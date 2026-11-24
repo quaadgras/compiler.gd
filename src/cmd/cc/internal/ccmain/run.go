@@ -41,7 +41,6 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	pkg := fs.String("pkg", "main", "package of the output")
 	withMain := fs.Bool("main", false, "make C's main the program's main")
 	undef := fs.Bool("undef", false, "let a call of an undefined function panic when it runs, instead of being an error")
-	thin := fs.Bool("thin", false, "translate 1:1: C's objects as Go variables and its pointers as Go's, checked as unsafe.Pointer is")
 	debug := fs.Bool("debug", false, "write the assertions that Go lays each struct and union out as C does")
 	out := fs.String("o", "", "output file")
 	cacheDir := fs.String("cache", "", "keep translations in `dir`, and take from it the one of this command line if what it read has not changed")
@@ -79,7 +78,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 		in = newInputs()
 	}
-	gosrc, err := translateFiles(fs.Args(), options{pkg: *pkg, main: *withMain, undef: *undef, thin: *thin, debug: *debug}, incDirs, in)
+	gosrc, err := translateFiles(fs.Args(), options{pkg: *pkg, main: *withMain, undef: *undef, debug: *debug}, incDirs, in)
 	if err == nil && cache != nil {
 		if err := cache.put(gosrc, in); err != nil {
 			fmt.Fprintln(stderr, "cc: cache:", err) // not kept: not an error of the translation

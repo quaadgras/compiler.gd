@@ -129,9 +129,7 @@ func newPkgGen(file string, o options) *pkgGen {
 // generate translates units, one program or package, to Go source.
 func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, err error) {
 	defer catch(&err)
-	if os.Getenv("CCTHIN") != "" {
-		o.thin = true // while the 1:1 translation replaces the other: every translation is one
-	}
+	o.thin = true // the translation is 1:1 (thin.go): the older one is being taken out
 	if os.Getenv("CCDEBUG") == "layout" {
 		o.debug = true
 	}
@@ -606,8 +604,15 @@ func (g *gen) record(t *ctype) string {
 		// As cgo does for unions, Go sees the bytes. The tag tells
 		// internal/c23 that they may hold pointers C stores, whose
 		// capabilities it keeps aside.
-		fmt.Fprintf(&b, "// %s is C's %s, as Go sees it: its bytes.\ntype %s struct {\n%s\tb [%d]byte `c23:\"union\"`\n}\n\n",
-			name, what, name, unionAlign(r.align), r.size)
+		if w := target.ptrSize; g.o.thin && hasPointers(t) && r.size > 0 && r.size%w == 0 && r.align%w == 0 {
+			// A member may be a pointer: Go sees words, each of which
+			// the collector takes for one.
+			fmt.Fprintf(&b, "// %s is C's %s, as Go sees it: its words, which may hold pointers.\ntype %s struct {\n%s\tb [%d]unsafe.Pointer\n}\n\n",
+				name, what, name, unionAlign(r.align), r.size/w)
+		} else {
+			fmt.Fprintf(&b, "// %s is C's %s, as Go sees it: its bytes.\ntype %s struct {\n%s\tb [%d]byte `c23:\"union\"`\n}\n\n",
+				name, what, name, unionAlign(r.align), r.size)
+		}
 	} else {
 		fmt.Fprintf(&b, "// %s is C's %s, as Go sees it.\ntype %s struct {\n", name, what, name)
 		for _, f := range fields {

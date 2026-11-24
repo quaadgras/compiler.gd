@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/ast"
 	gotoken "go/token"
+	"regexp"
 	"strings"
 
 	"cmd/internal/edit"
@@ -25,11 +26,11 @@ var cgoBasic = map[string]string{
 // to C's names (C.f, C.struct_node, C.int, C.CString...) become the Go that
 // g generated for them, and the import of "C" becomes one of internal/c23.
 //
-// A pointer passed to a C function gets the capability of the Go value it
-// points to, by its static type; &x[i] gets the whole array, cgo's rule for
-// what C may reach; unsafe.Pointer(p) passes p's own capability. A pointer
-// a C function returns is a Go pointer if it points to a whole value of its
-// type, and faults where Go uses it if not.
+// C's types are the Go types that mirror them and its pointers are Go's,
+// so a call of a C function is a call of the Go function it was
+// translated to, with the arguments as they are: but that void * is
+// *c23.Void where cgo has unsafe.Pointer, which an argument is
+// converted from and a result to.
 func (g *gen) rewrite(fset *gotoken.FileSet, f *ast.File, src []byte) (out []byte, err error) {
 	defer catch(&err)
 	tf := fset.File(f.Pos())
@@ -98,6 +99,12 @@ func cDefined(u *unit, name string) bool {
 	return false
 }
 
+// c23Name is c23 in the Go that g generates, where the Go file that
+// imports "C" has _c23.
+var c23Name = regexp.MustCompile(`\bc23\.`)
+
+func cgoQual(s string) string { return c23Name.ReplaceAllString(s, "_c23.") }
+
 // cName returns the Go for C.name used as a type or a value.
 func (g *gen) cName(line int, name string) string {
 	if t, ok := cgoBasic[name]; ok {
@@ -110,7 +117,7 @@ func (g *gen) cName(line int, name string) string {
 					return g.mirror(t)
 				}
 				if kw == "enum_" && t.enum != nil {
-					return goType(t)
+					return cgoQual(goType(t))
 				}
 			}
 		}
@@ -123,17 +130,13 @@ func (g *gen) cName(line int, name string) string {
 	if s != nil {
 		switch s.kind {
 		case symTypedef:
-			if s.t.kind == kUIntCap {
-				return "uintptr"
-			}
-			if s.t.kind == kIntCap {
-				return "int"
-			}
-			return g.mirror(s.t)
+			return cgoQual(g.mirror(s.t))
 		case symEnumConst:
 			return fmt.Sprintf("(%d)", s.val)
 		case symVar:
-			return fmt.Sprintf("(*_c23.ToGo[%s](%s))", g.mirror(s.t), g.globalName(s))
+			// The Go variable that is the object.
+			at := pos{g.u.file, line}
+			return "(" + cgoQual(g.tlv(&varRef{node{s.t, at}, s}, false).x) + ")"
 		case symFunc:
 			g.errorf(pos{g.u.file, line}, "C.%s used as a value", name)
 		}
@@ -177,62 +180,26 @@ func (g *gen) rewriteCall(b *edit.Buffer, off func(gotoken.Pos) int, line int, c
 		}
 	}
 	switch {
-	case ft.ret.isPtr() && g.mirror(ft.ret) == "unsafe.Pointer":
+	case ft.ret.isPtr() && g.gt(ft.ret) == voidPtr:
+		// void *: unsafe.Pointer, as with cgo.
 		b.Insert(off(call.Pos()), "_c23.ToGoUnsafe(")
-		b.Insert(off(call.End()), ")")
-	case ft.ret.isPtr():
-		b.Insert(off(call.Pos()), fmt.Sprintf("_c23.ToGo[%s](", g.mirror(ft.ret.elem)))
 		b.Insert(off(call.End()), ")")
 	case ft.ret.kind == kStruct:
 		g.errorf(at, "C.%s: struct results are not supported", name)
 	case ft.ret.kind == kBool:
 		b.Insert(off(call.Pos()), "(")
 		b.Insert(off(call.End()), " != 0)")
-	case ft.ret.isCap():
-		b.Insert(off(call.Pos()), map[bool]string{true: "uintptr", false: "int"}[ft.ret.kind == kUIntCap]+"(_c23.Addr(")
-		b.Insert(off(call.End()), "))")
 	}
 	b.Replace(off(call.Fun.Pos()), off(call.Fun.End()), g.names[s])
 	for i, a := range call.Args {
-		if ft.params[i].isCap() {
-			b.Insert(off(a.Pos()), "_c23.FromInt(uintptr(")
-			b.Insert(off(a.End()), "))")
+		if !ft.params[i].isPtr() || g.gt(ft.params[i]) != voidPtr {
+			continue // a Go pointer of the parameter's type, or no pointer
+		}
+		if id, ok := a.(*ast.Ident); ok && id.Name == "nil" {
 			continue
 		}
-		if !ft.params[i].isPtr() {
-			continue
-		}
-		g.pointerArg(b, off, a)
-	}
-}
-
-// pointerArg rewrites an argument passed for a pointer parameter to give
-// it its capability.
-func (g *gen) pointerArg(b *edit.Buffer, off func(gotoken.Pos) int, a ast.Expr) {
-	if id, ok := a.(*ast.Ident); ok && id.Name == "nil" {
-		b.Replace(off(a.Pos()), off(a.End()), "(*_c23.Void)(nil)")
-		return
-	}
-	// unsafe.Pointer(e): e's capability.
-	inner, prefixEnd, suffixStart := a, a.Pos(), a.End()
-	if c, ok := a.(*ast.CallExpr); ok && len(c.Args) == 1 {
-		if sel, ok := c.Fun.(*ast.SelectorExpr); ok {
-			if id, ok := sel.X.(*ast.Ident); ok && id.Name == "unsafe" && sel.Sel.Name == "Pointer" {
-				inner, prefixEnd, suffixStart = c.Args[0], c.Args[0].Pos(), c.Args[0].End()
-			}
-		}
-	}
-	// &x[i]: the whole array, as cgo's rules let C reach.
-	if u, ok := inner.(*ast.UnaryExpr); ok && u.Op == gotoken.AND {
-		if ix, ok := u.X.(*ast.IndexExpr); ok {
-			b.Replace(off(a.Pos()), off(ix.X.Pos()), "_c23.FromSliceAt(")
-			b.Replace(off(ix.Lbrack), off(ix.Index.Pos()), "[:], ")
-			b.Replace(off(ix.Index.End()), off(a.End()), ")")
-			return
-		}
-	}
-	b.Replace(off(a.Pos()), off(prefixEnd), "_c23.Arg(")
-	if suffixStart == a.End() {
+		// void *, or a pointer to a function: an unsafe.Pointer.
+		b.Insert(off(a.Pos()), "(*_c23.Void)(")
 		b.Insert(off(a.End()), ")")
 	}
 }

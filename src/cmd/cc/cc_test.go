@@ -6,7 +6,6 @@ package main
 
 import (
 	"cmd/cc/host"
-	"fmt"
 	"internal/testenv"
 	"os"
 	"os/exec"
@@ -14,7 +13,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"unsafe"
 )
 
 // The tests translate with the assertions that Go lays each record out as
@@ -652,43 +650,14 @@ func TestPxIPC(t *testing.T) {
 	}
 }
 
-// TestInterop checks what Go and C may do with each other's pointers: an
-// ordinary cgo package (testdata/interop), which go build compiles with
-// cmd/cc because cgo is off, natively and on wasm (with node).
+// TestInterop checks that Go and C use each other's memory: an ordinary
+// cgo package (testdata/interop), which go build compiles with cmd/cc
+// because cgo is off.
+//
+// (Not on wasm, where it ran before the translation was 1:1: that has
+// yet to be made to work there.)
 func TestInterop(t *testing.T) {
-	// It tested what capabilities caught (C reading past Go's slice, an
-	// integer dereferenced, a pointer kept in untyped bytes). They are
-	// gone: C's pointers are Go's, checked as unsafe.Pointer is
-	// (doc/gd/cc.md). To be written again for that.
-	t.Skip("tested the capabilities' faults, which are gone")
-
 	testenv.MustHaveGoRun(t)
-	for _, target := range []struct {
-		name string
-		env  []string
-		word int // the size of a pointer and of C's long (cmd/cc's target.go)
-	}{
-		{"native", nil, 8},
-		{"wasm-linear", []string{"GOOS=js", "GOARCH=wasm", "GOWASM=linear"}, 8},
-		{"wasm-split", []string{"GOOS=js", "GOARCH=wasm"}, 4},
-		{"wasm-split-ptr64", []string{"GOOS=js", "GOARCH=wasm", "GOWASM=gc,split,ptr64"}, 8},
-	} {
-		t.Run(target.name, func(t *testing.T) {
-			wasm := target.env != nil
-			if wasm {
-				if _, err := exec.LookPath("node"); err != nil {
-					t.Skip("no node")
-				}
-			}
-			testInterop(t, target.env, strings.HasPrefix(target.name, "wasm-split"), target.word)
-		})
-	}
-}
-
-// wasm reports whether env is that of a GOARCH=wasm variant.
-func wasm(env []string) bool { return env != nil }
-
-func testInterop(t *testing.T, env []string, split bool, word int) {
 	dir := t.TempDir()
 	files := map[string]string{"go.mod": "module cctest\n\ngo 1.27\n"}
 	ents, err := os.ReadDir("testdata/interop")
@@ -709,81 +678,33 @@ func testInterop(t *testing.T, env []string, split bool, word int) {
 	}
 	cmd := testenv.Command(t, testenv.GoToolPath(t), "run", ".")
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "NODE_OPTIONS=")
-	if env != nil {
-		cmd.Env = append(cmd.Env, env...)
-		cmd.Env = append(cmd.Env, "PATH="+filepath.Join(testenv.GOROOT(t), "lib", "wasm")+string(os.PathListSeparator)+os.Getenv("PATH"))
-	}
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	b, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go run: %v\n%s", err, b)
 	}
-	out := string(b)
-	// What depends on the word: C's long (a sum that wraps with 32 bits),
-	// struct node and main.goThing (an int64 and a slice).
-	sum := int64(5000050000)
-	if word == 4 {
-		sum = int64(int32(sum))
-	}
-	thing := (8 + 3*word + 7) / 8 * 8
-	if !wasm(env) && word == 8 {
-		// gd: a slice is two words with 8-byte words but on wasm,
-		// aligned as the slice is (doc/gd/slice16.md).
-		thing = int(unsafe.Sizeof(struct {
-			n    int64
-			data []int32
-		}{}))
-	}
-	for _, want := range []string{
-		"C's list in Go: 1 2 3 4 5\n",
-		"Go's list summed by C: 60\n",
-		fmt.Sprintf("after 3 collections: Go 5000050000 C %d\n", sum),
-		"Go's stack pair summed by C: 3\n",
-		"C's locals: 213\n",
-		"allocations per call: sumPair 0 locals 0\n",
-		"30 C reads arr[2] of Go's slice                 ok",
-		"C reads arr[3] of Go's slice                 trapped: c23: access of 4 bytes out of bounds of {int32, size 12, off 12}",
-		"Go dereferences it                           trapped: runtime error: invalid memory address",
-		"30 C brings it back in bounds (arr[2])          ok",
-		"C dereferences it out of bounds              trapped",
-		"30 ...stored in Go's heap object instead        ok",
-		"30 ...stored in Go's stack, which then moves    ok",
-		"30 C keeps a slice's array in Go's int* field   ok",
-		"...and indexes past it                       trapped: c23: access of 4 bytes out of bounds of {int32, size 12, off 12}",
-		"60 C one-based indexing                         ok",
-		"C writes an integer over a pointer word      trapped: c23: scalar store over a pointer word",
-		"C dereferences an integer                    trapped: c23: access through a pointer with no capability",
-		"C keeps a pointer in untyped bytes           ok",
-		"variant's list, after a collection: 10 type 2 bytes 8\n",
-		fmt.Sprintf("C reads the double as a pointer              trapped: c23: access of 4 bytes out of bounds of {C.struct_node, size %d", 2*word),
-		"objects in a pool, after a collection: 9\n",
-		"Go sees the pool's objects only as bytes     trapped: runtime error: invalid memory address",
-		"C puns a pointer word of a stack local       trapped: c23: scalar store over a pointer word",
-		"Go follows it                                trapped: runtime error: invalid memory address",
-		"42 C uses it as the int it is                   ok",
-		"C writes a plain field of a Go value         ok",
-		"C writes the length of a Go slice            trapped: c23: store into a word of a Go value with invariants (main.goThing)",
-		fmt.Sprintf("C writes past a Go value                     trapped: c23: access of %d bytes out of bounds of {main.goThing, size %d, off %d}", word, thing, thing),
-		"Go's value after: 7 2\n",
-		"C frees what malloc and the like returned    ok",
-		"C frees a pointer into its object            trapped: c23: free of a pointer into an object, not to its start: {c23.Raw, size 16, off 1}",
-		"C frees a local                              trapped: c23: free of an object that is not an allocation of its own: {int32, size 4, off 0}",
-		"C frees a pointer that went through a long   ok",
-		"C reallocs a pointer gone through a long     trapped: c23: realloc of a pointer with no capability",
-		"C reallocs a pointer into its object         trapped: c23: realloc of a pointer into an object, not to its start: {c23.Raw, size 16, off 8}",
-		"C frees Go's slice                           trapped: c23: free of Go's memory: {int32, size 12, off 0}",
-		"Go frees C's string                          ok",
-		"Go frees its own slice                       trapped: c23: free of Go's memory",
-	} {
-		if split {
-			// No panic to recover from (deref_split.go).
-			if strings.Contains(want, "trapped: runtime error") {
-				want = want[:strings.Index(want, "trapped:")] + "not tried"
-			}
-		}
-		if !strings.Contains(out, want) {
-			t.Errorf("output lacks %q:\n%s", want, out)
-		}
+	const want = `C's list in Go: 1 2 3 4 5
+Go's list summed by C: 60
+100000 nodes, after 3 collections: Go 5000050000 C 5000050000
+Go's stack pair summed by C: 3
+C's locals: 213
+allocations per call: sumPair 0 locals 0
+C reads arr[2] of Go's slice: 30
+C keeps a slice's array in its int* field: 30 10
+a list kept in untyped memory, after 3 collections: 500500
+through void *: 10
+C writes a field of a Go value: 7 2
+C's variable: 42 43
+enum: 5 6 true
+string: HELLO
+arrays summed from one past their end: 45760
+variant's list, after 3 collections: 10 type 2 size 8
+variant's long: 12
+objects in a pool, after 3 collections: 9 1 2
+C frees what malloc and the like returned: 1
+`
+	if string(b) != want {
+		t.Errorf("got:\n%s\nwant:\n%s", b, want)
 	}
 }
 
