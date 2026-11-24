@@ -363,7 +363,7 @@ func (g *gen) trv(e expr) (string, bool) {
 		}
 		if lit, ok := e.x.(*strLit); ok {
 			if q, ok := cString(lit); ok {
-				return g.retype("c23.String("+q+")", "*int8", g.gt(e.t)), true
+				return g.retype("c23.String("+q+")", "*c23.Char", g.gt(e.t)), true
 			}
 		}
 		return g.tdecay(g.tlv(e.x, true), e.t), true
@@ -852,14 +852,14 @@ func (g *gen) initLeaf(t *ctype, x expr) (string, bool) {
 	v := g.rv(x)
 	// A constant has the type of what it initializes: 1, not int32(1).
 	if m := constConv.FindStringSubmatch(v); m != nil && m[1] == goType(t) {
-		v = m[3]
+		v = m[2]
 	} else if m := floatConv.FindStringSubmatch(v); m != nil && m[1] == goType(t) {
 		v = m[2]
 	}
 	return v, true
 }
 
-var floatConv = regexp.MustCompile(`^(float(?:32|64))\(([-+0-9.e]+)\)$`)
+var floatConv = regexp.MustCompile(`^(c23\.(?:Float|Double)|float(?:32|64))\(([-+0-9.e]+)\)$`)
 
 func (g *gen) initNodeLit(n *initNode) string {
 	if n.kids == nil {

@@ -809,7 +809,9 @@ func (g *gen) castCode(e *cast) string {
 }
 
 // convertCode converts the Go value x of C type from to C type to.
-var constConv = regexp.MustCompile(`^(u?int(8|16|32|64))\((-?[0-9]+)\)$`)
+// constConv matches an integer constant as constLit writes it: its type
+// and its value.
+var constConv = regexp.MustCompile(`^(c23\.(?:Bool|Char|SChar|UChar|Short|UShort|Int|UInt|Long|ULong|LongLong|ULongLong|Wchar|Char16|Char32)|u?int(?:8|16|32|64))\((-?[0-9]+)\)$`)
 
 func convertCode(x string, from, to *ctype) string {
 	if is128(to) && from.isCap() {
@@ -820,7 +822,7 @@ func convertCode(x string, from, to *ctype) string {
 	}
 	if is128(to) || is128(from) {
 		if m := constConv.FindStringSubmatch(x); m != nil && is128(to) {
-			return constLitStr(to, m[3])
+			return constLitStr(to, m[2])
 		}
 		return convert128(x, from, to)
 	}
@@ -829,10 +831,10 @@ func convertCode(x string, from, to *ctype) string {
 	}
 	if m := constConv.FindStringSubmatch(x); m != nil && to.isInteger() && !to.isBitInt() {
 		// A constant: converted here, as Go would reject an overflow.
-		if v, err := strconv.ParseInt(m[3], 10, 64); err == nil {
+		if v, err := strconv.ParseInt(m[2], 10, 64); err == nil {
 			return constLit(to, v)
 		}
-		if v, err := strconv.ParseUint(m[3], 10, 64); err == nil {
+		if v, err := strconv.ParseUint(m[2], 10, 64); err == nil {
 			return constLit(to, int64(v))
 		}
 	}

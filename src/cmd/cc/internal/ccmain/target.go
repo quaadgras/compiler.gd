@@ -256,7 +256,11 @@ func libcConv(v string, t *ctype, in bool) string {
 		return v
 	}
 	if in {
-		return fmt.Sprintf("%s64(%s)", strings.TrimSuffix(goType(t), "32"), v)
+		// The library's long has 64 bits.
+		if t.kind == kULong {
+			return fmt.Sprintf("uint64(%s)", v)
+		}
+		return fmt.Sprintf("int64(%s)", v)
 	}
 	return fmt.Sprintf("%s(%s)", goType(t), v)
 }

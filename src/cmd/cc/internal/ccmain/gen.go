@@ -425,30 +425,50 @@ func (g *gen) globalVar(s *symbol) {
 
 // Types.
 
-// goType is the Go type of a C value in a Go variable.
+// goType is the Go type of a C value in a Go variable: for C's
+// arithmetic types, by the name internal/c23 gives it (c23.Int,
+// c23.ULong), which is an alias of the Go type that the data model
+// makes it. So the Go says what the C said, and is the same Go whatever
+// the size of long.
 func goType(t *ctype) string {
+	switch t.chr {
+	case 'w':
+		return "c23.Wchar"
+	case 's':
+		return "c23.Char16"
+	case 'i':
+		return "c23.Char32"
+	}
 	switch t.kind {
-	case kBool, kUChar:
-		return "uint8"
-	case kChar, kSChar:
-		return "int8"
+	case kBool:
+		return "c23.Bool"
+	case kUChar:
+		return "c23.UChar"
+	case kChar:
+		return "c23.Char"
+	case kSChar:
+		return "c23.SChar"
 	case kShort:
-		return "int16"
+		return "c23.Short"
 	case kUShort:
-		return "uint16"
+		return "c23.UShort"
 	case kInt:
-		return "int32"
+		return "c23.Int"
 	case kUInt:
-		return "uint32"
-	case kLong, kLLong:
-		return fmt.Sprintf("int%d", t.sizeof()*8)
-	case kULong, kULLong:
-		return fmt.Sprintf("uint%d", t.sizeof()*8)
+		return "c23.UInt"
+	case kLong:
+		return "c23.Long"
+	case kULong:
+		return "c23.ULong"
+	case kLLong:
+		return "c23.LongLong"
+	case kULLong:
+		return "c23.ULongLong"
 	case kComplex:
 		if t.elem.kind == kFloat {
-			return "complex64"
+			return "c23.ComplexFloat"
 		}
-		return "complex128"
+		return "c23.ComplexDouble"
 	case kInt128:
 		return "c23.Int128"
 	case kUInt128:
@@ -460,9 +480,9 @@ func goType(t *ctype) string {
 		}
 		return fmt.Sprintf("%sint%d", u, t.sizeof()*8)
 	case kFloat:
-		return "float32"
+		return "c23.Float"
 	case kDouble, kLDouble:
-		return "float64"
+		return "c23.Double" // long double's value is a double
 	case kPtr, kNullptr, kVaList, kStruct, kArray, kIntCap, kUIntCap:
 		return "*c23.Void"
 	}
@@ -669,6 +689,8 @@ func constLit(t *ctype, v int64) string {
 		return fmt.Sprintf("c23.FromInt(%d)", uint64(v)&(1<<(8*target.ptrSize)-1))
 	case t.isFloat():
 		return fmt.Sprintf("%s(%d)", goType(t), v)
+	case t.isUnsigned() && t.sizeof() == 8 && !t.isBitInt():
+		return fmt.Sprintf("%s(%d)", goType(t), uint64(v))
 	case t.isUnsigned() && t.sizeof() == 8:
 		return fmt.Sprintf("uint64(%d)", uint64(v))
 	}
