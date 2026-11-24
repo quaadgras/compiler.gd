@@ -190,6 +190,9 @@ func (g *gen) funcLit(f *funcDecl) string {
 		text = dropUnusedLabels(text)
 	}
 	if !g.jmp {
+		if !hasRes {
+			text = dropLastReturn(text)
+		}
 		fb.WriteString(text)
 		if hasRes && !endsInReturn(text) && (needsFlat(f) || !terminates(f.body)) {
 			fmt.Fprintf(&fb, "\treturn %s\n", g.zero(ft.ret))
@@ -414,6 +417,20 @@ func breaksOut(s stmt) bool {
 	return false
 }
 
+// dropLastReturn takes the return that ends body, the statements of a
+// function with no result, out of it: Go returns there anyway.
+func dropLastReturn(body string) string {
+	trimmed := strings.TrimRight(body, " \t\n")
+	i := strings.LastIndexByte(trimmed, '\n') + 1
+	if strings.TrimSpace(trimmed[i:]) != "return" {
+		return body
+	}
+	if before := strings.TrimRight(trimmed[:i], " \t\n"); strings.HasSuffix(before, ":") {
+		return body // a label's statement
+	}
+	return trimmed[:i]
+}
+
 // endsInReturn reports whether the last statement of body, a function's,
 // is a return: Go then wants none after it.
 func endsInReturn(body string) bool {
@@ -605,7 +622,7 @@ func (g *gen) stmt(s stmt) {
 			v := g.rv(s.x)
 
 			if v != "sret" {
-				g.p("*sret = *%s", v)
+				g.p("*sret = %s", star(v))
 			}
 
 			g.ret("")

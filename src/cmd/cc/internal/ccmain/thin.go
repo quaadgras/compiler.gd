@@ -82,6 +82,14 @@ func tderef(p string) string {
 	return "(*" + p + ")"
 }
 
+// star is what the pointer p points to, as a value: x for &x.
+func star(p string) string {
+	if strings.HasPrefix(p, "&") && balanced(p[1:]) && !strings.ContainsAny(p[1:], " ") {
+		return p[1:]
+	}
+	return "*" + p
+}
+
 // balanced reports whether s's parentheses and brackets match, with
 // none closed before it is opened.
 func balanced(s string) bool {
@@ -330,7 +338,7 @@ func (g *gen) tstore(l lval, v string, c expr) {
 	switch {
 	case l.t.kind == kStruct || l.t.kind == kArray:
 		if v != taddr(l.x) {
-			g.p("%s = *%s", l.x, v)
+			g.p("%s = %s", l.x, star(v))
 		}
 		return
 	case memValue(l.t):
