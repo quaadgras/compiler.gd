@@ -148,7 +148,7 @@ compiled: the mangled names are the Itanium ABI's, the calls are Go's.
 ## Status
 
 `go test cmd/cc -run Cxx` compiles `testdata/cxx/*.cc` with cmd/cc and
-with g++ and compares what they print (36 programs). Against Godot
+with g++ and compares what they print (41 programs). Against Godot
 (4.7.1, with its own defines and include directories, and `__GNUC__`
 defined: Godot expects its compiler to be GCC, clang or MSVC), 176 of
 the 177 `.cpp` files of `core` translate, each alone, and the 176
@@ -159,11 +159,16 @@ which the Go compiler then builds in 3 minutes. The other,
 `<string>`, `<queue>` and `<iostream>`.
 
 Translated together with `cc -undef` (a call of a function that no file
-defines panics, so a part of a program can be built), seven of them run:
-`vector3.cpp`, `vector3i.cpp`, `basis.cpp`, `quaternion.cpp`,
-`math_funcs.cpp`, `random_pcg.cpp` and `pcg.cpp` with a test that
-prints what the vectors, a Basis and a Quaternion compute, the same as
-g++'s build of the same files prints. Nothing larger has been run.
+defines panics, so a part of a program can be built: core calls 1,300
+functions of the scene and the servers), that program runs. Core's
+objects of static duration are constructed, and a test prints the same
+41 lines as it does linked with g++'s build of core: what the vectors, a
+Basis, a Quaternion, a Transform3D and a Color compute; String
+(concatenation, searching, splitting, numbers, UTF-8, `vformat`, paths,
+hashes); Vector, LocalVector, HashMap, HashSet, RBMap and List; and
+Variant, with Array and Dictionary, converted and printed. The engine is
+not set up in it (no `register_core_types`): ClassDB and the object
+system have not been run.
 
 What is there, by step of the order above:
 
