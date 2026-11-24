@@ -512,18 +512,58 @@ func staticAddr(e expr) bool {
 // Conversions.
 
 // convFuncs are the conversion functions of the class t.
-func convFuncs(t *ctype) []*symbol {
+func (p *parser) convFuncs(t, to *ctype) []*symbol {
 	ci := classOf(t)
 	if ci == nil {
 		return nil
 	}
 	var out []*symbol
 	for _, name := range sorted(ci.scope.vars) {
-		if s := ci.scope.vars[name]; s.kind == symFunc && s.t.fn.conv != nil {
-			out = append(out, funcSet(s)...)
+		s := ci.scope.vars[name]
+		if s.kind != symFunc {
+			continue
+		}
+		for _, o := range funcSet(s) {
+			switch {
+			case o.tmpl != nil && name == "operator " && to != nil:
+				// A conversion function template: its instance for the
+				// type that is wanted.
+				tm := o.tmpl
+				p.funcPattern(tm)
+				if tm.convPat == nil {
+					continue
+				}
+				bound, set := make([]targ, len(tm.params)), make([]bool, len(tm.params))
+				want := to
+				if want.isRef() {
+					want = want.elem
+				}
+				if !p.unify(tm.convPat, want.unqual(), bound, set) {
+					continue
+				}
+				if targs, ok := p.deduce(tm, bound[:countSet(set)], nil, o.p); ok {
+					if inst := p.instFunc(tm, targs, o.p); inst != nil && inst.t.fn.conv != nil {
+						out = append(out, inst)
+					}
+				}
+			case o.tmpl == nil && o.t.fn.conv != nil:
+				out = append(out, o)
+			}
 		}
 	}
+	for _, b := range ci.bases {
+		out = append(out, p.convFuncs(b.t, to)...)
+	}
 	return out
+}
+
+// countSet is the number of leading parameters that are set.
+func countSet(set []bool) int {
+	n := 0
+	for n < len(set) && set[n] {
+		n++
+	}
+	return n
 }
 
 // convertClass is e, of class type, converted by a conversion function
@@ -537,7 +577,7 @@ func (p *parser) convertClass(e expr, t *ctype, at pos) expr {
 	if target.isRef() {
 		target = target.elem
 	}
-	for _, s := range convFuncs(e.ty()) {
+	for _, s := range p.convFuncs(e.ty(), t) {
 		if rq := s.t.fn.recv.elem.q; rq&oq != oq {
 			continue
 		}
@@ -597,7 +637,7 @@ func (p *parser) classConvRank(a expr, vt, pt *ctype) int {
 	}
 	if vt.kind == kStruct {
 		oq := a.ty().q
-		for _, s := range convFuncs(vt) {
+		for _, s := range p.convFuncs(vt, pt) {
 			if rq := s.t.fn.recv.elem.q; rq&oq != oq {
 				continue
 			}
@@ -909,15 +949,10 @@ func (p *parser) newExpr(at pos) expr {
 		if p.next().text == "{" {
 			end = "}"
 		}
-		var as []expr
-		for !p.is(end) {
-			as = append(as, p.assignment())
-			if !p.accept(",") {
-				break
-			}
-		}
-		p.expect(end)
+		as := p.exprList(end)
 		switch {
+		case end == "}" && count == nil && t.kind == kStruct:
+			init = &exprStmt{p.listInit(obj, t, &initList{node{tVoid, at}, as}, at)}
 		case count != nil:
 			// The elements given, then the rest value-initialized.
 			var list []stmt
@@ -1006,7 +1041,7 @@ func (p *parser) deleteExpr(at pos) expr {
 	x := p.castExpr()
 	if x.ty().kind == kStruct {
 		// By a conversion to a pointer.
-		for _, s := range convFuncs(x.ty()) {
+		for _, s := range p.convFuncs(x.ty(), nil) {
 			if s.t.fn.conv.isPtr() && s.t.fn.conv.ref == 0 {
 				x = p.callFunc(s, x, nil, at)
 				break

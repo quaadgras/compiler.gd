@@ -264,6 +264,9 @@ func (p *parser) statement() stmt {
 		case "for":
 			p.next()
 			p.expect("(")
+			if p.cxx && p.rangeForAhead() {
+				return p.rangeFor(at)
+			}
 			p.push()
 			f := &forStmt{}
 			if p.isDecl() {

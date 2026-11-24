@@ -1345,6 +1345,18 @@ func (p *parser) primary() expr {
 			if isTraitName(t.text) && p.is("(") {
 				return p.typeTrait(t.text, at)
 			}
+			if t.text == "operator" {
+				// An operator function, by its name: operator[](i).
+				name := p.operatorName()
+				a := &adlRef{node: node{tVoid, at}, name: name}
+				if sym := p.lookup(name); sym != nil && sym.kind == symFunc {
+					a.set = funcSet(sym)
+				}
+				if !p.is("(") {
+					p.errorAt(at, "%s is only called here", name)
+				}
+				return a
+			}
 			p.pos--
 			return p.cxxName(at)
 		}

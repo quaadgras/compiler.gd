@@ -495,7 +495,11 @@ func (p *parser) callResult(c *call, ft *funcType, at pos) expr {
 
 // cxxCall types a call of x in C++, after its "(".
 func (p *parser) cxxCall(x expr, at pos) expr {
-	args := p.callArgs()
+	return p.cxxCallArgs(x, p.callArgs(), at)
+}
+
+// cxxCallArgs is the call of x with the arguments args.
+func (p *parser) cxxCallArgs(x expr, args []expr, at pos) expr {
 	switch x := x.(type) {
 	case *adlRef:
 		set := x.set

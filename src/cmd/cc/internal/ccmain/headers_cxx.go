@@ -934,4 +934,23 @@ inline thread::id get_id() noexcept { return thread::id(pthread_self()); }
 }
 #endif
 `
+	sysHeaders["typeinfo"] = `#ifndef __CC_TYPEINFO
+#define __CC_TYPEINFO
+#include <stddef.h>
+namespace std {
+class type_info {
+	const char *__name;
+
+public:
+	explicit type_info(const char *n) : __name(n) {}
+	type_info(const type_info &) = delete;
+	const char *name() const noexcept { return __name; }
+	size_t hash_code() const noexcept { return size_t(__name); }
+	bool operator==(const type_info &o) const noexcept { return __name == o.__name; }
+	bool operator!=(const type_info &o) const noexcept { return __name != o.__name; }
+	bool before(const type_info &o) const noexcept { return __name < o.__name; }
+};
+}
+#endif
+`
 }

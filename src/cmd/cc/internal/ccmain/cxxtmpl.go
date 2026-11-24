@@ -63,8 +63,9 @@ type template struct {
 	// A function template.
 	pat     *funcType // its type, with the parameters as placeholders
 	patDone bool
-	nameAt  int  // the token of its name
-	static  bool // a static member function
+	nameAt  int    // the token of its name
+	static  bool   // a static member function
+	convPat *ctype // a conversion function template's type, with the parameters as placeholders
 }
 
 // A tinst is an instance of a template.
@@ -374,6 +375,11 @@ func (p *parser) declName() (name string, at, qual int, isFunc bool) {
 						p.errorf("expected an operator's parameters")
 					}
 					k++
+				}
+				if t1 := p.peekAt(j + 1); t1.kind == tkIdent && t1.text != "new" && t1.text != "delete" {
+					// A conversion function: its type may depend on
+					// the template's parameters.
+					return "operator ", j, p.qualStart(j), true
 				}
 				save := p.pos
 				p.pos += j + 1
@@ -1336,9 +1342,12 @@ func (p *parser) funcPattern(tm *template) *funcType {
 				}
 				base = &ctype{kind: kDependent, dep: &depType{}}
 			}
-			_, t, _ := p.declarator(base)
+			name, t, _ := p.declarator(base)
 			if t.kind == kFunc {
 				tm.pat = t.fn
+				if strings.HasPrefix(name, "operator ") {
+					tm.convPat = p.convType
+				}
 			}
 		})
 	})
@@ -1807,3 +1816,6 @@ func (p *parser) typePackAt(i int) bool {
 // debugSFINAE prints the errors that are not reported because they are
 // substitution failures: CCDEBUG=sfinae.
 var debugSFINAE = os.Getenv("CCDEBUG") == "sfinae"
+
+// debugPanic makes a parse error a panic, with its stack: CCDEBUG=panic.
+var debugPanic = os.Getenv("CCDEBUG") == "panic"

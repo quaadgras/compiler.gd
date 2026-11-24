@@ -1448,3 +1448,10 @@ func (p *parser) skipStatement() {
 		}
 	}
 }
+
+// afterDeclarator reports whether the token before the next one ends a
+// declarator: a name, or a closing bracket.
+func (p *parser) afterDeclarator() bool {
+	t := p.peekAt(-1)
+	return t.kind == tkIdent && !typeWords[t.text] && !cxxTypeWords[t.text] || t.kind == tkPunct && (t.text == ")" || t.text == "]")
+}

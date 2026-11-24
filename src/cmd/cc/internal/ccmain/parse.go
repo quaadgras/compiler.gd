@@ -89,6 +89,9 @@ type parser struct {
 type parseError struct{ msg string }
 
 func (p *parser) errorAt(at pos, format string, args ...any) {
+	if debugPanic {
+		panic(fmt.Sprintf("%s:%d: %s", at.file, at.line, fmt.Sprintf(format, args...)))
+	}
 	panic(parseError{fmt.Sprintf("%s:%d: %s", at.file, at.line, fmt.Sprintf(format, args...))})
 }
 
@@ -337,6 +340,17 @@ func (p *parser) attributes() attrs {
 			p.skipParens()
 		case p.is("__extension__"):
 			p.next()
+		case p.cxx && p.is("alignas") && p.isAt(1, "(") && p.exprType == 0 && p.afterDeclarator():
+			// C++: alignas after a declarator's name.
+			p.pos += 2
+			var n int64
+			if p.isTypeStart(0) {
+				n = p.typeName().alignof()
+			} else {
+				n = p.constInt(p.conditional())
+			}
+			p.expect(")")
+			a.aligned = max(a.aligned, n)
 		default:
 			return a
 		}
@@ -1089,6 +1103,12 @@ func (p *parser) enumSpec1(scoped bool) *ctype {
 	if t == nil {
 		t = &ctype{kind: kInt, enum: &enumType{tag: tag}}
 	}
+	if scoped {
+		// Its earlier constants are in scope in its body.
+		names.parent = p.sc
+		p.sc = names
+		defer func() { p.sc = names.parent }()
+	}
 	var consts []*symbol
 	next := int64(0)
 	nextUnsigned := false
@@ -1297,15 +1317,15 @@ func (p *parser) declarator(base *ctype) (string, *ctype, attrs) {
 		var in *scope
 		name, in = p.declaratorID()
 		a.merge(p.attributes())
-		if !(name != "" && p.is("(") && p.directInitAhead()) {
-			save := p.sc
-			if in != nil {
-				// What follows the name is in its scope.
-				p.sc = in
-			}
-			t = p.suffixes(t, &a)
-			p.sc = save
+		save := p.sc
+		if in != nil {
+			// What follows the name is in its scope.
+			p.sc = in
 		}
+		if !(name != "" && p.is("(") && p.directInitAhead()) {
+			t = p.suffixes(t, &a)
+		}
+		p.sc = save
 		a.merge(p.attributes())
 		p.declIn = in
 		return name, t, a

@@ -712,7 +712,6 @@ func (p *parser) completeClass(t *ctype) {
 	}
 	for o := sc.vars["{ctor}"]; o != nil; o = o.next {
 		if o.tmpl != nil {
-			ci.nontrivCtor = true
 			continue
 		}
 		ps := o.t.fn.params[1:]
@@ -725,9 +724,6 @@ func (p *parser) completeClass(t *ctype) {
 		}
 		if len(ps) == 1 && isSelf(ps[0]) && !o.implicit {
 			userCopy = true
-		}
-		if !o.implicit {
-			ci.nontrivCtor = true
 		}
 	}
 	for o := sc.vars["operator="]; o != nil; o = o.next {
@@ -1314,6 +1310,7 @@ func (p *parser) cxxMember(x expr, arrow bool, at pos) expr {
 		in, j = p.nested(0)
 		p.pos += j
 	}
+	p.accept("template") // x.template f<T>()
 	var name string
 	if p.accept("operator") {
 		name = p.operatorName()
