@@ -66,13 +66,14 @@ type template struct {
 	patArgs []targ // them, with the parameters as placeholders
 
 	// A function template.
-	pat       *funcType // its type, with the parameters as placeholders
-	patDone   bool
-	nameAt    int         // the token of its name
-	static    bool        // a static member function
-	convPat   *ctype      // a conversion function template's type, with the parameters as placeholders
-	ctorPats  []*funcType // a class template's constructors' types, as patterns
-	ctorExtra []int       // for each, the number of parameters of its own template that follow the class's
+	pat          *funcType // its type, with the parameters as placeholders
+	patDone      bool
+	nameAt       int         // the token of its name
+	static       bool        // a static member function
+	convPat      *ctype      // a conversion function template's type, with the parameters as placeholders
+	ctorPats     []*funcType // a class template's constructors' types, as patterns
+	ctorExtra    []int       // for each, the number of parameters of its own template that follow the class's
+	declDefaults []defArg    // a function template declared, then defined: the declaration's default arguments
 
 	ctorsDone bool
 }
@@ -500,7 +501,13 @@ func (p *parser) templateDecl() {
 	at := p.here()
 	p.next()
 	if !p.is("<") {
-		p.skipDecl(p.is("class") || p.is("struct") || p.is("union")) // an explicit instantiation
+		// An explicit instantiation. A class's members are made where
+		// they are used, as any instance's; a function is made here.
+		class := p.is("class") || p.is("struct") || p.is("union")
+		if !class {
+			p.explicitInst(at)
+		}
+		p.skipDecl(class)
 		return
 	}
 	params := p.templateParams()
@@ -702,6 +709,7 @@ func (p *parser) templateDecl() {
 							params[i].dflt = o.tmpl.params[i].dflt // the declaration's default
 						}
 					}
+					p.keepDefaults(o.tmpl)
 					o.tmpl.params, o.tmpl.start, o.tmpl.hasBody, o.tmpl.nameAt = params, tm.start, true, tm.nameAt
 					o.tmpl.patDone, o.tmpl.pat = false, nil
 					return
@@ -744,6 +752,7 @@ func (p *parser) templateDecl() {
 		last = o
 		if o.tmpl != nil && len(o.tmpl.params) == len(params) && !o.tmpl.hasBody && tm.hasBody && p.sameDeclTokens(o.tmpl, tm) {
 			// Declared before: this is its definition.
+			p.keepDefaults(o.tmpl)
 			o.tmpl.params, o.tmpl.start, o.tmpl.hasBody, o.tmpl.nameAt = params, tm.start, true, tm.nameAt
 			o.tmpl.patDone, o.tmpl.pat = false, nil
 			return
@@ -1751,6 +1760,21 @@ func (p *parser) instFunc(tm *template, args []targ, at pos) *symbol {
 				t = p.memberType(ct, name, t, s)
 			}
 			p.declIn = nil
+			if dd := tm.declDefaults; dd != nil {
+				// The default arguments of the declaration that the
+				// definition, which this is made of, does not repeat.
+				ft := t.fn
+				if off := len(ft.params) - len(dd); off >= 0 {
+					if ft.defaults == nil {
+						ft.defaults = make([]defArg, len(ft.params))
+					}
+					for i, d := range dd {
+						if d.start != 0 && ft.defaults[i+off].start == 0 {
+							ft.defaults[i+off] = defArg{d.start, sc}
+						}
+					}
+				}
+			}
 			sym := p.cxxDeclareFunc(name, t, s, dat)
 			sym.comdat = true
 			sym.explicit = s.explicit
@@ -1931,6 +1955,54 @@ func (p *parser) drain(final bool) {
 		sym.queued = true
 	}
 	p.pending = wait
+}
+
+// keepDefaults keeps the default arguments of tm's declaration, which
+// its definition is about to replace.
+func (p *parser) keepDefaults(tm *template) {
+	if tm.declDefaults != nil {
+		return
+	}
+	if pat := p.funcPattern(tm); pat != nil {
+		for _, d := range pat.defaults {
+			if d.start != 0 {
+				tm.declDefaults = pat.defaults
+				return
+			}
+		}
+	}
+}
+
+// explicitInst makes the instances of the function templates that an
+// explicit instantiation names with their arguments, at its
+// specifiers: template void *alloc<true>(size_t). The parser's
+// position is left where it was.
+func (p *parser) explicitInst(at pos) {
+	save, saveSc := p.pos, p.sc
+	p.try(func() {
+		p.declSpecs()
+		for p.is("*") || p.is("&") || p.is("&&") || p.is("const") {
+			p.next()
+		}
+		sym, _, n := p.qualName(0)
+		if sym == nil || sym.kind != symFunc || !p.isAt(n, "<") {
+			return
+		}
+		p.pos += n
+		given := p.templateArgs()
+		for _, s := range funcSet(sym) {
+			if s.tmpl == nil {
+				continue
+			}
+			if targs, ok := p.deduce(s.tmpl, given, nil, at); ok {
+				if inst := p.instFunc(s.tmpl, targs, at); inst != nil {
+					inst.used = true
+					p.use(inst)
+				}
+			}
+		}
+	})
+	p.pos, p.sc = save, saveSc
 }
 
 // outsideDef gives tm, a member function template declared in a class
