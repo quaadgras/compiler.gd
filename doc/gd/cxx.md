@@ -146,9 +146,10 @@ with g++ and compares what they print (41 programs). Against Godot
 (4.7.1, with its own defines and include directories, and `__GNUC__`
 defined: Godot expects its compiler to be GCC, clang or MSVC), 176 of
 the 177 `.cpp` files of `core` translate, each alone, and the 176
-together, as one program of 1.9 million lines of Go: in 30 seconds on 32
-threads (0.4 seconds from `cc -cache` when nothing it read has changed),
-which the Go compiler then builds in 3 minutes. The other,
+together, as one program of 1.2 million lines of Go (1.9 million before
+the translation was 1:1): in 30 seconds on 32 threads (0.4 seconds from
+`cc -cache` when nothing it read has changed), which the Go compiler
+then builds in 3 to 5 minutes, into a program of 67 MB (167 MB before). The other,
 `core/math/geometry_2d.cpp`, includes clipper2, which uses `<vector>`,
 `<string>`, `<queue>` and `<iostream>`.
 
@@ -162,7 +163,9 @@ Basis, a Quaternion, a Transform3D and a Color compute; String
 hashes); Vector, LocalVector, HashMap, HashSet, RBMap and List; and
 Variant, with Array and Dictionary, converted and printed. The engine is
 not set up in it (no `register_core_types`): ClassDB and the object
-system have not been run.
+system have not been run. The whole run, core's static initialization
+included, takes 8 ms, where g++'s build takes 3 ms and the translation
+with capabilities took 76 ms to start.
 
 What is there, by step of the order above:
 

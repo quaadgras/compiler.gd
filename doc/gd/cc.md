@@ -141,6 +141,14 @@ Where C and Go's rules for pointers disagree:
   it where the compiler sees none. `new T[n]` of a class with a
   destructor keeps n in front of the array, as other compilers do,
   since the size of the allocation no longer says it.
+  A typed pointer to the end (`T *end = a + n`) is a conversion to
+  `*T` of a pointer that no T fits at. In such a package the
+  conversion is checked by `runtime.checkptrAlignmentC`, which lets a
+  pointer into an object of the heap be if its type reaches past the
+  object's end. This is the one place where C is checked less than Go:
+  a load or a store through such a pointer reaches up to one value
+  past the end, and nothing stops it. C's spans (above) would know the
+  size that was asked for, and with it the end exactly.
 - **Integers in pointers.** C keeps them there (`SIG_IGN`, `(void *)1`,
   a union's `int`) and adds to a null pointer. Such a conversion goes
   through `c23.FromInt`, unchecked; a pointer to a function is a
