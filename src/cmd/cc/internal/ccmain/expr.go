@@ -671,6 +671,9 @@ func (p *parser) toPtrish(e expr) expr {
 }
 
 func (p *parser) checkPtrArith(t *ctype, at pos) {
+	if p.cxx {
+		p.complete(t.elem)
+	}
 	if t.elem.kind == kStruct && !t.elem.rec.complete {
 		p.errorAt(at, "arithmetic on a pointer to an incomplete type")
 	}
@@ -1124,6 +1127,8 @@ func (p *parser) postfix(x expr) expr {
 	for {
 		at := p.here()
 		switch {
+		case p.cxx && (p.is(".") || p.is("->")) && p.isAt(1, "*") && p.noPM > 0:
+			return x
 		case p.cxx && (p.is(".") || p.is("->")) && p.isAt(1, "*"):
 			arrow := p.next().text == "->"
 			p.next()

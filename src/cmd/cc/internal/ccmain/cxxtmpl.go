@@ -1085,6 +1085,10 @@ func (p *parser) selectSpec(tm *template, args []targ) (*template, []targ) {
 				p.replay(sp.pattern, sc, func() {
 					p.pattern = 1
 					sp.patArgs = p.templateArgs()
+					if len(sp.patArgs) < len(tm.params) {
+						// The primary's defaults complete it.
+						sp.patArgs = flatArgs(p.fullArgs(tm, sp.patArgs, sp.at))
+					}
 				})
 			})
 			if !ok || sp.patArgs == nil {
@@ -1119,7 +1123,12 @@ func (p *parser) selectSpec(tm *template, args []targ) (*template, []targ) {
 		var subst []targ
 		ssc := p.bindParams(sp, bound)
 		if !p.try(func() {
-			p.replay(sp.pattern, ssc, func() { subst = p.templateArgs() })
+			p.replay(sp.pattern, ssc, func() {
+				subst = p.templateArgs()
+				if len(subst) < len(tm.params) {
+					subst = p.fullArgs(tm, subst, sp.at)
+				}
+			})
 		}) {
 			continue
 		}
@@ -1774,6 +1783,9 @@ func (p *parser) typeArgAhead() bool {
 	case p.isAt(n, "::") && p.pattern > 0 && !p.is("typename"):
 		return false // a member of a type that depends on a parameter: a value
 	case p.isAt(n, "("):
+		if _, m := p.memPtrAhead(n + 1); m > 0 {
+			return true
+		}
 		return p.isAt(n+1, ")") || p.isAt(n+1, "*") || p.isAt(n+1, "&") || p.isAt(n+1, "&&") || p.isAt(n+1, "...") || p.isTypeStart(n+1) || p.typePackAt(n+1)
 	}
 	return true
@@ -1913,4 +1925,18 @@ func (p *parser) ctad(tm *template, args []expr, at pos) *ctype {
 	}
 	p.errorAt(at, "the arguments of the class template %s cannot be deduced", tm.name)
 	return nil
+}
+
+// ctadAt is the class template that the identifier at token offset i
+// names as a declaration's type, without arguments: T x(args).
+func (p *parser) ctadAt(i int) *template {
+	t := p.peekAt(i)
+	if t.kind != tkIdent || p.peekAt(i+1).kind != tkIdent || typeWords[p.peekAt(i+1).text] || cxxKeywords[p.peekAt(i+1).text] {
+		return nil
+	}
+	s := p.lookup(t.text)
+	if s == nil || s.kind != symTemplate || s.tmpl.kind != 'c' {
+		return nil
+	}
+	return s.tmpl
 }

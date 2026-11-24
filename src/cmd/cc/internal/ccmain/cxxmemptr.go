@@ -391,7 +391,9 @@ func (p *parser) memberPointerAccess(x expr, arrow bool, at pos) expr {
 		}
 		x = p.derefOf(b, at)
 	}
+	p.noPM++
 	pm := p.castExpr()
+	p.noPM--
 	if m, ok := pm.(*memFnRef); ok {
 		pm = p.pmfConst(m.set[0], at)
 	}

@@ -952,7 +952,33 @@ func (p *parser) operatorName() string {
 // directInitAhead reports whether the "(" next, after a declarator's
 // name, starts an initializer and not a function's parameters.
 func (p *parser) directInitAhead() bool {
-	if p.isAt(1, ")") || p.isAt(1, "...") || p.isTypeStart(1) {
+	if p.isAt(1, ")") || p.isAt(1, "...") {
+		return false
+	}
+	if p.isTypeStart(1) {
+		// A parameter's type, unless it is T(args) or T{args}: a
+		// temporary. T(name) declares a parameter only if name is not
+		// something declared.
+		k := p.typeSpecEnd(1)
+		switch {
+		case p.isAt(k, "{"):
+			return true
+		case p.isAt(k, "("):
+			if _, m := p.memPtrAhead(k + 1); m > 0 {
+				return false
+			}
+			m := k + 1
+			for p.isAt(m, "*") || p.isAt(m, "&") || p.isAt(m, "&&") {
+				m++
+			}
+			if p.isAt(m, ")") || p.isTypeStart(m) {
+				return false // T(), T(U): a function type
+			}
+			if t := p.peekAt(m); t.kind == tkIdent && p.isAt(m+1, ")") && p.lookup(t.text) == nil {
+				return false
+			}
+			return true
+		}
 		return false
 	}
 	if t := p.peekAt(1); t.kind == tkIdent {
@@ -1050,7 +1076,20 @@ func (p *parser) cxxInit(sym *symbol, s specs, at pos) bool {
 		p.staticInit++
 		defer func() { p.staticInit-- }()
 	}
-	if hasAuto(t) {
+	if t.isAuto && t.ctad != nil {
+		// T x(args): T's template arguments from a constructor's.
+		var args []expr
+		switch {
+		case p.accept("("):
+			args = p.exprList(")")
+		case p.accept("{"):
+			args = p.exprList("}")
+		case p.accept("="):
+			args = []expr{p.initExpr()}
+		}
+		sym.t = p.ctad(t.ctad, args, at).qualified(t.q)
+		sym.ctor = p.constructAt(&varRef{node{sym.t, at}, sym}, sym.t, args, at, mValue)
+	} else if hasAuto(t) {
 		var e expr
 		switch {
 		case p.accept("="):
@@ -1170,6 +1209,13 @@ func (p *parser) cxxName(at pos) expr {
 		if t.kind != tkIdent {
 			p.errorAt(at, "expected a name, found %s", t)
 		}
+		if in != nil && in.rec != nil {
+			name := in.name
+			if in.rec.mtag != "" {
+				name = in.rec.mtag
+			}
+			p.errorAt(at, "%q is not a member of %s", t.text, name)
+		}
 		p.errorAt(at, "%q undeclared", t.text)
 	}
 	name := p.peekAt(n - 1).text
@@ -1240,6 +1286,26 @@ func (p *parser) typeSpecEnd(i int) int {
 		}
 		if t.kind == tkIdent && (typeWords[t.text] || cxxTypeWords[t.text]) {
 			j++
+			switch t.text {
+			case "decltype", "typeof", "__typeof__", "__typeof", "__underlying_type", "__make_unsigned", "__make_signed", "alignas", "_Alignas", "_Atomic":
+				// With its operand in parentheses.
+				if p.isAt(j, "(") {
+					depth := 0
+					for ; ; j++ {
+						if p.isAt(j, "(") {
+							depth++
+						} else if p.isAt(j, ")") {
+							depth--
+							if depth == 0 {
+								j++
+								break
+							}
+						} else if p.peekAt(j).kind == tkEOF {
+							break
+						}
+					}
+				}
+			}
 			continue
 		}
 		if !named {
@@ -1261,6 +1327,9 @@ func (p *parser) castAhead() bool {
 		return false
 	}
 	if p.isAt(n, "(") {
+		if _, m := p.memPtrAhead(n + 1); m > 0 {
+			return true // (T (C::*)(...))
+		}
 		return p.isAt(n+1, "*") || p.isAt(n+1, "&") || p.isAt(n+1, "^") || p.isAt(n+1, ")") || p.isTypeStart(n+1)
 	}
 	return true

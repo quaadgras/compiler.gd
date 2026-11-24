@@ -77,12 +77,13 @@ type ctype struct {
 	align int64 // _Alignas or aligned, if more than the type's own
 
 	// C++ (cxx.go).
-	ref     uint8    // kPtr: a reference (1: T &, 2: T &&)
-	isAuto  bool     // the placeholder auto, until its initializer says
-	isPackT bool     // kTParam: a parameter pack
-	depN    int      // kArray, in a pattern: its length is the value parameter depN-1
-	mp      *memPtr  // a pointer to data member (an integer: the offset); kMemPtr
-	dep     *depType // kDependent
+	ref     uint8     // kPtr: a reference (1: T &, 2: T &&)
+	isAuto  bool      // the placeholder auto, until its initializer says
+	isPackT bool      // kTParam: a parameter pack
+	depN    int       // kArray, in a pattern: its length is the value parameter depN-1
+	mp      *memPtr   // a pointer to data member (an integer: the offset); kMemPtr
+	ctad    *template // isAuto: a class template's name, whose arguments the initializer gives
+	dep     *depType  // kDependent
 }
 
 type record struct {

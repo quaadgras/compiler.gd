@@ -623,7 +623,7 @@ func (p *parser) memberType(ct *ctype, name string, t *ctype, s specs) *ctype {
 	case s.noType:
 		p.errorf("expected a type for %q", name)
 	}
-	static := s.storage == sStatic || name == "operator new" || name == "operator delete" || name == "operator new[]" || name == "operator delete[]"
+	static := s.storage == sStatic || name == "operatornew" || name == "operatordelete" || name == "operatornew[]" || name == "operatordelete[]"
 	if !static {
 		return &ctype{kind: kFunc, fn: withRecv(&ft, ct)}
 	}

@@ -919,9 +919,26 @@ func (p *parser) allocFuncs(name string, t *ctype) []*symbol {
 // newExpr parses a new expression, after "new".
 func (p *parser) newExpr(at pos) expr {
 	var placement []expr
-	if p.is("(") && !p.isTypeStart(1) {
-		p.next()
-		placement = p.callArgs()
+	if p.is("(") {
+		// Placement arguments, unless it is new (type): a type follows
+		// arguments.
+		depth, m := 0, 0
+		for ; ; m++ {
+			if p.isAt(m, "(") {
+				depth++
+			} else if p.isAt(m, ")") {
+				depth--
+				if depth == 0 {
+					break
+				}
+			} else if p.peekAt(m).kind == tkEOF {
+				p.errorAt(at, "unbalanced parentheses after new")
+			}
+		}
+		if !p.isTypeStart(1) || p.isTypeStart(m+1) || p.isAt(m+1, "(") {
+			p.next()
+			placement = p.callArgs()
+		}
 	}
 	// The type: a type specifier and pointers, then [n] for an array.
 	var t *ctype
@@ -960,9 +977,9 @@ func (p *parser) newExpr(at pos) expr {
 	// The memory: an allocation function of the program's, the memory
 	// a placement gives, or the C library's.
 	var mem expr
-	opName := "operator new"
+	opName := "operatornew"
 	if count != nil {
-		opName = "operator new[]"
+		opName = "operatornew[]"
 	}
 	args := append([]expr{size}, placement...)
 	if sym := p.resolve(p.allocFuncs(opName, t), nil, args, at, opName, true); sym != nil {
@@ -1131,9 +1148,9 @@ func (p *parser) deleteExpr(at pos) expr {
 // of an object of type t, as delete does: by a deallocation function of
 // the program's, else the C library's.
 func (p *parser) deallocate(ptr expr, t *ctype, array bool, at pos) stmt {
-	opName := "operator delete"
+	opName := "operatordelete"
 	if array {
-		opName = "operator delete[]"
+		opName = "operatordelete[]"
 	}
 	if sym := p.resolve(p.allocFuncs(opName, t), nil, []expr{ptr}, at, opName, true); sym != nil {
 		return &exprStmt{p.rvalueVoid(p.callFunc(sym, nil, []expr{ptr}, at))}

@@ -76,6 +76,7 @@ type parser struct {
 	pmfTypes   map[string]*ctype
 	pmfConsts  map[*symbol]*symbol
 	pmfNulls   map[*record]*symbol
+	noPM       int       // parsing the right operand of .* or ->*
 	explicitT  []targ    // the explicit template arguments of the call being resolved
 	tmplSuffix string    // the template arguments, mangled, of the function being instantiated
 	instTag    *ctype    // the class template instance whose definition is being parsed
@@ -488,7 +489,7 @@ func (p *parser) isTypeStart(i int) bool {
 			return true
 		}
 		s, _ := p.cxxTypeAt(i)
-		return s != nil
+		return s != nil || p.ctadAt(i) != nil
 	}
 	s := p.lookup(t.text)
 	return s != nil && s.kind == symTypedef
@@ -705,6 +706,28 @@ func (p *parser) declSpecs() specs {
 			continue
 		case "typeof", "typeof_unqual", "__typeof__", "__typeof", "__typeof_unqual__":
 			p.next()
+			if p.cxx && p.pattern > 0 {
+				// In a pattern: a type that may not be known.
+				start, sc := p.pos, p.sc
+				var dt *ctype
+				if !p.try(func() {
+					p.expect("(")
+					e := p.expr()
+					p.expect(")")
+					if pr, ok := e.(*classPR); ok {
+						dt = pr.t
+					} else {
+						dt = e.ty()
+					}
+				}) || dt == nil || hasTParam(dt) {
+					p.pos, p.sc = start, sc
+					p.skipParens()
+					dt = &ctype{kind: kDependent, dep: &depType{}}
+				}
+				s.t = dt
+				seen = true
+				continue
+			}
 			p.expect("(")
 			var ty *ctype
 			if p.isTypeStart(0) {
@@ -727,6 +750,14 @@ func (p *parser) declSpecs() specs {
 			continue
 		default:
 			if p.cxx && base == "" && s.t == nil && !unsigned && !signed && !short && nlong == 0 && nint == 0 {
+				if tm := p.ctadAt(0); tm != nil {
+					// A class template's name: its arguments are deduced
+					// from the initializer.
+					p.next()
+					s.t = &ctype{kind: kInt, isAuto: true, ctad: tm}
+					seen = true
+					continue
+				}
 				if sym, n := p.cxxTypeAt(0); sym != nil && !(s.auto && (p.isAt(n, "=") || p.isAt(n, ";") || p.isAt(n, ","))) && !p.isCtorName(sym, n) {
 					s.t = sym.t
 					sym.used = true
