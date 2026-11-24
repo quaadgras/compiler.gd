@@ -159,7 +159,6 @@ type request struct {
 	Path   string `json:"path"`
 	Source string `json:"source"` // scratch source, used when non-empty
 	Lang   string `json:"lang"`   // of scratch source
-	Mode   string `json:"mode"`   // thin or cap
 }
 
 func handleTranslate(w http.ResponseWriter, r *http.Request) {
@@ -209,13 +208,8 @@ func handleTranslate(w http.ResponseWriter, r *http.Request) {
 
 	out := filepath.Join(work, "out.go")
 	os.Remove(out)
-	args := []string{"-main", "-undef", "-o", out}
-	if req.Mode != "cap" {
-		args = append([]string{"-thin"}, args...)
-	}
-	args = append(args, path)
-	cmd := exec.Command(ccBin, args...)
-	cmd.Env = buildEnv
+	cmd := exec.Command(ccBin, "-main", "-undef", "-o", out, path)
+	cmd.Env = append(buildEnv, "CCTHIN=1") // the 1:1 translation, whether or not it is cc's default yet
 	cmd.Dir = filepath.Dir(path)
 	var stderr bytes.Buffer
 	cmd.Stderr, cmd.Stdout = &stderr, &stderr
@@ -229,10 +223,7 @@ func handleTranslate(w http.ResponseWriter, r *http.Request) {
 	gosrc, _ := os.ReadFile(out)
 	res.Go = string(gosrc)
 
-	key := req.Mode + "\x00" + path
-	if req.Source != "" {
-		key = req.Mode + "\x00scratch"
-	}
+	key := path
 	if res.Go != "" && res.Go != lastGo[key] {
 		if lastGo[key] != "" {
 			prevGo[key] = lastGo[key]

@@ -83,8 +83,6 @@ body.nomark mark { background: none; color: inherit; }
   <select id="file" title="Source file"></select>
   <button id="scratchBtn" title="Edit your own source">Scratch</button>
   <select id="lang" title="Scratch language" hidden><option value="c">C</option><option value="cpp">C++</option></select>
-  <button id="thinBtn" class="on" title="cc -thin, the 1:1 translation">thin</button>
-  <button id="capBtn" title="the capability mode">cap</button>
   <button id="refresh" title="Rebuild cmd/cc and translate again (r, or ctrl+enter in scratch)">⟳ Rebuild &amp; translate</button>
   <span class="spacer"></span>
   <label class="meta"><input type="checkbox" id="marks" checked> marks</label>
@@ -110,7 +108,7 @@ body.nomark mark { background: none; color: inherit; }
 </main>
 <script>
 const $ = id => document.getElementById(id);
-const state = { path: '', mode: 'thin', scratch: false, res: null, sel: -1, changed: new Set() };
+const state = { path: '', scratch: false, res: null, sel: -1, changed: new Set() };
 const ls = {
   get(k, d) { try { const v = localStorage.getItem('ccview.' + k); return v == null ? d : v; } catch { return d; } },
   set(k, v) { try { localStorage.setItem('ccview.' + k, v); } catch {} },
@@ -344,7 +342,7 @@ async function translate() {
   const keepSel = state.res && state.res.decls && state.res.decls[state.sel] ? state.res.decls[state.sel].go : null;
   const goTop = $('go').scrollTop, srcTop = $('src').scrollTop;
   try {
-    const body = { path: state.path, mode: state.mode };
+    const body = { path: state.path };
     if (state.scratch) { body.source = $('scratch').value || ' '; body.lang = $('lang').value; }
     const r = await fetch('/api/translate', { method: 'POST', body: JSON.stringify(body) });
     if (!r.ok) throw new Error(await r.text());
@@ -364,15 +362,7 @@ async function translate() {
 function saveHash() {
   const p = new URLSearchParams();
   if (state.scratch) p.set('scratch', '1'); else p.set('file', state.path);
-  p.set('mode', state.mode);
   history.replaceState(null, '', '#' + p);
-}
-
-function setMode(m) {
-  state.mode = m;
-  $('thinBtn').classList.toggle('on', m === 'thin');
-  $('capBtn').classList.toggle('on', m === 'cap');
-  saveHash(); translate();
 }
 
 function setScratch(on) {
@@ -393,9 +383,6 @@ async function init() {
     sel.appendChild(og);
   }
   const h = new URLSearchParams(location.hash.slice(1));
-  state.mode = h.get('mode') === 'cap' ? 'cap' : 'thin';
-  $('thinBtn').classList.toggle('on', state.mode === 'thin');
-  $('capBtn').classList.toggle('on', state.mode === 'cap');
   state.path = h.get('file') || ls.get('file', '') || (sel.options[0] && sel.options[0].value) || '';
   if (![...sel.options].some(o => o.value === state.path) && sel.options[0]) state.path = sel.options[0].value;
   sel.value = state.path;
@@ -407,8 +394,6 @@ async function init() {
 }
 
 $('file').onchange = e => { state.path = e.target.value; state.sel = -1; ls.set('file', state.path); saveHash(); translate(); };
-$('thinBtn').onclick = () => setMode('thin');
-$('capBtn').onclick = () => setMode('cap');
 $('refresh').onclick = translate;
 $('scratchBtn').onclick = () => setScratch(!state.scratch);
 $('lang').onchange = e => { ls.set('lang', e.target.value); translate(); };
