@@ -26,17 +26,8 @@ func c23Object(p unsafe.Pointer) (unsafe.Pointer, uintptr) {
 	return base, linbrk - uintptr(base)
 }
 
-// c23Stack returns no bounds: a goroutine's stack never moves, so C's
-// side tables key its words by address, as they do the heap's.
-//
-//go:linkname c23Stack
-func c23Stack() (lo, hi uintptr) { return 0, 0 }
-
 // c23GTable returns the goroutine's slot for internal/c23's table of
 // it (_Thread_local objects, errno, pthread keys, thread id).
 //
 //go:linkname c23GTable
 func c23GTable() *unsafe.Pointer { return &curg.c23 }
-
-//go:linkname c23SetStackMove
-func c23SetStackMove(f func(t unsafe.Pointer, lo, hi, delta uintptr)) {}

@@ -630,9 +630,8 @@ type g struct {
 	// built with the "valgrind" build tag, otherwise it is unused.
 	valgrindStackID uintptr
 
-	// c23 is internal/c23's side table of the capabilities that C stored
-	// in this goroutine's stack and that its words cannot carry
-	// (doc/gd/cc.md). copystack re-keys it through c23StackMove.
+	// c23 is what internal/c23 keeps for this goroutine as a thread of
+	// C's: its errno, and the like (c23GTable).
 	c23 unsafe.Pointer
 }
 
