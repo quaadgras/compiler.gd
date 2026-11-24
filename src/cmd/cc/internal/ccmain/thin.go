@@ -675,12 +675,28 @@ func (g *gen) tlocalInit(s *symbol) {
 		}
 		g.tstore(l, v, s.init.scalar)
 	case s.init != nil:
-		if here {
-			g.declare(n, m, "") // zero, each time it is reached
-		} else {
-			g.p("%s = %s{}", n, m)
+		// As one Go literal, if its values need no statements of their
+		// own and do not name the object itself.
+		var lit string
+		ok := false
+		if pre := g.capture(func() { lit, ok = g.initLit(s.t, s.init) }); pre != "" || names(lit, n) {
+			ok = false
 		}
-		g.tinitObject(n, s.t, s.init)
+		switch {
+		case ok && here && lit == m+"{}":
+			g.declare(n, m, "")
+		case ok && here:
+			g.p("%s := %s", n, lit)
+			g.p("_ = %s", n)
+		case ok:
+			g.p("%s = %s", n, lit)
+		case here:
+			g.declare(n, m, "") // zero, each time it is reached
+			g.tinitObject(n, s.t, s.init)
+		default:
+			g.p("%s = %s{}", n, m)
+			g.tinitObject(n, s.t, s.init)
+		}
 	case here:
 		// Without an initializer its value is indeterminate each time
 		// the declaration is reached: Go's zero.
