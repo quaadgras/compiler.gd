@@ -1591,6 +1591,9 @@ func mallocgcSmallScanNoHeader(size uintptr, typ *_type, local bool) (unsafe.Poi
 		c.scanAlloc += 8
 	} else {
 		c.scanAlloc += heapSetTypeNoHeader(uintptr(x), size, typ, span)
+		if needWholeBits(span, typ) {
+			span.writeWholeBits(uintptr(x), size, typ)
+		}
 	}
 	size = uintptr(gc.SizeClassToSize[sizeclass])
 

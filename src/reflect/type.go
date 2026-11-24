@@ -2640,6 +2640,12 @@ func StructOf(fields []StructField) Type {
 	typ.PtrBytes = typeptrdata(&typ.Type)
 	typ.Align_ = typalign
 	typ.FieldAlign_ = typalign
+	for i := range fs {
+		if fs[i].Typ.HoldsWhole() {
+			typ.FieldAlign_ |= abi.FieldAlignWhole
+			break
+		}
+	}
 	typ.PtrToThis = 0
 	if len(methods) > 0 {
 		typ.TFlag |= abi.TFlagUncommon
@@ -2836,6 +2842,9 @@ func ArrayOf(length int, elem Type) Type {
 	}
 	array.Align_ = typ.Align_
 	array.FieldAlign_ = typ.FieldAlign_
+	if length == 0 {
+		array.FieldAlign_ &^= abi.FieldAlignWhole
+	}
 	array.Len = uintptr(length)
 	array.Slice = &(SliceOf(elem).(*rtype).t)
 

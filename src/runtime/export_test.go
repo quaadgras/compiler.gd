@@ -2231,3 +2231,34 @@ func CountLocalAllocs(f func()) uint64 {
 func StringWord0(s string) uint64 {
 	return uint64(uintptr(stringStructOf(&s).str))
 }
+
+// NewLocalTyped allocates as a local object n values of type t.
+func NewLocalTyped(t *abi.Type, n uintptr) unsafe.Pointer {
+	return mallocgcl(n*t.Size_, t, true, true)
+}
+
+// InLocalSpan reports whether p is in a span of local objects.
+func InLocalSpan(p unsafe.Pointer) bool {
+	s := spanOfHeap(uintptr(p))
+	return s != nil && s.spanclass >= localSpanClasses
+}
+
+// WholeStates returns the states of the n words at p, an object of 512
+// bytes or less, in its span's bitmap, one letter each: '-' plain, 'F' the
+// first word of a string or an interface, 'S' of a slice, '.' a later
+// word. It returns "" if the span has no bitmap.
+func WholeStates(p unsafe.Pointer, n int) string {
+	s := spanOfHeap(uintptr(p))
+	if s == nil {
+		panic("not in the heap")
+	}
+	bits := s.wholeBitsOf()
+	if bits == nil {
+		return ""
+	}
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = "-S.F"[bits.state((uintptr(p)-s.base())/goarch.PtrSize+uintptr(i))]
+	}
+	return string(b)
+}

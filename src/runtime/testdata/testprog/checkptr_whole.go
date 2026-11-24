@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"internal/abi"
 	"reflect"
+	"runtime"
 	"slices"
+	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 )
 
@@ -63,6 +66,7 @@ func init() {
 	viewDynamic[any]("Iface")
 	viewPuns()
 	viewLong()
+	viewSmall()
 	viewNil[string]("String")
 	viewNil[[]byte]("Slice")
 	viewNil[any]("Iface")
@@ -226,6 +230,7 @@ func viewDynamic[T any](kind string) {
 		name string
 		n    int
 	}{
+		{"Small", 4},
 		{"Header", 1024 / int(unsafe.Sizeof(*new(T)))},
 		{"Large", 64 << 10 / int(unsafe.Sizeof(*new(T)))},
 	}
@@ -308,3 +313,211 @@ func viewShapeStatic[T any]() {
 	var e any = 1
 	sink2 = *(*T)(unsafe.Pointer(&e))
 }
+
+type (
+	viewPlainWords struct {
+		p    *int
+		a, b uint64
+		c    uint64
+	}
+	viewPadded struct {
+		p *int
+		f float64
+		g float64
+		b bool
+	}
+	viewRaceA struct {
+		s string
+		b []byte
+	}
+	viewRaceB struct {
+		b []byte
+		s string
+	}
+)
+
+// viewSmall adds the views, through a plain unsafe.Pointer, of objects of
+// 512 bytes or less, which have the states of their words in a bitmap of
+// their span.
+func viewSmall() {
+	const P, W = "CheckPtrPartialSmall", "CheckPtrWholeSmall"
+	viewCase(P+"IfaceAsString", func() { viewAs[string](viewPlain(new(any))) })
+	viewCase(P+"IfaceSecondAsString", func() {
+		viewAs[string](unsafe.Add(viewPlain(new(any)), viewWordSize))
+	})
+	viewCase(P+"IfaceAsTwoStrings", func() { viewAs[[2]string](viewPlain(new(any))) })
+	viewCase(P+"IfaceShifted", func() {
+		x := make([]any, 4)
+		viewAs[any](unsafe.Add(viewPlain(&x[1]), viewWordSize))
+	})
+	viewCase(P+"StringSecondAsInt", func() {
+		viewAs[int](unsafe.Add(viewPlain(new(string)), viewWordSize))
+	})
+	viewCase(P+"StringsAsIface", func() { viewAs[any](viewPlain(new([3]string))) })
+	viewCase(P+"NestedField", func() {
+		v := new(viewStruct)
+		viewAs[uintptr](unsafe.Add(viewPlain(&v.s), viewWordSize))
+	})
+	viewCase(P+"Append", func() {
+		var x []string
+		x = append(x, "a", "b", "c")
+		viewAs[[2]uint64](viewPlain(&x[1]))
+	})
+	viewCase(P+"Reflect", func() {
+		t := reflect.StructOf([]reflect.StructField{
+			{Name: "N", Type: reflect.TypeFor[int]()},
+			{Name: "S", Type: reflect.TypeFor[string]()},
+		})
+		v := reflect.New(t)
+		sink2 = v.Interface()
+		viewAs[uintptr](unsafe.Add(v.UnsafePointer(), unsafe.Offsetof(viewReflectWhole{}.S)+viewWordSize))
+	})
+	viewCase(P+"ReflectArray", func() {
+		v := reflect.New(reflect.ArrayOf(3, reflect.TypeFor[any]()))
+		sink2 = v.Interface()
+		viewAs[string](v.UnsafePointer())
+	})
+	viewCase(P+"AfterGC", func() {
+		x := new(string)
+		p := viewPlain(x)
+		runtime.GC()
+		runtime.GC()
+		viewAs[[2]uintptr](p)
+		runtime.KeepAlive(x)
+	})
+	viewCase(P+"ABIInterface", func() { viewAs[[2]uintptr](viewPlain(new(abi.EmptyInterface))) })
+	viewCase(P+"ReflectValue", func() { viewAs[[2]uintptr](viewPlain(new(reflect.Value))) })
+
+	if abi.SlicePacked {
+		// Two words each, which are not the same two.
+		viewCase(P+"StringAsSlice", func() { viewAs[[]byte](viewPlain(new(string))) })
+		viewCase(P+"SliceAsString", func() { viewAs[string](viewPlain(new([]byte))) })
+	}
+	viewCase(P+"SliceOverIfaceEnd", func() {
+		viewAs[[]byte](unsafe.Add(viewPlain(new(any)), unsafe.Sizeof(any(nil))-unsafe.Sizeof([]byte(nil))))
+	})
+	viewCase(P+"SliceAtStringSecond", func() {
+		v := new(viewStringPlain)
+		viewAs[[]byte](unsafe.Add(viewPlain(&v.s), viewWordSize))
+	})
+	viewCase(P+"SliceAtSliceSecond", func() {
+		v := new(viewSlicePlain)
+		viewAs[[]byte](unsafe.Add(viewPlain(&v.b), viewWordSize))
+	})
+	viewCase(P+"IfaceOverStringAndPlain", func() { viewAs[any](viewPlain(new(viewStringPlain))) })
+
+	viewCase(W+"PastLastObject", func() {
+		// Where a span has no object, up to and past its end.
+		const pageSize, size = 8192, unsafe.Sizeof([3]string{})
+		x := new([3]string)
+		p := viewPlain(x)
+		viewAs[[size]byte](unsafe.Add(p, pageSize/size*size-uintptr(p)%pageSize))
+		runtime.KeepAlive(x)
+	})
+	viewCase(W+"ABIInterface", func() {
+		viewAs[abi.EmptyInterface](viewPlain(new(any)))
+		viewAs[any](viewPlain(new(abi.EmptyInterface)))
+		var err error
+		viewAs[abi.NonEmptyInterface](viewPlain(&err))
+	})
+	viewCase(W+"Array", func() {
+		x := make([]string, 6)
+		viewAs[[2]string](viewPlain(&x[2]))
+		y := make([]any, 3)
+		viewAs[any](viewPlain(&y[2]))
+	})
+	viewCase(W+"PlainField", func() {
+		v := new(viewStruct)
+		viewAs[uintptr](viewPlain(&v.n))
+		viewAs[byte](viewPlain(&v.n))
+	})
+	viewCase(W+"PlainMemory", func() {
+		// A string's type over memory that holds no whole value, in
+		// a span that has a bitmap.
+		sink2 = new([2]string)
+		viewAs[[2]string](viewPlain(new(viewPlainWords)))
+	})
+	viewCase(W+"Reflect", func() {
+		t := reflect.StructOf([]reflect.StructField{
+			{Name: "N", Type: reflect.TypeFor[int]()},
+			{Name: "S", Type: reflect.TypeFor[string]()},
+		})
+		v := reflect.New(t)
+		sink2 = v.Interface()
+		viewAs[viewReflectWhole](v.UnsafePointer())
+		viewAs[int](v.UnsafePointer())
+	})
+	viewCase(W+"ReflectValue", func() { viewAs[reflect.Value](viewPlain(new(reflect.Value))) })
+	viewCase(W+"Reused", func() {
+		// The slots of whole values, freed, and allocated again as
+		// types without any, regular memory or not.
+		for range 8 {
+			keep := make([]*[2]string, 2000)
+			for i := range keep {
+				keep[i] = new([2]string)
+			}
+			sink2 = keep
+			sink2 = nil
+			keep = nil
+			runtime.GC()
+			runtime.GC()
+			for range 2000 {
+				viewAs[[unsafe.Sizeof(viewPlainWords{})]byte](viewPlain(new(viewPlainWords)))
+				viewAs[[unsafe.Sizeof(viewPadded{})]byte](viewPlain(new(viewPadded)))
+			}
+		}
+	})
+	viewCase(W+"Race", viewSmallRace)
+}
+
+// A whole value, and plain words after it.
+type viewStringPlain struct {
+	s string
+	n [4]uintptr
+}
+
+type viewSlicePlain struct {
+	b []byte
+	n [4]uintptr
+}
+
+type viewReflectWhole struct {
+	N int
+	S string
+}
+
+// viewSmallRace has goroutines publish new objects whose slots had
+// another layout, and others convert them as they arrive: a reader that
+// saw the object before its states would die.
+func viewSmallRace() {
+	var slot atomic.Pointer[viewRaceA]
+	var stop atomic.Bool
+	var wg sync.WaitGroup
+	n := max(runtime.GOMAXPROCS(0)/2, 1)
+	for range n {
+		wg.Go(func() {
+			for !stop.Load() {
+				a := new(viewRaceA)
+				slot.Store(a)
+				for range 4 {
+					viewRaceSink.Store(new(viewRaceB))
+				}
+			}
+		})
+		wg.Go(func() {
+			for !stop.Load() {
+				if p := slot.Load(); p != nil {
+					viewAs[viewRaceA](viewHide(unsafe.Pointer(p)))
+				}
+			}
+		})
+	}
+	time.Sleep(300 * time.Millisecond)
+	stop.Store(true)
+	wg.Wait()
+}
+
+var viewRaceSink atomic.Pointer[viewRaceB]
+
+//go:noinline
+func viewHide(p unsafe.Pointer) unsafe.Pointer { return p }

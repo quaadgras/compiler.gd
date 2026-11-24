@@ -51,6 +51,8 @@ func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
 		}
 		if typ != nil {
 			checkptrWhole(typ, tbase, base+s.elemsize, uintptr(p), elem, size)
+		} else if wholeBitsEnabled {
+			checkptrWholeSmall(s, base, uintptr(p), elem, size)
 		}
 		return
 	}
@@ -100,6 +102,8 @@ func checkptrView(p unsafe.Pointer, elem *_type, n uintptr) {
 	base := s.base() + s.objIndex(uintptr(p))*s.elemsize
 	if typ, tbase := checkptrObjectType(s, base); typ != nil {
 		checkptrWhole(typ, tbase, base+s.elemsize, uintptr(p), elem, n*elem.Size_)
+	} else if wholeBitsEnabled {
+		checkptrWholeSmall(s, base, uintptr(p), elem, n*elem.Size_)
 	}
 }
 
@@ -237,32 +241,69 @@ func wholeStringAt(t *_type, off uintptr) bool {
 // checkptrWhole checks that the view of size bytes at p, of values of type
 // elem, is not of part of a string, a slice or an interface of the object
 // that ends at limit, which holds values of type typ from tbase on.
-//
-// It goes by words: where the object has a whole value, the view must
-// have the same state, and the word after the view must not be the rest
-// of a value that the view began.
 func checkptrWhole(typ *_type, tbase, limit, p uintptr, elem *_type, size uintptr) {
-	if size == 0 || p < tbase || p >= limit || tearKind(typ) == 0 {
+	if !typ.HoldsWhole() {
+		return
+	}
+	obj := wholeObject{typ: typ, tbase: tbase}
+	checkptrWholeIn(&obj, limit, p, elem, size)
+}
+
+// A wholeObject gives the states of the words of an object: from the type
+// it records, or from its span's bitmap (mwholebits.go).
+type wholeObject struct {
+	typ   *_type
+	bits  *wholeBits
+	tbase uintptr // where the object's values begin
+	sbase uintptr // the base of its span, with bits
+}
+
+// state returns the state of the word at offset off from tbase.
+func (o *wholeObject) state(off uintptr) uint8 {
+	if o.typ != nil {
+		return wordState(o.typ, off%o.typ.Size_)
+	}
+	return o.bits.state((o.tbase + off - o.sbase) / goarch.PtrSize)
+}
+
+// checkptrWholeIn is the comparison of the view with the object that ends
+// at limit. It goes by words: where the object has a whole value, the view
+// must have the same state, and the word after the view must not be the
+// rest of a value that the view began. A view of plain memory may have any
+// type.
+func checkptrWholeIn(o *wholeObject, limit, p uintptr, elem *_type, size uintptr) {
+	if size == 0 || p < o.tbase || p >= limit {
 		return
 	}
 	const word = goarch.PtrSize
-	lo := p - tbase
+	lo := p - o.tbase
 	if size > limit-p {
 		// A type longer than the object, as (*[1<<30]byte)(p) has.
 		// The object may have room past its last value, which
 		// holds nothing: go no further than the value p is in.
-		limit = min(limit, tbase+(lo/typ.Size_+1)*typ.Size_)
+		if o.typ != nil {
+			limit = min(limit, o.tbase+(lo/o.typ.Size_+1)*o.typ.Size_)
+		}
 		size = limit - p
 	}
 	aligned := lo&(word-1) == 0
 	end := alignUp(lo+size, word)
 	excused := ^uintptr(0) // the third word of a slice viewed as a string
+	beyond := ^uintptr(0)  // the third word of a string viewed as a slice
+	wasPlain := false
 	for w := lo &^ (word - 1); w < end; w += word {
-		have := wordState(typ, w%typ.Size_)
+		have := o.state(w)
 		var want uint8
 		if aligned {
 			want = wordState(elem, (w-lo)%elem.Size_)
 		}
+		// A value of the view is over one whole value or over plain
+		// memory, not partly each, as an interface over a string and
+		// the two words after it would be.
+		if want == wordCont && (have == wordPlain) != wasPlain && w != beyond {
+			throw(checkptrPartialMsg)
+		}
+		wasPlain = have == wordPlain
 		if have == want || have == wordPlain || w == excused && want == wordPlain {
 			continue
 		}
@@ -273,7 +314,10 @@ func checkptrWhole(typ *_type, tbase, limit, p uintptr, elem *_type, size uintpt
 				excused = w + 2*word
 				continue
 			}
-			if have == wordFirst && want == wordSliceFirst && wholeStringAt(typ, w%typ.Size_) {
+			// (A string is two words: what is first and has no
+			// third word is one.)
+			if have == wordFirst && want == wordSliceFirst && (o.tbase+w+2*word >= limit || o.state(w+2*word) != wordCont) {
+				beyond = w + 2*word
 				continue
 			}
 		}
@@ -282,7 +326,7 @@ func checkptrWhole(typ *_type, tbase, limit, p uintptr, elem *_type, size uintpt
 	if end == excused {
 		end += word
 	}
-	if tbase+end < limit && wordState(typ, end%typ.Size_) == wordCont {
+	if o.tbase+end < limit && o.state(end) == wordCont {
 		throw(checkptrPartialMsg)
 	}
 }

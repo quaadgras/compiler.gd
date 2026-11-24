@@ -141,6 +141,10 @@ func mallocgcSmallScanNoHeaderSC1(size uintptr, typ *_type, needzero bool) unsaf
 			doubleCheckHeapType(x, dataSize, typ, nil, span)
 		}
 		c.scanAlloc += scanSize
+
+		if needWholeBits(span, typ) {
+			span.writeWholeBits(x, dataSize, typ)
+		}
 	}
 
 	publicationBarrier()
@@ -294,6 +298,10 @@ func mallocgcSmallScanNoHeaderSC2(size uintptr, typ *_type, needzero bool) unsaf
 			doubleCheckHeapType(x, dataSize, typ, nil, span)
 		}
 		c.scanAlloc += scanSize
+
+		if needWholeBits(span, typ) {
+			span.writeWholeBits(x, dataSize, typ)
+		}
 	}
 
 	publicationBarrier()
@@ -447,6 +455,10 @@ func mallocgcSmallScanNoHeaderSC3(size uintptr, typ *_type, needzero bool) unsaf
 			doubleCheckHeapType(x, dataSize, typ, nil, span)
 		}
 		c.scanAlloc += scanSize
+
+		if needWholeBits(span, typ) {
+			span.writeWholeBits(x, dataSize, typ)
+		}
 	}
 
 	publicationBarrier()
@@ -600,6 +612,10 @@ func mallocgcSmallScanNoHeaderSC4(size uintptr, typ *_type, needzero bool) unsaf
 			doubleCheckHeapType(x, dataSize, typ, nil, span)
 		}
 		c.scanAlloc += scanSize
+
+		if needWholeBits(span, typ) {
+			span.writeWholeBits(x, dataSize, typ)
+		}
 	}
 
 	publicationBarrier()
@@ -753,6 +769,10 @@ func mallocgcSmallScanNoHeaderSC5(size uintptr, typ *_type, needzero bool) unsaf
 			doubleCheckHeapType(x, dataSize, typ, nil, span)
 		}
 		c.scanAlloc += scanSize
+
+		if needWholeBits(span, typ) {
+			span.writeWholeBits(x, dataSize, typ)
+		}
 	}
 
 	publicationBarrier()
@@ -906,6 +926,10 @@ func mallocgcSmallScanNoHeaderSC6(size uintptr, typ *_type, needzero bool) unsaf
 			doubleCheckHeapType(x, dataSize, typ, nil, span)
 		}
 		c.scanAlloc += scanSize
+
+		if needWholeBits(span, typ) {
+			span.writeWholeBits(x, dataSize, typ)
+		}
 	}
 
 	publicationBarrier()
@@ -1059,6 +1083,10 @@ func mallocgcSmallScanNoHeaderSC7(size uintptr, typ *_type, needzero bool) unsaf
 			doubleCheckHeapType(x, dataSize, typ, nil, span)
 		}
 		c.scanAlloc += scanSize
+
+		if needWholeBits(span, typ) {
+			span.writeWholeBits(x, dataSize, typ)
+		}
 	}
 
 	publicationBarrier()
@@ -2061,6 +2089,10 @@ func mallocgcSmallScanSlowPath(size uintptr, typ *_type, needzero bool, spc span
 			doubleCheckHeapType(x, dataSize, typ, nil, span)
 		}
 		c.scanAlloc += scanSize
+
+		if needWholeBits(span, typ) {
+			span.writeWholeBits(x, dataSize, typ)
+		}
 	}
 
 	publicationBarrier()

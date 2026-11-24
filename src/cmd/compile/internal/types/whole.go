@@ -77,17 +77,18 @@ func isABIInterface(t *Type) bool {
 	return e != nil && e.Pkg != nil && e.Pkg.Path == "internal/abi" && (e.Name == "Type" || e.Name == "ITab")
 }
 
-// holdsWhole reports whether a value of type t holds a whole value.
-func holdsWhole(t *Type) bool {
+// HoldsWhole reports whether a value of type t holds a whole value
+// (abi.FieldAlignWhole).
+func HoldsWhole(t *Type) bool {
 	if WholeKindOf(t) != NotWhole {
 		return true
 	}
 	switch {
 	case t.IsArray():
-		return t.NumElem() > 0 && holdsWhole(t.Elem())
+		return t.NumElem() > 0 && HoldsWhole(t.Elem())
 	case t.IsStruct():
 		for _, f := range t.Fields() {
-			if holdsWhole(f.Type) {
+			if HoldsWhole(f.Type) {
 				return true
 			}
 		}
@@ -151,7 +152,7 @@ func PartialView(src *Type, off int64, view *Type, size int64) WholeKind {
 
 func partialIn(t *Type, base, lo, hi int64, view *Type) WholeKind {
 	size := t.Size()
-	if size == 0 || base >= hi || base+size <= lo || !holdsWhole(t) {
+	if size == 0 || base >= hi || base+size <= lo || !HoldsWhole(t) {
 		return NotWhole
 	}
 	if k := WholeKindOf(t); k != NotWhole {

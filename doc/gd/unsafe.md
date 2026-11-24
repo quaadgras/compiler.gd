@@ -97,12 +97,52 @@ How it is checked:
 - **The runtime**, for a plain `unsafe.Pointer`: `checkptrAlignment`
   compares the view with the type the object records, if it has one, and
   `checkptrView` does for types of alignment 1, which need no other check.
-  Objects with a malloc header and large objects record their type.
+  Objects with a malloc header and large objects record their type. Objects
+  of 512 bytes or less have the states of their words in a bitmap of their
+  span (below). The comparison is the same: where the object's word is part
+  of a whole value, the view's must have the same state, and the word just
+  past the view must not be a continuation. Each value of the view must be
+  over one whole value or over plain memory, not partly each, so an
+  interface cannot be viewed over a string and the two plain words after it.
+  A view of plain memory may have any type, so
+  `*(*string)(unsafe.Pointer(&hdr))` keeps working.
 
 A type longer than its object, as in `(*[1<<30]byte)(p)`, is compared up to
-the value `p` is in: an object may have room after its last value, which
-holds nothing. Generic code has a type's shape, so the shapes of
-`reflect.Value` and of `internal/abi`'s interfaces count as what they are.
+the end of the object, or with a recorded type, of the value `p` is in: an
+object may have room after its last value, which holds nothing. Generic
+code has a type's shape, so the shapes of `reflect.Value` and of
+`internal/abi`'s interfaces count as what they are.
+
+### The bitmap of small objects
+
+A span of objects of 512 bytes or less that holds a whole value has a
+`wholeBits` (`runtime/mwholebits.go`), two bits for each word of the span:
+
+| State | Word |
+| --- | --- |
+| `00` | not part of a whole value |
+| `10` | a later word of a whole value |
+| `11` | the first word of a string, an interface or `reflect.Value` |
+| `01` | the first word of a slice |
+
+One bit per kind would not do: in an array of interfaces every word would
+have it, and a view shifted by a word would pass.
+
+- **Who pays.** A noscan span has none. A span that never held a whole
+  value has a nil pointer. It is 256 bytes for an 8 KiB span with 8-byte
+  words (3.1%), outside the heap, in `GCSys`, and goes back to a free list
+  with its span.
+- **Allocation.** `mallocgc` tests one bit of the type's descriptor
+  (`abi.FieldAlignWhole`, the high bit of `FieldAlign_`, which no alignment
+  has), set by the compiler and by reflect for a type that holds a whole
+  value, and looks at whether the span has a bitmap. The states of such a
+  type are computed once from its descriptor and kept in a table, so the
+  binary has no new data. An allocation in a span with a bitmap always
+  writes its slot, zero if it has no whole value, so a slot never keeps the
+  states of the object that was there. The states are written before the
+  publication barrier.
+- **The collector** does not touch it: it is not in the GC's arenas, so the
+  states of what survives stay.
 
 `-d=checkptr=0` turns it off. `-d=unsafewhole=1` reports the conversions
 the compiler proves partial instead of failing, and `=2` also those whose
@@ -112,12 +152,28 @@ A nil pointer views nothing and always passes. `sync/atomic`'s `ifaceEq` is
 `//go:nocheckptr`: it compares two by-value copies in its own frame, word by
 word, which no other goroutine can reach.
 
+Measured on amd64 against the commit before the bitmap, user-mode
+instructions with `perf stat -r 5` and `GOGC=off`, in two passes:
+
+| Workload | Instructions | Repeat spread |
+| --- | ---: | ---: |
+| allocation of 32 bytes, no whole value | 188.4 to 195.5 per object, +3.8% | under 0.1% |
+| allocation of 32 bytes with a string or an interface | 188.4 to 268.8, +43% | under 0.1% |
+| `make([]string, 8)` | 411.7 to 577.4, +40% | under 0.1% |
+| fmt `SprintfStructure` | +0.93% | 0.13% |
+| fmt `ManyArgs` | +0.09% | 0.01% |
+| json encode, decode | +0.10%, +0.16% | up to 0.09% |
+| http ClientServer | +1.89% | 0.22% |
+| compile `go/types` | +1.72% | 0.02% |
+
+In time, on one pinned CPU: 21.4 to 21.8 ns for an object with no whole
+value (+1.5%), 21.4 to 25.6 ns with a string or an interface (+19%). A heap
+of 2M objects of 32 bytes with strings has 2.0 MB more in `GCSys` (3.1% of
+those spans) and the same heap. Peak RSS is +1.5% for a compile of `go/types`
+and for http ClientServer, within their spread of runs, and +0.2% for json.
+
 ### Known gaps
 
-- **Objects of 512 bytes or less** have only a pointer bitmap, in which a
-  string looks like `struct{p *T; n int}`, so a view through a plain
-  `unsafe.Pointer` is not checked. Closing it takes a record per word of
-  which words begin and continue a whole value.
 - **The stack and globals through a plain `unsafe.Pointer`**: they have no
   recorded type here. A pointer whose source the compiler can see is
   checked; one that came through a parameter or a field is not.
@@ -187,7 +243,8 @@ the type its object was allocated with, and memory outside the heap.
 ## Tests
 
 `runtime/checkptr_test.go`, with `CheckPtrPointers*` for the check of
-pointers and `TestCheckPtrViews` for views (`testprog/checkptr_whole.go`);
+pointers and `TestCheckPtrViews` for views (`testprog/checkptr_whole.go`),
+`runtime/mwholebits_test.go` for the bitmap;
 the standard library's tests pass with the checks on. Six tests of
 `test/` that count instructions or diagnostics, or that misuse `unsafe`
 on purpose, run with `-d=checkptr=0`.

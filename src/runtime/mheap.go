@@ -489,9 +489,10 @@ type mspan struct {
 	// out memory.
 	allocBits   *gcBits
 	gcmarkBits  *gcBits
-	pinnerBits  *gcBits // bitmap for pinned objects; accessed atomically
-	sharedBits  *gcBits // bitmap of the objects other goroutines may reach (shared.go); accessed atomically
-	exposedBits *gcBits // bitmap of the objects whose address a program has as an integer (checkptr.go); accessed atomically
+	pinnerBits  *gcBits    // bitmap for pinned objects; accessed atomically
+	sharedBits  *gcBits    // bitmap of the objects other goroutines may reach (shared.go); accessed atomically
+	exposedBits *gcBits    // bitmap of the objects whose address a program has as an integer (checkptr.go); accessed atomically
+	wholeBits   *wholeBits // states of the words of small objects, if the span holds a string, slice or interface (mwholebits.go); accessed atomically
 
 	// sweep generation:
 	// if sweepgen == h->sweepgen - 2, the span needs sweeping
@@ -1705,6 +1706,7 @@ func (h *mheap) freeSpan(s *mspan) {
 		}
 
 		lock(&h.lock)
+		s.freeWholeBits()
 		if msanenabled {
 			// Tell msan that this entire span is no longer in use.
 			base := unsafe.Pointer(s.base())
@@ -1870,6 +1872,7 @@ func (span *mspan) init(base uintptr, npages uintptr) {
 	span.pinnerBits = nil
 	span.sharedBits = nil
 	span.exposedBits = nil
+	span.wholeBits = nil
 	span.state.set(mSpanDead)
 	lockInit(&span.speciallock, lockRankMspanSpecial)
 }

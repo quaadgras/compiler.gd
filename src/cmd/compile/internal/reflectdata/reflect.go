@@ -819,7 +819,11 @@ func dcommontype(gd *base.Invocation, c rttype.Cursor, t *types.Type) {
 		gd.Fatalf("invalid alignment %d for %v", uint8(t.Alignment()), t)
 	}
 	c.Field("Align_").WriteUint8(uint8(t.Alignment()))
-	c.Field("FieldAlign_").WriteUint8(uint8(t.Alignment()))
+	fieldAlign := uint8(t.Alignment())
+	if types.HoldsWhole(t) {
+		fieldAlign |= abi.FieldAlignWhole
+	}
+	c.Field("FieldAlign_").WriteUint8(fieldAlign)
 
 	c.Field("Kind_").WriteUint8(uint8(ABIKindOfType(t)))
 

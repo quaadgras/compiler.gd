@@ -517,7 +517,17 @@ func (t *Type) Size() uintptr { return t.Size_ }
 // Align returns the alignment of data with type t.
 func (t *Type) Align() int { return int(t.Align_) }
 
-func (t *Type) FieldAlign() int { return int(t.FieldAlign_) }
+func (t *Type) FieldAlign() int { return int(t.FieldAlign_ &^ FieldAlignWhole) }
+
+// FieldAlignWhole is a bit of FieldAlign_, which no alignment has (gd):
+// a value of the type holds a string, a slice or an interface, which are
+// only read or written whole (doc/gd/unsafe.md). The allocator tests it for
+// each object, so it is in a byte of the type that it loads anyway.
+const FieldAlignWhole = 1 << 7
+
+// HoldsWhole reports whether a value of type t holds a string, a slice or
+// an interface.
+func (t *Type) HoldsWhole() bool { return t.FieldAlign_&FieldAlignWhole != 0 }
 
 type InterfaceType struct {
 	Type

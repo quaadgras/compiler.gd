@@ -272,6 +272,11 @@ func smallStub(mp *m, size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 			x := uintptr(x)
 			scanSize := heapSetTypeNoHeaderStub(x, dataSize, typ, span)
 			c.scanAlloc += scanSize
+			// Here, where the call to publicationBarrier has
+			// the registers spilled anyway.
+			if needWholeBits(span, typ) {
+				span.writeWholeBits(x, dataSize, typ)
+			}
 		}
 	}
 
