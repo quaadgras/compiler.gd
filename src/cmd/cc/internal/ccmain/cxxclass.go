@@ -554,6 +554,7 @@ func (p *parser) staticMember(name string, t *ctype, s specs, at pos) {
 	if inBlock(p.sc) {
 		sym.linkage = 0
 	}
+	sym.comdat = inInstance(p.sc)
 	p.declare(sym, at)
 	p.u.syms = append(p.u.syms, sym)
 	if !p.is("=") && !p.is("{") {

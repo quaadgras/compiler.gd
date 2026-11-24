@@ -1991,6 +1991,16 @@ func (p *parser) declarator2C(name string, t *ctype, s specs, a attrs, at pos) *
 		if a.vector > 0 {
 			p.errorAt(at, "vector types are not supported")
 		}
+		if p.cxx && t.kind == kStruct && t.rec.tag == "" && t.q == 0 {
+			// C++: an unnamed class has, for linkage, the name of the
+			// first typedef that names it.
+			t.rec.tag = name
+			if t.rec.cls != nil {
+				t.rec.cls.scope.name = name
+			}
+		} else if p.cxx && t.enum != nil && t.enum.tag == "" && t.q == 0 {
+			t.enum.tag = name
+		}
 		sym := &symbol{name: name, kind: symTypedef, t: t, p: at}
 		p.declare(sym, at)
 		return sym

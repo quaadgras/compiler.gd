@@ -37,6 +37,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	pkg := fs.String("pkg", "main", "package of the output")
 	withMain := fs.Bool("main", false, "make C's main the program's main")
+	undef := fs.Bool("undef", false, "let a call of an undefined function panic when it runs, instead of being an error")
 	out := fs.String("o", "", "output file")
 	var incDirs []string
 	fs.Func("I", "search `dir` for #include (repeatable)", func(s string) error {
@@ -55,7 +56,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	gosrc, err := translateFiles(fs.Args(), *pkg, *withMain, incDirs)
+	gosrc, err := translateFiles(fs.Args(), *pkg, *withMain, incDirs, *undef)
 	if gosrc != nil {
 		if werr := os.WriteFile(*out, gosrc, 0o666); werr != nil {
 			fmt.Fprintln(stderr, "cc:", werr)
@@ -72,10 +73,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 // Program translates the C files files, a whole program with main, to
 // the Go source of package pkg. incDirs are searched for #include.
 func Program(files []string, pkg string, incDirs []string) ([]byte, error) {
-	return translateFiles(files, pkg, true, incDirs)
+	return translateFiles(files, pkg, true, incDirs, false)
 }
 
-func translateFiles(files []string, pkg string, withMain bool, incDirs []string) ([]byte, error) {
+func translateFiles(files []string, pkg string, withMain bool, incDirs []string, undef bool) ([]byte, error) {
 	var units []*unit
 	for _, f := range files {
 		b, err := os.ReadFile(f)
@@ -92,6 +93,6 @@ func translateFiles(files []string, pkg string, withMain bool, incDirs []string)
 		}
 		units = append(units, u)
 	}
-	out, _, err := generate(files[0], units, options{pkg: pkg, main: withMain})
+	out, _, err := generate(files[0], units, options{pkg: pkg, main: withMain, undef: undef})
 	return out, err
 }

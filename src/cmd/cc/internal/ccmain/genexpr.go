@@ -105,7 +105,7 @@ func (g *gen) globalName(s *symbol) string {
 	if s.kind == symVar && !s.t.isComplete() {
 		g.errorf(s.p, "undefined reference to %q", s.name)
 	}
-	if _, lib := libcVars[s.name]; s.kind == symVar && s.storage == sExtern && !s.defined && !lib {
+	if _, lib := libcVars[s.name]; s.kind == symVar && s.storage == sExtern && !s.defined && !lib && !g.o.undef {
 		g.errorf(s.p, "undefined reference to %q", s.name)
 	}
 	return n
@@ -1136,7 +1136,23 @@ func (g *gen) funcName(s *symbol, at pos) string {
 		if s.weak || def.weak {
 			return ""
 		}
-		g.errorf(at, "undefined reference to %q", s.name)
+		if !g.o.undef {
+			g.errorf(at, "undefined reference to %q", s.name)
+		}
+		// A function that panics when it is called.
+		if g.stubs == nil {
+			g.stubs = map[*symbol]bool{}
+		}
+		if !g.stubs[def] {
+			g.stubs[def] = true
+			ft := def.t.fn
+			names := []string{}
+			for i := range ft.params {
+				names = append(names, fmt.Sprintf("a%d", i))
+			}
+			sig := strings.TrimPrefix(g.funcSig(ft, names), "func")
+			fmt.Fprintf(&g.funcs, "func %s%s {\n\tpanic(%q)\n}\n\n", g.names[def], sig, "cc: call of the undefined function "+s.name)
+		}
 	}
 	return g.names[def]
 }

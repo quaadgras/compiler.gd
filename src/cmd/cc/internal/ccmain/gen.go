@@ -31,6 +31,7 @@ type options struct {
 	main   bool   // C's main becomes the program's main
 	prefix string // of every package-level name: "_C23" in a package that
 	// imports "C", so that nothing clashes with the package's own names
+	undef bool // a call of an undefined function panics, instead of being an error
 }
 
 type genError struct{ msg string }
@@ -55,7 +56,8 @@ type pkgGen struct {
 	descs    map[string]bool    // function descriptors made
 	objs     map[*symbol]string // the Go expression of an object's value, known statically
 	recN     int
-	uses     map[string]bool // imports used
+	uses     map[string]bool  // imports used
+	stubs    map[*symbol]bool // undefined functions that have a stub (options.undef)
 }
 
 // gen generates one function, or file-scope code, of a unit.

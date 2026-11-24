@@ -1067,7 +1067,10 @@ func (p *parser) cxxVarName(sym *symbol, name string, s specs, at pos) {
 	if !p.cLinkage(at) {
 		sym.name = mangleVar(p.sc, name)
 	}
-	if inAnon(p.sc) || sym.t.q&qConst != 0 && s.storage != sExtern && sym.t.ref == 0 {
+	if s.inline {
+		// An inline variable: each unit that has it defines it.
+		sym.comdat = true
+	} else if inAnon(p.sc) || (baseElem(sym.t).q&qConst != 0 || s.constx) && s.storage != sExtern && sym.t.ref == 0 {
 		// const objects have internal linkage, unless extern says not.
 		sym.linkage = 'i'
 	}

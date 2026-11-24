@@ -85,6 +85,9 @@ func (p *parser) cxxDeclareFunc(name string, t *ctype, s specs, at pos) *symbol 
 	if s.storage == sStatic && sc.kind == skNamespace || inAnon(sc) {
 		sym.linkage = 'i'
 	}
+	if inInstance(sc) {
+		sym.comdat = true // a template's: each unit that uses it defines it
+	}
 	if sc.kind == skTemplate {
 		// A function template's instance: not found by name, which
 		// finds the template.

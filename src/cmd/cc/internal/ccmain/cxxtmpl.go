@@ -1998,3 +1998,14 @@ func (p *parser) ctadAt(i int) *template {
 	}
 	return s.tmpl
 }
+
+// inInstance reports whether sc is a template instance's scope, or a
+// class template instance's member's.
+func inInstance(sc *scope) bool {
+	for ; sc != nil; sc = sc.parent {
+		if sc.kind == skTemplate || sc.kind == skClass && sc.rec != nil && sc.rec.inst != nil {
+			return true
+		}
+	}
+	return false
+}

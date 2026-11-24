@@ -36,8 +36,10 @@ func localKindOf(s *symbol) localKind {
 // funcSig is the Go type of a C function of type ft.
 func (g *gen) funcSig(ft *funcType, names []string) string {
 	var ps []string
-	if ft.ret.kind == kStruct {
+	if ft.ret.kind == kStruct && names != nil {
 		ps = append(ps, "sret c23.Ptr")
+	} else if ft.ret.kind == kStruct {
+		ps = append(ps, "c23.Ptr") // a type: its parameters have no names
 	}
 	for i, pt := range ft.params {
 		if names != nil {
