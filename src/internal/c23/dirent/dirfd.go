@@ -34,15 +34,15 @@ func Fdopendir(fd int32) c23.Ptr {
 	name, e := c23.FdDirName(fd)
 	if e != 0 {
 		c23.SetErrno(e)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	p := c23.New[Dir]()
-	d := (*Dir)(p.Obj)
+	d := (*Dir)(p)
 	d.path = name
 	d.fd = fd
 	if err := d.read(); err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	d.ent = c23.Malloc(280)
 	return p
@@ -63,7 +63,7 @@ func ReaddirR(p, entry, result c23.Ptr) int32 {
 	if dirOf(p).next(entry) {
 		c23.StorePtr(result, entry)
 	} else {
-		c23.StorePtr(result, c23.Ptr{})
+		c23.StorePtr(result, c23.Ptr(nil))
 	}
 	return 0
 }

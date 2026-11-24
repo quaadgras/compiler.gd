@@ -27,7 +27,7 @@ func IfIndextoname(index uint32, name Ptr) Ptr {
 	ifi, err := net.InterfaceByIndex(int(index))
 	if err != nil || !putString(name, 16, ifi.Name) {
 		c23.SetErrno(c23.ENXIO)
-		return Ptr{}
+		return Ptr(nil)
 	}
 	return name
 }

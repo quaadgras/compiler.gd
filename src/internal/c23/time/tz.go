@@ -186,7 +186,7 @@ func AsctimeR(p, buf c23.Ptr) c23.Ptr {
 	b := asctime(p)
 	if len(b) > 26 {
 		c23.SetErrno(c23.EOVERFLOW)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	copy(c23.BytesAt(buf, uintptr(len(b))), b)
 	return buf
@@ -196,7 +196,7 @@ func AsctimeR(p, buf c23.Ptr) c23.Ptr {
 func CtimeR(t, buf c23.Ptr) c23.Ptr {
 	p := c23.New[tm]()
 	if c23.Addr(LocaltimeR(t, p)) == 0 {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return AsctimeR(p, buf)
 }

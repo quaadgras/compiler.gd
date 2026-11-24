@@ -274,7 +274,10 @@ func (g *gen) ret(v string) {
 }
 
 func zeroOf(t *ctype) string {
-	if goType(t) == "c23.Ptr" || is128(t) {
+	if goType(t) == "c23.Ptr" {
+		return "c23.Ptr(nil)"
+	}
+	if is128(t) {
 		return goType(t) + "{}"
 	}
 	return "0"

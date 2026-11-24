@@ -72,7 +72,7 @@ func Fsetlocking(p Ptr, typ int32) int32 {
 
 // Flushlbf is _flushlbf: it flushes every stream, which includes the
 // line-buffered ones.
-func Flushlbf() { c23.Fflush(Ptr{}) }
+func Flushlbf() { c23.Fflush(Ptr(nil)) }
 
 // Fpurge is __fpurge: it drops what the buffer holds, written or read
 // ahead, and what ungetc pushed back.

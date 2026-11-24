@@ -83,7 +83,7 @@ func Sigtimedwait(set, info, timeout c23.Ptr) int32 {
 }
 
 // Sigwaitinfo is sigwaitinfo: sigtimedwait without a timeout.
-func Sigwaitinfo(set, info c23.Ptr) int32 { return Sigtimedwait(set, info, c23.Ptr{}) }
+func Sigwaitinfo(set, info c23.Ptr) int32 { return Sigtimedwait(set, info, c23.Ptr(nil)) }
 
 // Sigqueue is sigqueue: to the program's own process, the signal is sent
 // with si_code SI_QUEUE and si_value value (union sigval, passed as its

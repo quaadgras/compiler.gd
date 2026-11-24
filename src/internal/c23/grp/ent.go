@@ -49,7 +49,7 @@ func Getgrent() c23.Ptr {
 	}
 	if entNext >= len(entGroups) {
 		grMu.Unlock()
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	e := entGroups[entNext]
 	entNext++
@@ -72,7 +72,7 @@ func Endgrent() { Setgrent() }
 // buf (ERANGE if they do not fit), and *result gr, or null if there is
 // no such group.
 func grResultR(e []string, ok bool, gr, buf c23.Ptr, n uint64, result c23.Ptr) int32 {
-	c23.StorePtr(result, c23.Ptr{})
+	c23.StorePtr(result, c23.Ptr(nil))
 	if !ok {
 		return 0
 	}
@@ -100,7 +100,7 @@ func grResultR(e []string, ok bool, gr, buf c23.Ptr, n uint64, result c23.Ptr) i
 	for i, m := range members {
 		c23.StorePtr(c23.Add(mem, i*int(ws)), str(m))
 	}
-	c23.StorePtr(c23.Add(mem, len(members)*int(ws)), c23.Ptr{})
+	c23.StorePtr(c23.Add(mem, len(members)*int(ws)), c23.Ptr(nil))
 	gid, _ := strconv.ParseUint(e[2], 10, 32)
 	var g group
 	c23.StorePtr(gr, str(e[0]))

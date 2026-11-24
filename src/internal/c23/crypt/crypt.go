@@ -47,7 +47,7 @@ func put(buf, key, salt c23.Ptr) c23.Ptr {
 	s, ok := Hash(c23.GoString(key), c23.GoString(salt))
 	if !ok {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	copy(c23.BytesAt(buf, uintptr(len(s)+1)), s+"\x00")
 	return buf

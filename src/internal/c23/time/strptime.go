@@ -20,7 +20,7 @@ func Strptime(buf, format, p c23.Ptr) c23.Ptr {
 	s := c23.GoString(buf)
 	rest, ok := st.parse(s, c23.GoString(format))
 	if !ok {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	st.finish()
 	return c23.Add(buf, len(s)-len(rest))

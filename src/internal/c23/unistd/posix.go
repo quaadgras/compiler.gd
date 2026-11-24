@@ -139,7 +139,7 @@ func Getcwd(buf c23.Ptr, size uint64) c23.Ptr {
 	wd, err := os.Getwd()
 	if err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	n := uint64(len(wd) + 1)
 	if c23.Addr(buf) == 0 {
@@ -148,15 +148,15 @@ func Getcwd(buf c23.Ptr, size uint64) c23.Ptr {
 		}
 		if n > size {
 			c23.SetErrno(c23.ERANGE)
-			return c23.Ptr{}
+			return c23.Ptr(nil)
 		}
 		buf = c23.Malloc(size)
 	} else if size == 0 {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	} else if n > size {
 		c23.SetErrno(c23.ERANGE)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	copy(c23.BytesAt(buf, uintptr(n)), wd+"\x00")
 	return buf

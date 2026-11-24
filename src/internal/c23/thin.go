@@ -78,31 +78,27 @@ func ReallocRaw(p unsafe.Pointer, n uint64) unsafe.Pointer {
 // Free1 is free: the collector frees.
 func Free1(p unsafe.Pointer) {}
 
-var byteInfo = TinfoOf[byte]()
+// Thin is p: the library takes Go's pointers.
+func Thin(p unsafe.Pointer) Ptr { return p }
 
-// Thin is the Ptr for a Go pointer that the library is given: the bytes
-// from it to the end of its heap object, or as far as the library goes
-// if it points to a variable of the stack or of the program's data.
-func Thin(p unsafe.Pointer) Ptr {
-	if p == nil {
-		return Ptr{}
-	}
-	if c, ok := cobject(p); ok {
-		return c
-	}
-	if base, size := object(p); base != nil {
-		return Ptr{Obj: base, Size: size, Off: int(uintptr(p) - uintptr(base)), ti: tref(byteInfo)}
-	}
-	return Ptr{Obj: p, Size: ^uintptr(0) >> 2, ti: tref(byteInfo)}
+// Unthin is p.
+func Unthin(p Ptr) unsafe.Pointer { return p }
+
+// MallocAligned is aligned_alloc: n bytes at a multiple of align.
+func MallocAligned(align, n uintptr) Ptr {
+	p := AllocRaw(uint64(n + align))
+	return unsafe.Add(p, (align-uintptr(p)%align)%align)
 }
 
-// Unthin is the Go pointer for a Ptr the library returns.
-func Unthin(p Ptr) unsafe.Pointer {
-	if p.Obj == nil {
-		return unsafe.Pointer(uintptr(p.Off))
-	}
-	return unsafe.Add(p.Obj, p.Off)
-}
+// NewAligned allocates an object of type T at a multiple of align.
+func NewAligned[T any](align uintptr) Ptr { return NewAlignedT(TinfoOf[T](), align) }
+
+// NewAlignedT allocates an object of type t at a multiple of align.
+func NewAlignedT(t *Type, align uintptr) Ptr { return NewArrayAlignedT(t, t.size, align) }
+
+// NewArrayAlignedT allocates n bytes as an array of t's at a multiple
+// of align: in memory that has no type, since Go aligns no type so.
+func NewArrayAlignedT(t *Type, n, align uintptr) Ptr { return MallocAligned(align, max(n, 1)) }
 
 // The library's functions that 1:1 code calls most, on Go's pointers.
 

@@ -19,32 +19,14 @@ import (
 func Arg[P any](p P) Ptr {
 	t := reflect.TypeFor[P]()
 	switch t.Kind() {
-	case reflect.Pointer:
-		w := *(*unsafe.Pointer)(unsafe.Pointer(&p))
-		if w == nil {
-			return Ptr{}
-		}
-		if uintptr(w)&Tag != 0 {
-			// Not a whole value of its type: C may not use it.
-			return FromInt(uintptr(w) &^ Tag)
-		}
-		if c, ok := cobject(w); ok {
-			return c
-		}
-		return Ptr{Obj: w, Size: t.Elem().Size(), ti: tref(infoOf(t.Elem()))}
-	case reflect.UnsafePointer:
-		w := *(*unsafe.Pointer)(unsafe.Pointer(&p))
-		if uintptr(w)&Tag != 0 {
-			return FromInt(uintptr(w) &^ Tag)
-		}
-		return FromGoUnsafe(w)
+	case reflect.Pointer, reflect.UnsafePointer:
+		return *(*unsafe.Pointer)(unsafe.Pointer(&p))
 	case reflect.Uintptr:
 		return FromInt(*(*uintptr)(unsafe.Pointer(&p)))
 	}
 	panic("c23.Arg: not a pointer: " + t.String())
 }
 
-// FromSliceAt returns the C pointer for &s[i], with a capability for s's
 // whole array.
 func FromSliceAt[T any](s []T, i int) Ptr {
 	if i < 0 || i >= len(s) {
@@ -62,15 +44,7 @@ func GoStringGo[P any](p P) string { return GoString(Arg(p)) }
 
 // FreeGo is C.free: Free, for which Go's heap is never what malloc
 // returned, though an unsafe.Pointer into it has no capability.
-func FreeGo[P any](p P) {
-	q := Arg(p)
-	if q.Obj == nil && reflect.TypeFor[P]().Kind() == reflect.UnsafePointer {
-		if base, _ := object(*(*unsafe.Pointer)(unsafe.Pointer(&p))); base != nil {
-			RaiseFault("free of Go's memory", Addr(q))
-		}
-	}
-	Free(q)
-}
+func FreeGo[P any](p P) { Free(Arg(p)) }
 
 // MallocGo is C.malloc.
 func MallocGo[N ~int | ~int32 | ~int64 | ~uint | ~uint32 | ~uint64 | ~uintptr](n N) unsafe.Pointer {

@@ -22,7 +22,7 @@ import (
 // CString allocates s as a C string.
 func CString(s string) Ptr {
 	p := Malloc(uint64(len(s) + 1))
-	copy(unsafe.Slice((*byte)(p.Obj), len(s)), s)
+	copy(unsafe.Slice((*byte)(p), len(s)), s)
 	return p
 }
 
@@ -67,10 +67,9 @@ func Calloc(n, size uint64) Ptr { return Malloc(n * size) }
 // Realloc is realloc: untyped memory, with what p's object holds. p is
 // NULL or what malloc returned (checkRealloc).
 func Realloc(p Ptr, n uint64) Ptr {
-	checkRealloc(p)
 	q := Malloc(n)
-	if p.Obj != nil {
-		Memmove(q, p, min(uintptr(n), p.Size))
+	if p != nil {
+		Memmove(q, p, min(uintptr(n), sizeOf(p)))
 	}
 	return q
 }
@@ -88,7 +87,7 @@ func Abort() {
 }
 
 func abort() {
-	Fflush(Ptr{})
+	Fflush(Ptr(nil))
 	panic(&Fault{"abort", 0})
 }
 
@@ -96,7 +95,7 @@ func abort() {
 // streams and ends the program.
 func Exit(status int32) {
 	runAtexit()
-	Fflush(Ptr{})
+	Fflush(Ptr(nil))
 	os.Exit(int(status))
 }
 
@@ -247,10 +246,10 @@ var (
 )
 
 func FileOf(p Ptr) *File {
-	if p.Obj == nil || p.Info() != fileInfo || p.Off != 0 {
+	if p == nil {
 		RaiseFault("not a FILE", Addr(p))
 	}
-	f := (*File)(p.Obj)
+	f := (*File)(p)
 	if f.closed {
 		RaiseFault("use of a closed FILE", Addr(p))
 	}
@@ -260,7 +259,7 @@ func FileOf(p Ptr) *File {
 // newFile returns a stream of the file descriptor fd.
 func NewFile(fd int32, rd, wr bool) Ptr {
 	p := New[File]()
-	fl := (*File)(p.Obj)
+	fl := (*File)(p)
 	fl.Fd = fd
 	fl.W = bufio.NewWriter(FdIO{fl})
 	fl.Rd, fl.Wr = rd, wr
@@ -276,7 +275,7 @@ func Stdio(n int32) Ptr {
 		stdio[0] = NewFile(0, true, false)
 		stdio[1] = NewFile(1, false, true)
 		stdio[2] = NewFile(2, false, true)
-		(*File)(stdio[2].Obj).Unbuf = true
+		(*File)(stdio[2]).Unbuf = true
 	})
 	return stdio[n]
 }
@@ -334,7 +333,7 @@ func (f *File) Flush() int32 {
 
 // Fflush flushes a stream, or every stream if p is null.
 func Fflush(p Ptr) int32 {
-	if p.Obj == nil {
+	if p == nil {
 		FilesMu.Lock()
 		defer FilesMu.Unlock()
 		r := int32(0)
@@ -358,7 +357,7 @@ func (f *File) Readable() bool {
 func (f *File) Reader() *bufio.Reader {
 	if f.R == nil {
 		if f.Fd == 0 {
-			Fflush(Ptr{})
+			Fflush(Ptr(nil))
 		} else {
 			f.Flush()
 		}

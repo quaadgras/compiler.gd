@@ -16,7 +16,7 @@ func newMemFile(m *MemFile, rd, wr bool) c23.Ptr { return NewMemStream(m, rd, wr
 // file.
 func NewMemStream(m c23.MemStream, rd, wr bool) c23.Ptr {
 	p := c23.New[c23.File]()
-	fl := (*c23.File)(p.Obj)
+	fl := (*c23.File)(p)
 	fl.Fd = -1
 	fl.Mem = m
 	fl.W = bufio.NewWriter(c23.FdIO{F: fl})
@@ -37,7 +37,7 @@ func Fmemopen(buf c23.Ptr, size uint64, mode c23.Ptr) c23.Ptr {
 	_, rd, wr, ok := openMode(md)
 	if !ok || size == 0 {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	m := &MemFile{Buf: buf, Size: int(size)}
 	for i := 1; i < len(md); i++ {

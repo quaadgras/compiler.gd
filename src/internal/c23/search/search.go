@@ -54,7 +54,7 @@ func Hsearch(item c23.Ptr, action uint32) c23.Ptr {
 	}
 	if action == 0 || !st.made {
 		c23.SetErrno(c23.ESRCH)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	e := c23.Malloc(uint64(2 * c23.WordSize))
 	c23.StorePtr(e, key)
@@ -149,7 +149,7 @@ func tinsert(n, key c23.Ptr, cmp func(c23.Ptr, c23.Ptr) int32) (c23.Ptr, c23.Ptr
 // if there is none.
 func Tsearch(key, rootp, compar c23.Ptr) c23.Ptr {
 	if c23.Addr(rootp) == 0 {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	root, n := tinsert(c23.LoadPtr(rootp), key, c23.CmpFunc(compar))
 	c23.StorePtr(rootp, root)
@@ -159,7 +159,7 @@ func Tsearch(key, rootp, compar c23.Ptr) c23.Ptr {
 // Tfind is tfind: the node of key in the tree *rootp, or null.
 func Tfind(key, rootp, compar c23.Ptr) c23.Ptr {
 	if c23.Addr(rootp) == 0 {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	cmp := c23.CmpFunc(compar)
 	n := c23.LoadPtr(rootp)
@@ -173,7 +173,7 @@ func Tfind(key, rootp, compar c23.Ptr) c23.Ptr {
 			n = tright(n)
 		}
 	}
-	return c23.Ptr{}
+	return c23.Ptr(nil)
 }
 
 // tremoveMin removes the smallest node of the subtree n: it returns the
@@ -192,18 +192,18 @@ func tremoveMin(n c23.Ptr) (c23.Ptr, c23.Ptr) {
 // itself) and whether it found it.
 func tremove(n, key c23.Ptr, cmp func(c23.Ptr, c23.Ptr) int32) (c23.Ptr, c23.Ptr, bool) {
 	if c23.Addr(n) == 0 {
-		return n, c23.Ptr{}, false
+		return n, c23.Ptr(nil), false
 	}
 	c := cmp(key, tkey(n))
 	if c == 0 {
 		l, r := tleft(n), tright(n)
 		if c23.Addr(r) == 0 {
-			return l, c23.Ptr{}, true
+			return l, c23.Ptr(nil), true
 		}
 		r, m := tremoveMin(r)
 		tsetLeft(m, l)
 		tsetRight(m, r)
-		return tbalance(m), c23.Ptr{}, true
+		return tbalance(m), c23.Ptr(nil), true
 	}
 	var child, parent c23.Ptr
 	var ok bool
@@ -225,11 +225,11 @@ func tremove(n, key c23.Ptr, cmp func(c23.Ptr, c23.Ptr) int32) (c23.Ptr, c23.Ptr
 // new root, or rootp if the tree is now empty); null if key is not there.
 func Tdelete(key, rootp, compar c23.Ptr) c23.Ptr {
 	if c23.Addr(rootp) == 0 {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	root, parent, ok := tremove(c23.LoadPtr(rootp), key, c23.CmpFunc(compar))
 	if !ok {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	c23.StorePtr(rootp, root)
 	if c23.Addr(parent) == 0 {
@@ -299,7 +299,7 @@ func Lfind(key, base, nelp c23.Ptr, width uint64, compar c23.Ptr) c23.Ptr {
 			return e
 		}
 	}
-	return c23.Ptr{}
+	return c23.Ptr(nil)
 }
 
 // Lsearch is lsearch: lfind, which adds key at the end if it is not
@@ -319,8 +319,8 @@ func Lsearch(key, base, nelp c23.Ptr, width uint64, compar c23.Ptr) c23.Ptr {
 // after pred in its list, or makes a list of it alone if pred is null.
 func Insque(element, pred c23.Ptr) {
 	if c23.Addr(pred) == 0 {
-		c23.StorePtr(element, c23.Ptr{})
-		c23.StorePtr(c23.Add(element, int(c23.WordSize)), c23.Ptr{})
+		c23.StorePtr(element, c23.Ptr(nil))
+		c23.StorePtr(c23.Add(element, int(c23.WordSize)), c23.Ptr(nil))
 		return
 	}
 	next := c23.LoadPtr(pred)

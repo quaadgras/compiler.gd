@@ -253,7 +253,7 @@ func (t *SigThread) Run(sig int32, info SigInfo) {
 		Store32(Add(si, 16), uint32(info.Uid))
 		Store32(Add(si, 20), uint32(info.Status))
 		StorePtr(Add(si, SigInfoValueOff), info.Value)
-		FuncOf[func(int32, Ptr, Ptr)](act.Handler)(sig, si, Ptr{})
+		FuncOf[func(int32, Ptr, Ptr)](act.Handler)(sig, si, Ptr(nil))
 		Free(si)
 	} else {
 		FuncOf[func(int32)](act.Handler)(sig)

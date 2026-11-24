@@ -11,10 +11,10 @@ import (
 // MallocUsableSize is malloc_usable_size: the size of what malloc
 // returned, which is what it was asked for.
 func MallocUsableSize(p c23.Ptr) uint64 {
-	if p.Obj == nil {
+	if p == nil {
 		return 0
 	}
-	return uint64(p.Size)
+	return c23.SizeOf1(p)
 }
 
 // Memalign is memalign: aligned_alloc, with the alignment rounded up to

@@ -602,7 +602,7 @@ func (p *parser) command(cmd string) (string, error) {
 	if p.flags&WRDE_NOCMD != 0 {
 		return "", errWord(WRDE_CMDSUB)
 	}
-	c23.Fflush(Ptr{})
+	c23.Fflush(Ptr(nil))
 	sh := exec.Command("/bin/sh", "-c", cmd)
 	sh.Stdin = os.Stdin
 	if p.flags&WRDE_SHOWERR != 0 {
@@ -793,5 +793,5 @@ func Wordfree(we Ptr) {
 	}
 	var t wordexpT
 	c23.StoreLong(we, 0)
-	c23.StorePtr(c23.Add(we, int(unsafe.Offsetof(t.wordv))), Ptr{})
+	c23.StorePtr(c23.Add(we, int(unsafe.Offsetof(t.wordv))), Ptr(nil))
 }

@@ -27,7 +27,7 @@ func StateOf(ps Ptr, internal *Ptr) mbstate {
 	if Addr(ps) != 0 {
 		return mbstate{ps}
 	}
-	if internal.Obj == nil {
+	if internal == nil {
 		*internal = Malloc(8)
 	}
 	return mbstate{*internal}

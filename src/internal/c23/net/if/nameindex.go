@@ -17,7 +17,7 @@ func IfNameindex() Ptr {
 	ifs, err := net.Interfaces()
 	if err != nil {
 		c23.SetErrno(c23.ENOBUFS)
-		return Ptr{}
+		return Ptr(nil)
 	}
 	ws := int(c23.WordSize)
 	a := c23.Malloc(uint64((len(ifs) + 1) * 2 * ws))
@@ -28,7 +28,7 @@ func IfNameindex() Ptr {
 	}
 	e := c23.Add(a, 2*ws*len(ifs))
 	c23.Store32(e, 0)
-	c23.StorePtr(c23.Add(e, ws), Ptr{})
+	c23.StorePtr(c23.Add(e, ws), Ptr(nil))
 	return a
 }
 

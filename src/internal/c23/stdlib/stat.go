@@ -86,7 +86,7 @@ func Realpath(path, resolved c23.Ptr) c23.Ptr {
 	name := c23.GoString(path)
 	if _, err := os.Stat(name); err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	abs, err := filepath.Abs(name)
 	if err == nil {
@@ -94,11 +94,11 @@ func Realpath(path, resolved c23.Ptr) c23.Ptr {
 	}
 	if err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	if len(abs) >= 4096 { // PATH_MAX
 		c23.SetErrno(c23.ENAMETOOLONG)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	if c23.Addr(resolved) == 0 {
 		return c23.CString(abs)

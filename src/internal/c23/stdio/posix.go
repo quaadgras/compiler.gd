@@ -53,16 +53,16 @@ func Fdopen(fd int32, mode c23.Ptr) c23.Ptr {
 	_, rd, wr, ok := openMode(c23.GoString(mode))
 	if !ok {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	of := c23.FdFile(fd)
 	if of == nil {
 		c23.SetErrno(c23.EBADF)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	if acc := of.Flags & c23.O_ACCMODE; rd && acc == c23.O_WRONLY || wr && acc == c23.O_RDONLY {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return c23.NewFile(fd, rd, wr)
 }

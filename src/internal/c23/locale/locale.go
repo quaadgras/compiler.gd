@@ -48,12 +48,12 @@ func Localeconv() c23.Ptr {
 func Setlocale(category int32, locale c23.Ptr) c23.Ptr {
 	Localeconv()
 	if category < 0 || category > lcAll {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	globalMu.Lock()
 	defer globalMu.Unlock()
 	if c23.Addr(locale) != 0 && !setGlobal(int(category), c23.GoString(locale)) {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	if category == lcAll {
 		return nameOf(allName(globalUTF8))

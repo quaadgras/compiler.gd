@@ -652,6 +652,12 @@ func TestPxIPC(t *testing.T) {
 // ordinary cgo package (testdata/interop), which go build compiles with
 // cmd/cc because cgo is off, natively and on wasm (with node).
 func TestInterop(t *testing.T) {
+	// It tested what capabilities caught (C reading past Go's slice, an
+	// integer dereferenced, a pointer kept in untyped bytes). They are
+	// gone: C's pointers are Go's, checked as unsafe.Pointer is
+	// (doc/gd/cc.md). To be written again for that.
+	t.Skip("tested the capabilities' faults, which are gone")
+
 	testenv.MustHaveGoRun(t)
 	for _, target := range []struct {
 		name string

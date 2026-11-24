@@ -161,7 +161,7 @@ func Getlogin() c23.Ptr {
 	name, ok := login()
 	if !ok {
 		c23.SetErrno(c23.ENXIO)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	if c23.Addr(loginBuf) == 0 {
 		loginBuf = c23.Malloc(256)
@@ -214,14 +214,14 @@ func Ttyname(fd int32) c23.Ptr {
 	name, e := ttynameOf(fd)
 	if e != 0 {
 		c23.SetErrno(e)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	if c23.Addr(ttyBuf) == 0 {
 		ttyBuf = c23.Malloc(4096)
 	}
 	if len(name) >= 4096 {
 		c23.SetErrno(c23.ERANGE)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	copy(c23.BytesAt(ttyBuf, uintptr(len(name)+1)), name+"\x00")
 	return ttyBuf

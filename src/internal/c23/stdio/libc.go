@@ -102,7 +102,7 @@ func Ungetc(c int32, p c23.Ptr) int32 {
 
 func Fgets(s c23.Ptr, n int32, f c23.Ptr) c23.Ptr {
 	if n <= 0 {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	fl := c23.FileOf(f)
 	i := int32(0)
@@ -110,7 +110,7 @@ func Fgets(s c23.Ptr, n int32, f c23.Ptr) c23.Ptr {
 		c := fl.Getc()
 		if c < 0 {
 			if fl.Err {
-				return c23.Ptr{}
+				return c23.Ptr(nil)
 			}
 			break
 		}
@@ -121,7 +121,7 @@ func Fgets(s c23.Ptr, n int32, f c23.Ptr) c23.Ptr {
 		}
 	}
 	if i == 0 && n > 1 {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	c23.Store8(c23.Add(s, int(i)), 0)
 	return s
@@ -186,12 +186,12 @@ func Fopen(name, mode c23.Ptr) c23.Ptr {
 	flag, rd, wr, ok := openMode(c23.GoString(mode))
 	if !ok {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	f, err := os.OpenFile(c23.GoString(name), flag, 0o666)
 	if err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return c23.NewFile(c23.FdNew(f, cflags(flag)), rd, wr)
 }
@@ -204,7 +204,7 @@ func Freopen(name, mode, p c23.Ptr) c23.Ptr {
 	if f.Mem != nil { // a memory stream has no file to reopen
 		Fclose(p)
 		c23.SetErrno(c23.EBADF)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	f.Flush()
 	flag, rd, wr, ok := openMode(c23.GoString(mode))
@@ -218,13 +218,13 @@ func Freopen(name, mode, p c23.Ptr) c23.Ptr {
 	if !ok {
 		c23.SetErrno(c23.EINVAL)
 		f.Close()
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	nf, err := os.OpenFile(path, flag, 0o666)
 	if err != nil {
 		c23.SetErrnoOf(err)
 		f.Close()
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	fdSet(f.Fd, nf, cflags(flag))
 	f.W.Reset(c23.FdIO{F: f})
@@ -247,7 +247,7 @@ func Tmpnam(s c23.Ptr) c23.Ptr {
 	tmpnamMu.Lock()
 	defer tmpnamMu.Unlock()
 	if c23.Addr(s) == 0 {
-		if tmpnamBuf.Obj == nil {
+		if tmpnamBuf == nil {
 			tmpnamBuf = c23.Malloc(20)
 		}
 		s = tmpnamBuf
@@ -267,7 +267,7 @@ func Tmpnam(s c23.Ptr) c23.Ptr {
 		copy(c23.BytesAt(s, uintptr(len(name)+1)), append(name, 0))
 		return s
 	}
-	return c23.Ptr{}
+	return c23.Ptr(nil)
 }
 
 func Fclose(p c23.Ptr) int32 {
@@ -292,7 +292,7 @@ func Tmpfile() c23.Ptr {
 	f, err := os.CreateTemp("", "tmpf")
 	if err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	os.Remove(f.Name())
 	return c23.NewFile(c23.FdNew(f, c23.O_RDWR), true, true)

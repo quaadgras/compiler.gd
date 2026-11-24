@@ -219,5 +219,5 @@ func Glob(pattern c23.Ptr, flags int32, errfunc, pglob c23.Ptr) int32 {
 func Globfree(pglob c23.Ptr) {
 	var g globT
 	c23.StoreLong(pglob, 0)
-	c23.StorePtr(c23.Add(pglob, int(unsafe.Offsetof(g.pathv))), c23.Ptr{})
+	c23.StorePtr(c23.Add(pglob, int(unsafe.Offsetof(g.pathv))), c23.Ptr(nil))
 }

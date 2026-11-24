@@ -136,7 +136,7 @@ func (g *randomGen) set(i int, v int32) { c23.Store32(c23.Add(g.state, 4*i), uin
 
 // init makes the state glibc's first: initstate(1, randtbl, 128).
 func (g *randomGen) init() {
-	if g.state.Obj != nil {
+	if g.state != nil {
 		return
 	}
 	buf := c23.Malloc(128)
@@ -231,7 +231,7 @@ func Initstate(seed uint32, buf c23.Ptr, n uint64) c23.Ptr {
 	switch {
 	case n < 8:
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	case n < 32:
 		typ = 0
 	case n < 64:
@@ -264,7 +264,7 @@ func Setstate(buf c23.Ptr) c23.Ptr {
 	typ := int(info % maxTypes)
 	if info < 0 || typ < 0 {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	rnd.save()
 	old := c23.Add(rnd.state, -4)

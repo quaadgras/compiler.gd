@@ -165,7 +165,7 @@ func Getifaddrs(ifap Ptr) int32 {
 			copy(c23.BytesAt(q, uintptr(len(sa))), sa)
 			c23.StorePtr(c23.Add(p, (3+i)*ws), q)
 		}
-		if head.Obj == nil {
+		if head == nil {
 			head = p
 		} else {
 			c23.StorePtr(tail, p)

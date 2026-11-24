@@ -67,11 +67,11 @@ func lookupUser(name string, uid uint32) (pwEntry, bool) {
 // unchanged: no such user).
 func pwResult(e pwEntry, ok bool) c23.Ptr {
 	if !ok {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	pwMu.Lock()
 	defer pwMu.Unlock()
-	if pwBuf.Obj == nil {
+	if pwBuf == nil {
 		pwBuf = c23.New[passwd]()
 	}
 	storePasswd(pwBuf, e, c23.CString)
@@ -85,7 +85,7 @@ func Getpwuid(uid uint32) c23.Ptr { return pwResult(lookupUser("", uid)) }
 func Getpwnam(name c23.Ptr) c23.Ptr {
 	n := c23.GoString(name)
 	if n == "" {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return pwResult(lookupUser(n, 0))
 }

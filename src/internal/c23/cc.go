@@ -52,7 +52,7 @@ type Func struct {
 // NewFunc returns the C pointer to the function f.
 func NewFunc(f any) Ptr {
 	p := New[Func]()
-	(*Func)(p.Obj).f = f
+	(*Func)(p).f = f
 	return p
 }
 
@@ -61,16 +61,16 @@ var funcInfo = TinfoOf[Func]()
 // FuncOf returns the Go function of type F that p points to, which a
 // call through a C function pointer calls.
 func FuncOf[F any](p Ptr) F {
-	if p.Obj == nil || p.Off != 0 || p.Info() != funcInfo {
+	if p == nil {
 		RaiseFault("call through a pointer that is not to a function", Addr(p))
 	}
-	f, ok := (*Func)(p.Obj).f.(F)
+	f, ok := (*Func)(p).f.(F)
 	if !ok {
-		if g, ok := adapt[F]((*Func)(p.Obj).f); ok {
+		if g, ok := adapt[F]((*Func)(p).f); ok {
 			return g
 		}
 		var z F
-		RaiseFault(fmt.Sprintf("call of a %T through a pointer to a function of type %T", (*Func)(p.Obj).f, z), Addr(p))
+		RaiseFault(fmt.Sprintf("call of a %T through a pointer to a function of type %T", (*Func)(p).f, z), Addr(p))
 	}
 	return f
 }
@@ -153,7 +153,7 @@ func convertible(a, b reflect.Type) bool {
 // bytes, the null element included.
 func String[T any](s string) Ptr {
 	p := NewArray[T](uintptr(len(s)))
-	copy(unsafe.Slice((*byte)(p.Obj), len(s)), s)
+	copy(unsafe.Slice((*byte)(p), len(s)), s)
 	return p
 }
 
@@ -161,29 +161,21 @@ func String[T any](s string) Ptr {
 // the same object, of a type the compiler makes rather than reflect.
 func StringOf[T, A any](s string) Ptr {
 	p := LocalT(new(Obj[A]), TinfoOf[T]())
-	copy(unsafe.Slice((*byte)(p.Obj), len(s)), s)
+	copy(unsafe.Slice((*byte)(p), len(s)), s)
 	return p
 }
 
-// Copy returns a copy of the n bytes at p, in a new object of p's type.
-func Copy(p Ptr, n uint64) Ptr {
-	ti := p.Info()
-	q := newOf(ti, uintptr(n))
-	Memmove(q, p, uintptr(n))
-	return q
+// A ByValue is a struct or union passed by value in variable arguments:
+// the pointer to a copy of it. (A pointer that is passed is a Ptr.)
+type ByValue struct {
+	P Ptr
 }
 
-// newOf allocates n bytes as an array of ti's type.
-func newOf(ti *tinfo, n uintptr) Ptr {
-	sz := ti.t.Size()
-	count := n
-	if sz > 0 {
-		count = (n + sz - 1) / sz
-	}
-	base := newObj(ti.arrayObj(count))
-	h := (*header)(base)
-	*h = header{ref: ti.ref | refC, ti: ti, size: count * sz}
-	return Ptr{Obj: unsafe.Add(base, hdrSize), Size: count * sz, ti: cref(ti)}
+// Copy returns a copy of the n bytes at p.
+func Copy(p Ptr, n uint64) Ptr {
+	q := Malloc(n)
+	Memmove(q, p, uintptr(n))
+	return q
 }
 
 // Args returns main's argv.
@@ -202,7 +194,7 @@ func Trap() { panic(&Fault{"trap", 0}) }
 // file and line, and aborts.
 func AssertC(ok bool, text, file Ptr, line int32) {
 	if !ok {
-		Fflush(Ptr{})
+		Fflush(Ptr(nil))
 		fmt.Fprintf(os.Stderr, "%s:%d: assertion failed: %s\n", GoString(file), line, GoString(text))
 		Abort()
 	}
@@ -226,22 +218,22 @@ var vaInfo = TinfoOf[VaList]()
 // VaStart is va_start: a va_list of a function's variable arguments.
 func VaStart(va []any) Ptr {
 	p := New[VaList]()
-	(*VaList)(p.Obj).args = va
+	(*VaList)(p).args = va
 	return p
 }
 
 func VaOf(ap Ptr) *VaList {
-	if ap.Obj == nil || ap.Off != 0 || ap.Info() != vaInfo {
+	if ap == nil {
 		RaiseFault("va_arg of a va_list not started", Addr(ap))
 	}
-	return (*VaList)(ap.Obj)
+	return (*VaList)(ap)
 }
 
 // VaCopy is va_copy.
 func VaCopy(ap Ptr) Ptr {
 	v := VaOf(ap)
 	p := New[VaList]()
-	*(*VaList)(p.Obj) = *v
+	*(*VaList)(p) = *v
 	return p
 }
 
@@ -296,6 +288,9 @@ func VaArg[T any](ap Ptr) T {
 // VaArgPtr is va_arg(ap, T) of a struct T: the c23.Ptr to its copy.
 func VaArgPtr(ap Ptr) Ptr {
 	a := VaOf(ap).Next()
+	if v, ok := a.(ByValue); ok {
+		return v.P
+	}
 	p, ok := a.(Ptr)
 	if !ok {
 		RaiseFault(fmt.Sprintf("va_arg of a %T as a struct", a), 0)
@@ -307,10 +302,9 @@ func VaArgPtr(ap Ptr) Ptr {
 // with what p's object holds. p is NULL or what malloc returned
 // (checkRealloc).
 func ReallocOf[T any](p Ptr, n uintptr) Ptr {
-	checkRealloc(p)
 	q := NewArray[T](n)
-	if p.Obj != nil {
-		Memmove(q, p, min(n, p.Size))
+	if p != nil {
+		Memmove(q, p, min(n, sizeOf(p)))
 	}
 	return q
 }
@@ -332,8 +326,8 @@ func intArgValue(a any) (int64, bool) {
 // dlfcn.h: C compiled by cmd/cc cannot load native code, so dlopen
 // fails, as for a library not found.
 
-func Dlopen(path Ptr, flags int32) Ptr { return Ptr{} }
-func Dlsym(h, name Ptr) Ptr            { return Ptr{} }
+func Dlopen(path Ptr, flags int32) Ptr { return Ptr(nil) }
+func Dlsym(h, name Ptr) Ptr            { return Ptr(nil) }
 func Dlclose(h Ptr) int32              { return 0 }
 
 var (

@@ -47,10 +47,10 @@ func Dcngettext(domainname, msgid1, msgid2 Ptr, n uint64, category int32) Ptr {
 func Textdomain(domainname Ptr) Ptr {
 	mu.Lock()
 	defer mu.Unlock()
-	if domain.Obj == nil {
+	if domain == nil {
 		domain = c23.CString("messages")
 	}
-	if domainname.Obj != nil {
+	if domainname != nil {
 		d := c23.GoString(domainname)
 		if d == "" {
 			d = "messages"
@@ -63,21 +63,21 @@ func Textdomain(domainname Ptr) Ptr {
 // bind sets (unless value is null) and returns m's value of domain:
 // def's if not set.
 func bind(m map[string]Ptr, domainname, value Ptr, def string) Ptr {
-	if domainname.Obj == nil || c23.GoString(domainname) == "" {
+	if domainname == nil || c23.GoString(domainname) == "" {
 		c23.SetErrno(c23.EINVAL)
-		return Ptr{}
+		return Ptr(nil)
 	}
 	d := c23.GoString(domainname)
 	mu.Lock()
 	defer mu.Unlock()
-	if value.Obj != nil {
+	if value != nil {
 		m[d] = c23.CString(c23.GoString(value))
 	}
 	if p, ok := m[d]; ok {
 		return p
 	}
 	if def == "" {
-		return Ptr{}
+		return Ptr(nil)
 	}
 	p := c23.CString(def)
 	m[d] = p

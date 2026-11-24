@@ -889,7 +889,7 @@ func (s *socket) sendMate(m *socket, b []byte, rights []*c23.Ofile) (int, error)
 
 // Send is send.
 func Send(fd int32, buf Ptr, n uint64, flags int32) int64 {
-	return Sendto(fd, buf, n, flags, Ptr{}, 0)
+	return Sendto(fd, buf, n, flags, Ptr(nil), 0)
 }
 
 // Sendto is sendto: a stream socket ignores the address.
@@ -915,7 +915,7 @@ func Sendto(fd int32, buf Ptr, n uint64, flags int32, addr Ptr, alen uint32) int
 
 // Recv is recv.
 func Recv(fd int32, buf Ptr, n uint64, flags int32) int64 {
-	return Recvfrom(fd, buf, n, flags, Ptr{}, Ptr{})
+	return Recvfrom(fd, buf, n, flags, Ptr(nil), Ptr(nil))
 }
 
 // Recvfrom is recvfrom.

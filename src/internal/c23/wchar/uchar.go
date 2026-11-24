@@ -94,7 +94,7 @@ func Wcschr(s c23.Ptr, c int32) c23.Ptr {
 			return s
 		}
 		if x == 0 {
-			return c23.Ptr{}
+			return c23.Ptr(nil)
 		}
 		s = c23.Add(s, 4)
 	}

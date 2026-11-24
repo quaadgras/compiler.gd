@@ -308,7 +308,7 @@ func MqTimedsend(fd int32, msg c23.Ptr, n uint64, prio uint32, ts c23.Ptr) int32
 }
 
 func MqSend(fd int32, msg c23.Ptr, n uint64, prio uint32) int32 {
-	return MqTimedsend(fd, msg, n, prio, c23.Ptr{})
+	return MqTimedsend(fd, msg, n, prio, c23.Ptr(nil))
 }
 
 // MqTimedreceive is mq_timedreceive: it takes the oldest message of the
@@ -364,7 +364,7 @@ func MqTimedreceive(fd int32, msg c23.Ptr, n uint64, prio, ts c23.Ptr) int64 {
 }
 
 func MqReceive(fd int32, msg c23.Ptr, n uint64, prio c23.Ptr) int64 {
-	return MqTimedreceive(fd, msg, n, prio, c23.Ptr{})
+	return MqTimedreceive(fd, msg, n, prio, c23.Ptr(nil))
 }
 
 // MqNotify is mq_notify: the process registers for a notification

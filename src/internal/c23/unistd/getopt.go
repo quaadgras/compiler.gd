@@ -21,5 +21,5 @@ func OptoptLoc() c23.Ptr { return c23.OptoptObj }
 // it returns each non-option as the option 1, in optarg. Setting optind to
 // 0 starts over.
 func Getopt(argc int32, argv, optstring c23.Ptr) int32 {
-	return c23.Getopt(argc, argv, optstring, c23.Ptr{}, c23.Ptr{}, false)
+	return c23.Getopt(argc, argv, optstring, c23.Ptr(nil), c23.Ptr(nil), false)
 }

@@ -14,13 +14,13 @@ import (
 func Strsep(stringp, delim c23.Ptr) c23.Ptr {
 	s := c23.LoadPtr(stringp)
 	if c23.Addr(s) == 0 {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	d := c23.GoString(delim)
 	for p := s; ; p = c23.Add(p, 1) {
 		c := c23.Load8(p)
 		if c == 0 {
-			c23.StorePtr(stringp, c23.Ptr{})
+			c23.StorePtr(stringp, c23.Ptr(nil))
 			return s
 		}
 		if strings.IndexByte(d, c) >= 0 {

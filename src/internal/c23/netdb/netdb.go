@@ -362,7 +362,7 @@ func Gethostbyname2(name Ptr, family int32) Ptr {
 			} else {
 				SetHErrno(HOST_NOT_FOUND)
 			}
-			return Ptr{}
+			return Ptr(nil)
 		}
 		ips = addrs
 	}
@@ -379,7 +379,7 @@ func Gethostbyname2(name Ptr, family int32) Ptr {
 	}
 	if len(bs) == 0 {
 		SetHErrno(NO_DATA)
-		return Ptr{}
+		return Ptr(nil)
 	}
 	return newHostent(host, family, bs)
 }
@@ -394,12 +394,12 @@ func Gethostbyaddr(addr Ptr, n uint32, family int32) Ptr {
 		ip = netip.AddrFrom16([16]byte(c23.BytesAt(addr, 16)))
 	default:
 		SetHErrno(NO_RECOVERY)
-		return Ptr{}
+		return Ptr(nil)
 	}
 	names, err := net.LookupAddr(ip.String())
 	if err != nil || len(names) == 0 {
 		SetHErrno(HOST_NOT_FOUND)
-		return Ptr{}
+		return Ptr(nil)
 	}
 	return newHostent(strings.TrimSuffix(names[0], "."), family, [][]byte{c23.BytesAt(addr, uintptr(n))})
 }
@@ -413,7 +413,7 @@ func newHostent(name string, family int32, addrs [][]byte) Ptr {
 	h := hostent
 	c23.StorePtr(h, c23.CString(name))
 	aliases := c23.Malloc(uint64(ws))
-	c23.StorePtr(aliases, Ptr{})
+	c23.StorePtr(aliases, Ptr(nil))
 	c23.StorePtr(c23.Add(h, ws), aliases)
 	c23.Store32(c23.Add(h, 2*ws), uint32(family))
 	c23.Store32(c23.Add(h, 2*ws+4), uint32(len(addrs[0])))
@@ -423,7 +423,7 @@ func newHostent(name string, family int32, addrs [][]byte) Ptr {
 		copy(c23.BytesAt(p, uintptr(len(a))), a)
 		c23.StorePtr(c23.Add(list, i*ws), p)
 	}
-	c23.StorePtr(c23.Add(list, len(addrs)*ws), Ptr{})
+	c23.StorePtr(c23.Add(list, len(addrs)*ws), Ptr(nil))
 	c23.StorePtr(c23.Add(h, 2*ws+8), list)
 	return h
 }
@@ -457,14 +457,14 @@ func Getservbyname(name, proto Ptr) Ptr {
 	}
 	port, err := net.LookupPort(p, s)
 	if err != nil {
-		return Ptr{}
+		return Ptr(nil)
 	}
 	hostMu.Lock()
 	defer hostMu.Unlock()
 	if Addr(servent) == 0 {
 		servent = c23.Malloc(uint64(4 * ws))
 		aliases := c23.Malloc(uint64(ws))
-		c23.StorePtr(aliases, Ptr{})
+		c23.StorePtr(aliases, Ptr(nil))
 		c23.StorePtr(c23.Add(servent, ws), aliases)
 	}
 	c23.StorePtr(servent, static(s))
@@ -489,7 +489,7 @@ func protoResult(name string, proto int32) Ptr {
 	if Addr(protoent) == 0 {
 		protoent = c23.Malloc(uint64(3 * ws))
 		aliases := c23.Malloc(uint64(ws))
-		c23.StorePtr(aliases, Ptr{})
+		c23.StorePtr(aliases, Ptr(nil))
 		c23.StorePtr(c23.Add(protoent, ws), aliases)
 	}
 	c23.StorePtr(protoent, static(name))
@@ -505,7 +505,7 @@ func Getprotobyname(name Ptr) Ptr {
 			return protoResult(p.name, p.proto)
 		}
 	}
-	return Ptr{}
+	return Ptr(nil)
 }
 
 // Getprotobynumber is getprotobynumber.
@@ -515,5 +515,5 @@ func Getprotobynumber(proto int32) Ptr {
 			return protoResult(p.name, p.proto)
 		}
 	}
-	return Ptr{}
+	return Ptr(nil)
 }

@@ -54,11 +54,11 @@ func lookupGroup(name string, gid uint32) ([]string, bool) {
 // grResult returns the static struct group of e, or null.
 func grResult(e []string, ok bool) c23.Ptr {
 	if !ok {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	grMu.Lock()
 	defer grMu.Unlock()
-	if grBuf.Obj == nil {
+	if grBuf == nil {
 		grBuf = c23.New[group]()
 	}
 	gid, _ := strconv.ParseUint(e[2], 10, 32)
@@ -82,7 +82,7 @@ func grResult(e []string, ok bool) c23.Ptr {
 func Getgrnam(name c23.Ptr) c23.Ptr {
 	n := c23.GoString(name)
 	if n == "" {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return grResult(lookupGroup(n, 0))
 }

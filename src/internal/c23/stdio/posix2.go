@@ -24,12 +24,12 @@ func Popen(command, mode c23.Ptr) c23.Ptr {
 	rd := strings.HasPrefix(m, "r")
 	if !rd && !strings.HasPrefix(m, "w") || strings.Trim(m[1:], "e") != "" {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	r, w, err := os.Pipe()
 	if err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	cmd := exec.Command("/bin/sh", "-c", c23.GoString(command))
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
@@ -45,7 +45,7 @@ func Popen(command, mode c23.Ptr) c23.Ptr {
 	if err != nil {
 		mine.Close()
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	p := c23.NewFile(c23.FdNew(mine, c23.If[int32](rd, c23.O_RDONLY, c23.O_WRONLY)), rd, !rd)
 	popenMu.Lock()

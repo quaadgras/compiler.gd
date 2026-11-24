@@ -52,7 +52,7 @@ func Getopt(argc int32, argv, optstring, longopts, longind Ptr, longOnly bool) i
 	arg := func(i int32) Ptr { return LoadPtr(Add(argv, int(i)*int(WordSize))) }
 	optind := int32(Load32(OptindObj))
 	setOptind := func(i int32) { optind = i; Store32(OptindObj, uint32(i)) }
-	StorePtr(OptargObj, Ptr{})
+	StorePtr(OptargObj, Ptr(nil))
 	if argc < 1 {
 		return -1
 	}
@@ -62,7 +62,7 @@ func Getopt(argc int32, argv, optstring, longopts, longind Ptr, longOnly bool) i
 			setOptind(1)
 		}
 		st.firstNonopt, st.lastNonopt = optind, optind
-		st.nextchar = Ptr{}
+		st.nextchar = Ptr(nil)
 		switch {
 		case len(opts) > 0 && opts[0] == '-':
 			st.ordering = returnInOrder
@@ -211,7 +211,7 @@ func Getopt(argc int32, argv, optstring, longopts, longind Ptr, longOnly bool) i
 			StorePtr(OptargObj, arg(optind))
 			setOptind(optind + 1)
 		}
-		st.nextchar = Ptr{}
+		st.nextchar = Ptr(nil)
 	}
 	return int32(c)
 }
@@ -283,7 +283,7 @@ func (st *getoptStateT) longOption(argc int32, arg func(int32) Ptr, opts string,
 				}
 				FileOf(Stdio(2)).Write([]byte(msg + "\n"))
 			}
-			st.nextchar = Ptr{}
+			st.nextchar = Ptr(nil)
 			setOptind(optind + 1)
 			Store32(OptoptObj, 0)
 			return '?'
@@ -294,7 +294,7 @@ func (st *getoptStateT) longOption(argc int32, arg func(int32) Ptr, opts string,
 			if printErrors {
 				FileOf(Stdio(2)).Write([]byte(GoString(arg(0)) + ": unrecognized option '" + prefix + rest + "'\n"))
 			}
-			st.nextchar = Ptr{}
+			st.nextchar = Ptr(nil)
 			setOptind(optind + 1)
 			Store32(OptoptObj, 0)
 			return '?'
@@ -303,7 +303,7 @@ func (st *getoptStateT) longOption(argc int32, arg func(int32) Ptr, opts string,
 	}
 	optind++
 	setOptind(optind)
-	st.nextchar = Ptr{}
+	st.nextchar = Ptr(nil)
 	if hasValue {
 		if found.hasArg != 0 {
 			StorePtr(OptargObj, Add(arg(optind-1), len(prefix)+len(name)+1))

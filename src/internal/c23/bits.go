@@ -151,7 +151,7 @@ func LoadBytes(p Ptr, n int) uint64 {
 
 // StoreBytes stores the n low bytes of v at p, little-endian.
 func StoreBytes(p Ptr, n int, v uint64) {
-	a := checkScalar(p, uintptr(n))
+	a := p
 	for i := 0; i < n; i++ {
 		*(*byte)(unsafe.Add(a, i)) = byte(v >> (8 * i))
 	}

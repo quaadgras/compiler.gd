@@ -117,7 +117,7 @@ func Wcscspn(s, set c23.Ptr) uint64 { return wcsSpan(s, set, false) }
 func Wcspbrk(s, set c23.Ptr) c23.Ptr {
 	n := wcsSpan(s, set, false)
 	if c23.Wat(s, int(n)) == 0 {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return wptr(s, n)
 }
@@ -137,7 +137,7 @@ func Wcsstr(h, n c23.Ptr) c23.Ptr {
 			return c23.Add(h, 4*i)
 		}
 		if c23.Wat(h, i) == 0 {
-			return c23.Ptr{}
+			return c23.Ptr(nil)
 		}
 	}
 }
@@ -147,17 +147,17 @@ func Wcstok(s, delim, ptr c23.Ptr) c23.Ptr {
 	if c23.Addr(s) == 0 {
 		s = c23.LoadPtr(ptr)
 		if c23.Addr(s) == 0 {
-			return c23.Ptr{}
+			return c23.Ptr(nil)
 		}
 	}
 	s = wptr(s, wcsSpan(s, delim, true))
 	if c23.Wat(s, 0) == 0 {
-		c23.StorePtr(ptr, c23.Ptr{})
-		return c23.Ptr{}
+		c23.StorePtr(ptr, c23.Ptr(nil))
+		return c23.Ptr(nil)
 	}
 	e := wptr(s, wcsSpan(s, delim, false))
 	if c23.Wat(e, 0) == 0 {
-		c23.StorePtr(ptr, c23.Ptr{})
+		c23.StorePtr(ptr, c23.Ptr(nil))
 	} else {
 		c23.Wset(e, 0, 0)
 		c23.StorePtr(ptr, c23.Add(e, 4))
@@ -179,7 +179,7 @@ func Wmemchr(s c23.Ptr, c int32, n uint64) c23.Ptr {
 			return wptr(s, i)
 		}
 	}
-	return c23.Ptr{}
+	return c23.Ptr(nil)
 }
 
 func Wmemcmp(a, b c23.Ptr, n uint64) int32 {
@@ -290,7 +290,7 @@ func Ungetwc(c uint32, f c23.Ptr) uint32 {
 
 func Fgetws(s c23.Ptr, n int32, f c23.Ptr) c23.Ptr {
 	if n <= 0 {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	i := 0
 	for i < int(n)-1 {
@@ -305,7 +305,7 @@ func Fgetws(s c23.Ptr, n int32, f c23.Ptr) c23.Ptr {
 		}
 	}
 	if i == 0 {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	c23.Wset(s, i, 0)
 	return s
@@ -381,7 +381,7 @@ func Mbsrtowcs(dst, src c23.Ptr, n uint64, ps c23.Ptr) uint64 {
 		if c23.Load8(c23.Add(s, i)) == 0 {
 			if c23.Addr(dst) != 0 {
 				c23.Wset(dst, int(k), 0)
-				c23.StorePtr(src, c23.Ptr{})
+				c23.StorePtr(src, c23.Ptr(nil))
 			}
 			return k
 		}
@@ -414,7 +414,7 @@ func Wcsrtombs(dst, src c23.Ptr, n uint64, ps c23.Ptr) uint64 {
 			if c23.Addr(dst) != 0 {
 				if k < n {
 					c23.Store8(c23.Add(dst, int(k)), 0)
-					c23.StorePtr(src, c23.Ptr{})
+					c23.StorePtr(src, c23.Ptr(nil))
 				} else {
 					c23.StorePtr(src, c23.Add(s, 4*i))
 				}

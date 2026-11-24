@@ -167,25 +167,25 @@ func SemOpen(name c23.Ptr, oflag int32, va ...any) c23.Ptr {
 	n := strings.TrimLeft(c23.GoString(name), "/")
 	if n == "" || strings.Contains(n, "/") {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	if len(n) > 251 {
 		c23.SetErrno(c23.ENAMETOOLONG)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	namedMu.Lock()
 	defer namedMu.Unlock()
 	if s := named[n]; s != nil {
 		if oflag&(c23.O_CREAT|c23.O_EXCL) == c23.O_CREAT|c23.O_EXCL {
 			c23.SetErrno(c23.EEXIST)
-			return c23.Ptr{}
+			return c23.Ptr(nil)
 		}
 		s.refs++
 		return s.p
 	}
 	if oflag&c23.O_CREAT == 0 {
 		c23.SetErrno(c23.ENOENT)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	var value uint64
 	if len(va) > 1 {
@@ -193,7 +193,7 @@ func SemOpen(name c23.Ptr, oflag int32, va ...any) c23.Ptr {
 	}
 	if value > semValueMax {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	s := &namedSem{p: c23.Malloc(semSize), refs: 1}
 	SemInit(s.p, 1, uint32(value))

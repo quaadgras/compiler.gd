@@ -46,7 +46,7 @@ var ()
 func AlignedAlloc(align, size uint64) Ptr {
 	if align == 0 || align&(align-1) != 0 {
 		SetErrno(EINVAL)
-		return Ptr{}
+		return Ptr(nil)
 	}
 	if align <= 8 {
 		return Malloc(size)

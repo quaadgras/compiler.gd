@@ -46,7 +46,7 @@ func execProc(path string, search bool, args []string, envp c23.Ptr) int32 {
 }
 
 func Execv(path, argv c23.Ptr) int32 {
-	return execProc(c23.GoString(path), false, c23.GoStrings(argv), c23.Ptr{})
+	return execProc(c23.GoString(path), false, c23.GoStrings(argv), c23.Ptr(nil))
 }
 
 func Execve(path, argv, envp c23.Ptr) int32 {
@@ -54,7 +54,7 @@ func Execve(path, argv, envp c23.Ptr) int32 {
 }
 
 func Execvp(file, argv c23.Ptr) int32 {
-	return execProc(c23.GoString(file), true, c23.GoStrings(argv), c23.Ptr{})
+	return execProc(c23.GoString(file), true, c23.GoStrings(argv), c23.Ptr(nil))
 }
 
 func Execvpe(file, argv, envp c23.Ptr) int32 {
@@ -85,12 +85,12 @@ func execlArgs(arg c23.Ptr, va []any, env bool) (args []string, envp c23.Ptr) {
 
 func Execl(path, arg c23.Ptr, va ...any) int32 {
 	args, _ := execlArgs(arg, va, false)
-	return execProc(c23.GoString(path), false, args, c23.Ptr{})
+	return execProc(c23.GoString(path), false, args, c23.Ptr(nil))
 }
 
 func Execlp(file, arg c23.Ptr, va ...any) int32 {
 	args, _ := execlArgs(arg, va, false)
-	return execProc(c23.GoString(file), true, args, c23.Ptr{})
+	return execProc(c23.GoString(file), true, args, c23.Ptr(nil))
 }
 
 func Execle(path, arg c23.Ptr, va ...any) int32 {

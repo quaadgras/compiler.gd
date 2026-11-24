@@ -25,7 +25,7 @@ const (
 
 // loadWord and storeWord load and store a word as a scalar.
 func LoadWord(p Ptr) uintptr     { return *(*uintptr)(Check(p, WordSize)) }
-func StoreWord(p Ptr, v uintptr) { *(*uintptr)(checkScalar(p, WordSize)) = v }
+func StoreWord(p Ptr, v uintptr) { *(*uintptr)(p) = v }
 
 // loadLong and storeLong load and store a C long.
 func LoadLong(p Ptr) int64 {

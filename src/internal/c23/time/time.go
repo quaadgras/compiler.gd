@@ -122,7 +122,7 @@ func Localtime(t c23.Ptr) c23.Ptr {
 
 func GmtimeR(t, p c23.Ptr) c23.Ptr {
 	if !setTm(p, time.Unix(int64(c23.Load64(t)), 0).UTC()) {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return p
 }
@@ -130,7 +130,7 @@ func GmtimeR(t, p c23.Ptr) c23.Ptr {
 // LocaltimeR is localtime_r, in TZ's time (local).
 func LocaltimeR(t, p c23.Ptr) c23.Ptr {
 	if !setTm(p, time.Unix(int64(c23.Load64(t)), 0).In(local())) {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return p
 }
@@ -163,7 +163,7 @@ func Asctime(p c23.Ptr) c23.Ptr {
 	b := asctime(p)
 	if len(b) > 32 {
 		c23.SetErrno(c23.EOVERFLOW)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	copy(c23.BytesAt(ascBuf, uintptr(len(b))), b)
 	return ascBuf
@@ -182,7 +182,7 @@ func asctime(p c23.Ptr) []byte {
 func Ctime(t c23.Ptr) c23.Ptr {
 	p := Localtime(t)
 	if c23.Addr(p) == 0 {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return Asctime(p)
 }

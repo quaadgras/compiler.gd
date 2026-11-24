@@ -34,7 +34,7 @@ var jmpBufInfo = TinfoOf[jmpBuf]()
 // env, a jmp_buf, and returns 0.
 func Setjmp(env Ptr, f *JmpFrame, site int32) int32 {
 	p := New[jmpBuf]()
-	*(*jmpBuf)(p.Obj) = jmpBuf{f: f, site: site}
+	*(*jmpBuf)(p) = jmpBuf{f: f, site: site}
 	StorePtr(env, p)
 	return 0
 }
@@ -44,7 +44,7 @@ func Setjmp(env Ptr, f *JmpFrame, site int32) int32 {
 // siglongjmp) to restore, as glibc's and musl's do.
 func Sigsetjmp(env Ptr, f *JmpFrame, site, save int32) int32 {
 	p := New[jmpBuf]()
-	jb := (*jmpBuf)(p.Obj)
+	jb := (*jmpBuf)(p)
 	*jb = jmpBuf{f: f, site: site}
 	if save != 0 {
 		t := SigSelf()
@@ -64,10 +64,10 @@ type longjmpPanic struct {
 // Longjmp is longjmp.
 func Longjmp(env Ptr, val int32) {
 	p := LoadPtr(env)
-	if p.Obj == nil || p.Off != 0 || p.Info() != jmpBufInfo {
+	if p == nil {
 		RaiseFault("longjmp to a jmp_buf setjmp did not set", Addr(p))
 	}
-	jb := (*jmpBuf)(p.Obj)
+	jb := (*jmpBuf)(p)
 	if !jb.f.live {
 		RaiseFault("longjmp to a function that has returned", Addr(p))
 	}

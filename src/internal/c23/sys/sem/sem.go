@@ -220,7 +220,7 @@ func Semtimedop(id int32, sops c23.Ptr, nsops uint64, ts c23.Ptr) int32 {
 
 // Semop is semop: semtimedop without a timeout.
 func Semop(id int32, sops c23.Ptr, nsops uint64) int32 {
-	return Semtimedop(id, sops, nsops, c23.Ptr{})
+	return Semtimedop(id, sops, nsops, c23.Ptr(nil))
 }
 
 // undoAll applies the SEM_UNDO adjustments, as the process's exit does
@@ -244,19 +244,16 @@ func undoAll() {
 // as a copy of it), or its member itself: the int, or the pointer.
 func semArg(va []any, wantPtr bool) (int32, c23.Ptr) {
 	if len(va) == 0 {
-		return 0, c23.Ptr{}
+		return 0, c23.Ptr(nil)
+	}
+	if u, ok := va[0].(c23.ByValue); ok {
+		// The union's copy: it holds the int, or the pointer.
+		if !wantPtr {
+			return int32(c23.Load32(u.P)), c23.Ptr(nil)
+		}
+		return 0, c23.LoadPtr(u.P)
 	}
 	if p, ok := va[0].(c23.Ptr); ok {
-		if p.Obj != nil && p.Size == c23.WordSize && p.Off == 0 {
-			// A union's copy, or a pointer to something of its size:
-			// the copy holds a pointer with its capability, or the int.
-			if !wantPtr {
-				return int32(c23.Load32(p)), c23.Ptr{}
-			}
-			if q := c23.LoadPtr(p); q.Obj != nil || c23.Addr(q) == 0 {
-				return 0, q
-			}
-		}
 		return int32(c23.Addr(p)), p
 	}
 	v := c23.ToInt64(va[0])

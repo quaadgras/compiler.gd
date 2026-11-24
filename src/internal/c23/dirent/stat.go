@@ -43,10 +43,10 @@ type Dir struct {
 // made at init, it would link what Dir's fields reach (fs.DirEntry's
 // FileInfo, its time.Time, time's formatting) into every program.
 func dirOf(p c23.Ptr) *Dir {
-	if p.Obj == nil || p.Info() != c23.TinfoOf[Dir]() || p.Off != 0 {
+	if p == nil {
 		c23.RaiseFault("not a DIR", c23.Addr(p))
 	}
-	d := (*Dir)(p.Obj)
+	d := (*Dir)(p)
 	if d.closed {
 		c23.RaiseFault("use of a closed DIR", c23.Addr(p))
 	}
@@ -87,7 +87,7 @@ func Opendir(path c23.Ptr) c23.Ptr {
 		err = c23.ErrnoErr(c23.ENOTDIR)
 	}
 	p := c23.New[Dir]()
-	d := (*Dir)(p.Obj)
+	d := (*Dir)(p)
 	d.path = name
 	d.fd = -1
 	if err == nil {
@@ -95,7 +95,7 @@ func Opendir(path c23.Ptr) c23.Ptr {
 	}
 	if err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	d.ent = c23.Malloc(280)
 	return p
@@ -109,7 +109,7 @@ func Opendir(path c23.Ptr) c23.Ptr {
 func Readdir(p c23.Ptr) c23.Ptr {
 	d := dirOf(p)
 	if !d.next(d.ent) {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return d.ent
 }

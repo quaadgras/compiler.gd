@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/format"
 	"math"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -109,6 +110,9 @@ func newPkgGen(file string, o options) *pkgGen {
 // generate translates units, one program or package, to Go source.
 func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, err error) {
 	defer catch(&err)
+	if os.Getenv("CCTHIN") != "" {
+		o.thin = true // while the 1:1 translation replaces the other: every translation is one
+	}
 	pg = newPkgGen(file, o)
 	pg.units = units
 	pg.link()
@@ -166,7 +170,7 @@ func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, er
 		// C's streams are flushed if main panics (a fault): what it
 		// printed before is not lost. c23.Exit flushes them, and ends in
 		// os.Exit, which runs no deferred call: this one runs only then.
-		const flush = "\n\tdefer c23.Fflush(c23.Ptr{}) // if main panics"
+		const flush = "\n\tdefer c23.Fflush(nil) // if main panics"
 		if m.t.fn.ret.kind == kVoid {
 			fmt.Fprintf(&b, "\nfunc main() {%s\n\t%s\n\tc23.Exit(0)\n}\n", flush, ret)
 		} else {
@@ -599,7 +603,7 @@ func constLit(t *ctype, v int64) string {
 		return fmt.Sprintf("%s(%d)", goType(t), uint64(wrap(t, v)))
 	case t.isPtr() || t.kind == kNullptr || t.kind == kVaList || t.isCap():
 		if v == 0 {
-			return "c23.Ptr{}"
+			return "c23.Ptr(nil)"
 		}
 		return fmt.Sprintf("c23.FromInt(%d)", uint64(v)&(1<<(8*target.ptrSize)-1))
 	case t.isFloat():

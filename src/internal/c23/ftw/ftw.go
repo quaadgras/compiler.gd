@@ -214,7 +214,7 @@ type call struct {
 type Ptr = c23.Ptr
 
 func (c *call) stat(fi fs.FileInfo) Ptr {
-	if c.sb.Obj == nil {
+	if c.sb == nil {
 		c.sb = c23.Malloc(stat.StatSize)
 	}
 	if fi == nil {

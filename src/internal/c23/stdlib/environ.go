@@ -42,7 +42,7 @@ func makeEnviron() {
 	for i, kv := range env {
 		c23.StorePtr(c23.Add(arr, i*ws), c23.CString(kv))
 	}
-	c23.StorePtr(c23.Add(arr, len(env)*ws), c23.Ptr{})
+	c23.StorePtr(c23.Add(arr, len(env)*ws), c23.Ptr(nil))
 	c23.StorePtr(envObj, arr)
 }
 

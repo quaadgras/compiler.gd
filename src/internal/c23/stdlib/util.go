@@ -16,7 +16,7 @@ func Reallocarray(p c23.Ptr, nmemb, size uint64) c23.Ptr {
 	const maxSize = uint64(^uintptr(0) >> 1) // size_t's, which an object's size must not pass
 	if size != 0 && nmemb > maxSize/size {
 		c23.SetErrno(c23.ENOMEM)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return c23.Realloc(p, nmemb*size)
 }
@@ -45,7 +45,7 @@ func Mkdtemp(template c23.Ptr) c23.Ptr {
 	n := c23_string.Strlen(template)
 	if n < 6 || c23.GoString(c23.Add(template, int(n-6))) != "XXXXXX" {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	suffix := c23.Add(template, int(n-6))
 	const digits = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -61,9 +61,9 @@ func Mkdtemp(template c23.Ptr) c23.Ptr {
 		}
 		if !c23.IsErr(err, os.ErrExist) {
 			c23.SetErrnoOf(err)
-			return c23.Ptr{}
+			return c23.Ptr(nil)
 		}
 	}
 	c23.SetErrno(c23.EEXIST)
-	return c23.Ptr{}
+	return c23.Ptr(nil)
 }

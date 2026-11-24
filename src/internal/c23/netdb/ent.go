@@ -102,7 +102,7 @@ func strArray(ss []string) Ptr {
 	for i, s := range ss {
 		c23.StorePtr(c23.Add(a, i*ws), c23.CString(s))
 	}
-	c23.StorePtr(c23.Add(a, len(ss)*ws), Ptr{})
+	c23.StorePtr(c23.Add(a, len(ss)*ws), Ptr(nil))
 	return a
 }
 
@@ -212,7 +212,7 @@ func Getnetbyname(name Ptr) Ptr {
 // Getnetbyaddr is getnetbyaddr: the network of the number, of AF_INET.
 func Getnetbyaddr(net uint32, typ int32) Ptr {
 	if typ != AF_INET {
-		return Ptr{}
+		return Ptr(nil)
 	}
 	var r Ptr
 	netDB.search(func(e []string) bool {

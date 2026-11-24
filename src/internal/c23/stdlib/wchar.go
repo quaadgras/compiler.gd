@@ -13,7 +13,7 @@ import (
 	"unicode/utf8"
 )
 
-func Mblen(s c23.Ptr, n uint64) int32 { return Mbtowc(c23.Ptr{}, s, n) }
+func Mblen(s c23.Ptr, n uint64) int32 { return Mbtowc(c23.Ptr(nil), s, n) }
 
 func Mbtowc(pwc, s c23.Ptr, n uint64) int32 {
 	if c23.Addr(s) == 0 {
@@ -157,6 +157,6 @@ func QuickExit(status int32) {
 		quickMu.Unlock()
 		c23.FuncOf[func()](f)()
 	}
-	c23.Fflush(c23.Ptr{})
+	c23.Fflush(c23.Ptr(nil))
 	os.Exit(int(status))
 }

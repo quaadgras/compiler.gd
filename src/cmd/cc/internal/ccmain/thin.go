@@ -896,7 +896,10 @@ func (g *gen) tcall(c *call) string {
 			}
 		case !callee.variadic && (callee.proto || len(callee.params) > 0):
 			continue // an extra argument: ignored
-		case at.isPtr() || at.kind == kNullptr:
+		case at.kind == kStruct:
+			// By value, in variable arguments: a copy.
+			v = fmt.Sprintf("c23.ByValue{P: c23.Copy(%s, %d)}", g.unsafePtr(v, at), at.sizeof())
+		case at.isPtr() || at.kind == kNullptr || at.kind == kArray:
 			v = g.unsafePtr(v, at) // in variable arguments: any pointer is one type
 		}
 		if !direct && !isSimple(v) && !isPure(v) {

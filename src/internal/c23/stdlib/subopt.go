@@ -44,7 +44,7 @@ func Getsubopt(optionp, tokens, valuep c23.Ptr) int32 {
 			if k < n {
 				c23.StorePtr(valuep, c23.Add(opt, k+1))
 			} else {
-				c23.StorePtr(valuep, c23.Ptr{})
+				c23.StorePtr(valuep, c23.Ptr(nil))
 			}
 			c23.StorePtr(optionp, next)
 			return int32(i)

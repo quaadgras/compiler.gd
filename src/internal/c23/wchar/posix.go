@@ -194,7 +194,7 @@ func Mbsnrtowcs(dst, src c23.Ptr, nms, n uint64, ps c23.Ptr) uint64 {
 		if b[0] == 0 {
 			if c23.Addr(dst) != 0 {
 				c23.Wset(dst, int(k), 0)
-				c23.StorePtr(src, c23.Ptr{})
+				c23.StorePtr(src, c23.Ptr(nil))
 			}
 			return k
 		}
@@ -232,7 +232,7 @@ func Wcsnrtombs(dst, src c23.Ptr, nwc, n uint64, ps c23.Ptr) uint64 {
 			if c23.Addr(dst) != 0 {
 				if k < n {
 					c23.Store8(c23.Add(dst, int(k)), 0)
-					c23.StorePtr(src, c23.Ptr{})
+					c23.StorePtr(src, c23.Ptr(nil))
 				} else {
 					c23.StorePtr(src, c23.Add(s, 4*i))
 				}
@@ -331,7 +331,7 @@ func (m *wmemFile) Seek(off int64, whence int) (int64, error) {
 }
 
 func (m *wmemFile) sync() {
-	if m.buf.Obj == nil {
+	if m.buf == nil {
 		m.buf, m.size = c23.Malloc(4), 1
 	}
 	c23.StorePtr(m.bufp, m.buf)

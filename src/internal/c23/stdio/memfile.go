@@ -98,7 +98,7 @@ func (m *MemFile) Sync() {
 	if !m.Dyn {
 		return
 	}
-	if m.Buf.Obj == nil {
+	if m.Buf == nil {
 		m.Buf, m.Size = c23.Malloc(1), 1
 	}
 	c23.StorePtr(m.Bufp, m.Buf)

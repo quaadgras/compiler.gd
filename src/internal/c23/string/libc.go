@@ -90,7 +90,7 @@ func Strchr(s c23.Ptr, c int32) c23.Ptr {
 			return s
 		}
 		if x == 0 {
-			return c23.Ptr{}
+			return c23.Ptr(nil)
 		}
 		s = c23.Add(s, 1)
 	}
@@ -114,7 +114,7 @@ func Strstr(s, sub c23.Ptr) c23.Ptr {
 	h, n := c23.GoString(s), c23.GoString(sub)
 	i := strings.Index(h, n)
 	if i < 0 {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return c23.Add(s, i)
 }
@@ -158,7 +158,7 @@ func Strnlen(p c23.Ptr, max uint64) uint64 {
 func Strpbrk(s, set c23.Ptr) c23.Ptr {
 	n := Strcspn(s, set)
 	if c23.Load8(c23.Add(s, int(n))) == 0 {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return c23.Add(s, int(n))
 }
@@ -180,17 +180,17 @@ func StrtokR(s, sep, save c23.Ptr) c23.Ptr {
 	if c23.Addr(s) == 0 {
 		s = c23.LoadPtr(save)
 		if c23.Addr(s) == 0 {
-			return c23.Ptr{}
+			return c23.Ptr(nil)
 		}
 	}
 	s = c23.Add(s, int(Strspn(s, sep)))
 	if c23.Load8(s) == 0 {
-		c23.StorePtr(save, c23.Ptr{})
-		return c23.Ptr{}
+		c23.StorePtr(save, c23.Ptr(nil))
+		return c23.Ptr(nil)
 	}
 	e := c23.Add(s, int(Strcspn(s, sep)))
 	if c23.Load8(e) == 0 {
-		c23.StorePtr(save, c23.Ptr{})
+		c23.StorePtr(save, c23.Ptr(nil))
 	} else {
 		c23.Store8(e, 0)
 		c23.StorePtr(save, c23.Add(e, 1))
@@ -212,7 +212,7 @@ func Memccpy(dst, src c23.Ptr, c int32, n uint64) c23.Ptr {
 			return c23.Add(dst, int(i+1))
 		}
 	}
-	return c23.Ptr{}
+	return c23.Ptr(nil)
 }
 
 func Memchr(s c23.Ptr, c int32, n uint64) c23.Ptr {
@@ -221,5 +221,5 @@ func Memchr(s c23.Ptr, c int32, n uint64) c23.Ptr {
 			return c23.Add(s, int(i))
 		}
 	}
-	return c23.Ptr{}
+	return c23.Ptr(nil)
 }

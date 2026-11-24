@@ -53,7 +53,7 @@ func Getpwent() c23.Ptr {
 	}
 	if entNext >= len(entUsers) {
 		pwMu.Unlock()
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	e := entUsers[entNext]
 	entNext++
@@ -90,7 +90,7 @@ func storePasswd(p c23.Ptr, e pwEntry, str func(string) c23.Ptr) {
 // passwd at pw, its strings in the n bytes at buf (ERANGE if they do not
 // fit), and *result pw, or null if there is no such user.
 func pwResultR(e pwEntry, ok bool, pw, buf c23.Ptr, n uint64, result c23.Ptr) int32 {
-	c23.StorePtr(result, c23.Ptr{})
+	c23.StorePtr(result, c23.Ptr(nil))
 	if !ok {
 		return 0
 	}

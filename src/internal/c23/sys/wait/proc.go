@@ -79,7 +79,7 @@ func reap(pid int32, nohang, keep bool) (*c23.Child, int32) {
 // that ended it. WUNTRACED and WCONTINUED are accepted, and report
 // nothing. It is not interrupted by signals.
 func Waitpid(pid int32, status c23.Ptr, options int32) int32 {
-	return Wait4(pid, status, options, c23.Ptr{})
+	return Wait4(pid, status, options, c23.Ptr(nil))
 }
 
 // Wait is wait.

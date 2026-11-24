@@ -79,7 +79,7 @@ func Ptsname(fd int32) c23.Ptr {
 	}
 	if e := PtsnameR(fd, ptsBuf, 128); e != 0 {
 		c23.SetErrno(e)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return ptsBuf
 }

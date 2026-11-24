@@ -27,11 +27,11 @@ func Memmem(haystack c23.Ptr, hn uint64, needle c23.Ptr, n uint64) c23.Ptr {
 		return haystack
 	}
 	if n > hn {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	i := bytes.Index(c23.BytesAt(haystack, uintptr(hn)), c23.BytesAt(needle, uintptr(n)))
 	if i < 0 {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return c23.Add(haystack, i)
 }

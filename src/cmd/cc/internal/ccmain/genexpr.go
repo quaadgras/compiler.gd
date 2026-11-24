@@ -1207,7 +1207,7 @@ func (g *gen) funcPtr(s *symbol) string {
 	}
 	name := g.funcName(s, s.p)
 	if name == "" {
-		return "c23.Ptr{}" // weak, and not defined
+		return "c23.Ptr(nil)" // weak, and not defined
 	}
 	if s.nested {
 		return fmt.Sprintf("c23.NewFunc(%s)", name)
@@ -1262,7 +1262,7 @@ func (g *gen) callCode(c *call) string {
 		v := g.rv(a)
 		if i >= len(callee.params) && a.ty().kind == kStruct {
 			// By value, in variable arguments: a copy.
-			v = fmt.Sprintf("c23.Copy(%s, %d)", v, a.ty().sizeof())
+			v = fmt.Sprintf("c23.ByValue{P: c23.Copy(%s, %d)}", v, a.ty().sizeof())
 		}
 		if callee != c.ft {
 			// Declared here with another type than where it is
@@ -1282,7 +1282,7 @@ func (g *gen) callCode(c *call) string {
 			// is checked when Go evaluates the function.
 			t := g.tmp(g.gt(a.ty()))
 			if i >= len(c.ft.params) && a.ty().kind == kStruct {
-				t = g.tmp("c23.Ptr")
+				t = g.tmp("c23.ByValue")
 			}
 			g.p("%s = %s", t, v)
 			v = t
@@ -1427,7 +1427,7 @@ func (g *gen) builtinCode(e *builtinCall) string {
 		g.p("c23.Memset(%s, 0, %d)", g.rv(e.args[0]), e.args[1].(*intConst).v)
 		return ""
 	case "cxx_size":
-		return fmt.Sprintf("%s(%s.Size)", goType(tULong), g.rv(e.args[0]))
+		return fmt.Sprintf("%s(c23.SizeOf1(%s))", goType(tULong), g.rv(e.args[0]))
 	case "cxx_copy":
 		g.p("c23.Memmove(%s, %s, %d)", g.rv(e.args[0]), g.rv(e.args[1]), e.args[2].(*intConst).v)
 		return ""
@@ -1479,7 +1479,7 @@ func (g *gen) builtinCode(e *builtinCall) string {
 			if op == '-' {
 				n = "-" + n
 			}
-			return fmt.Sprintf("c23.AtomicFetchP(%s, '+', %s, c23.Ptr{})", p, n)
+			return fmt.Sprintf("c23.AtomicFetchP(%s, '+', %s, c23.Ptr(nil))", p, n)
 		}
 		return fmt.Sprintf("c23.AtomicFetch(%s, %d, %s(%s))", p, op, goType(et), v)
 	case "atomic_cmpxchg":

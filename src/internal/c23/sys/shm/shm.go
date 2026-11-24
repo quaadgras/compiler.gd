@@ -101,7 +101,7 @@ func Shmat(id int32, addr c23.Ptr, flg int32) c23.Ptr {
 	if s == nil {
 		return shmFailed
 	}
-	if s.p.Obj == nil {
+	if s.p == nil {
 		s.p = c23.Malloc(s.size)
 	}
 	if c23.Addr(addr) != 0 && c23.Addr(addr) != c23.Addr(s.p) {
@@ -122,7 +122,7 @@ func Shmdt(addr c23.Ptr) int32 {
 	var found *segment
 	var foundID int32
 	table.EachID(func(id int32, s *segment) {
-		if found == nil && s.nattch > 0 && s.p.Obj != nil && c23.Addr(s.p) == c23.Addr(addr) {
+		if found == nil && s.nattch > 0 && s.p != nil && c23.Addr(s.p) == c23.Addr(addr) {
 			found, foundID = s, id
 		}
 	})

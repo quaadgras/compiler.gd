@@ -14,7 +14,7 @@ import (
 
 // ExitNow is _Exit: exit without the functions atexit registered.
 func ExitNow(status int32) {
-	c23.Fflush(c23.Ptr{})
+	c23.Fflush(c23.Ptr(nil))
 	os.Exit(int(status))
 }
 
@@ -88,7 +88,7 @@ func Bsearch(key, base c23.Ptr, n, size uint64, cmp c23.Ptr) c23.Ptr {
 			lo = m + 1
 		}
 	}
-	return c23.Ptr{}
+	return c23.Ptr(nil)
 }
 
 // Atexit is atexit: Exit calls f, after the functions registered later.
@@ -127,11 +127,11 @@ func Ldiv(sret c23.Ptr, n, d int64) {
 	c23.Store64(c23.Add(sret, 8), uint64(n%d))
 }
 
-func Atoi(s c23.Ptr) int32 { return int32(Strtol(s, c23.Ptr{}, 10)) }
+func Atoi(s c23.Ptr) int32 { return int32(Strtol(s, c23.Ptr(nil), 10)) }
 
-func Atol(s c23.Ptr) int64 { return Strtol(s, c23.Ptr{}, 10) }
+func Atol(s c23.Ptr) int64 { return Strtol(s, c23.Ptr(nil), 10) }
 
-func Atof(s c23.Ptr) float64 { return Strtod(s, c23.Ptr{}) }
+func Atof(s c23.Ptr) float64 { return Strtod(s, c23.Ptr(nil)) }
 
 func Strtol(s, end c23.Ptr, base int32) int64 {
 	v, neg, of, n := c23.StrtoParse(c23.GoString(s), int(base))
@@ -210,7 +210,7 @@ func Srand(seed uint32) { randState = uint64(seed) }
 func Getenv(name c23.Ptr) c23.Ptr {
 	v, ok := os.LookupEnv(c23.GoString(name))
 	if !ok {
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	return c23.CString(v)
 }

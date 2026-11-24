@@ -74,7 +74,7 @@ func DbmOpen(file c23.Ptr, flags int32, mode uint32) c23.Ptr {
 	f, err := os.OpenFile(name+".pag", goFlags(flags), os.FileMode(mode&0o777))
 	if err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	if flags&c23.O_CREAT != 0 {
 		if d, err := os.OpenFile(name+".dir", os.O_RDWR|os.O_CREATE, os.FileMode(mode&0o777)); err == nil {
@@ -85,7 +85,7 @@ func DbmOpen(file c23.Ptr, flags int32, mode uint32) c23.Ptr {
 	if err := d.load(); err != nil {
 		f.Close()
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	p := c23.Malloc(1)
 	mu.Lock()
@@ -178,7 +178,7 @@ func datumBytes(p c23.Ptr, n uint64) []byte {
 func storeDatum(out c23.Ptr, b []byte, ok bool) {
 	ws := int(c23.WordSize)
 	if !ok {
-		c23.StorePtr(out, c23.Ptr{})
+		c23.StorePtr(out, c23.Ptr(nil))
 		c23.StoreLong(c23.Add(out, ws), 0)
 		return
 	}

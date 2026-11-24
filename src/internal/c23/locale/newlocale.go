@@ -91,7 +91,7 @@ func resolve(mask uint32, name string) (utf8 uint32, ok bool) {
 	return utf8, true
 }
 
-func isGlobal(p c23.Ptr) bool { return p.Obj == nil && uint32(c23.Addr(p)) == 0xffffffff }
+func isGlobal(p c23.Ptr) bool { return p == nil && uint32(c23.Addr(p)) == 0xffffffff }
 
 func globalPtr() c23.Ptr { return c23.FromInt(^uintptr(0)) }
 
@@ -109,13 +109,13 @@ func newObj(utf8 uint32) c23.Ptr {
 func Newlocale(mask int32, name, base c23.Ptr) c23.Ptr {
 	if c23.Addr(name) == 0 || uint32(mask)&^lcAllMask != 0 || isGlobal(base) {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	m := uint32(mask) & (1<<nCategory - 1)
 	utf8, ok := resolve(m, c23.GoString(name))
 	if !ok {
 		c23.SetErrno(c23.ENOENT)
-		return c23.Ptr{}
+		return c23.Ptr(nil)
 	}
 	if c23.Addr(base) == 0 {
 		return newObj(utf8)
@@ -150,7 +150,7 @@ func Uselocale(loc c23.Ptr) c23.Ptr {
 	old := c23.LoadPtr(cur)
 	switch {
 	case isGlobal(loc):
-		c23.StorePtr(cur, c23.Ptr{})
+		c23.StorePtr(cur, c23.Ptr(nil))
 	case c23.Addr(loc) != 0:
 		c23.StorePtr(cur, loc)
 	}

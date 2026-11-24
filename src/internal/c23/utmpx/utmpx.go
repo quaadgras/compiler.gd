@@ -114,7 +114,7 @@ func find(match func(rec []byte) bool) c23.Ptr {
 			return result(rec)
 		}
 	}
-	return c23.Ptr{}
+	return c23.Ptr(nil)
 }
 
 // Getutxent is getutxent: the next entry, or null at the end.
@@ -169,5 +169,5 @@ func Getutxline(ut c23.Ptr) c23.Ptr {
 // EPERM (as glibc's for a process that may not).
 func Pututxline(ut c23.Ptr) c23.Ptr {
 	c23.SetErrno(c23.EPERM)
-	return c23.Ptr{}
+	return c23.Ptr(nil)
 }

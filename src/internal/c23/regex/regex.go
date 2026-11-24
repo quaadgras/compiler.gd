@@ -70,21 +70,21 @@ func opaque(preg c23.Ptr) c23.Ptr { return c23.Add(preg, int(c23.LongSize)) }
 // regfree freed it).
 func regexOf(preg c23.Ptr) *regexT {
 	p := c23.LoadPtr(opaque(preg))
-	if p.Obj == nil || p.Info() != c23.TinfoOf[regexT]() || p.Off != 0 {
+	if p == nil {
 		return nil
 	}
-	return (*regexT)(p.Obj)
+	return (*regexT)(p)
 }
 
 // Regcomp is regcomp.
 func Regcomp(preg, pattern c23.Ptr, cflags int32) int32 {
 	re, code := compile(c23.GoString(pattern), cflags)
 	if code != 0 {
-		c23.StorePtr(opaque(preg), c23.Ptr{})
+		c23.StorePtr(opaque(preg), c23.Ptr(nil))
 		return code
 	}
 	p := c23.New[regexT]()
-	*(*regexT)(p.Obj) = *re
+	*(*regexT)(p) = *re
 	c23.StoreLong(preg, int64(re.nsub))
 	c23.StorePtr(opaque(preg), p)
 	return 0
@@ -92,7 +92,7 @@ func Regcomp(preg, pattern c23.Ptr, cflags int32) int32 {
 
 // Regfree is regfree.
 func Regfree(preg c23.Ptr) {
-	c23.StorePtr(opaque(preg), c23.Ptr{})
+	c23.StorePtr(opaque(preg), c23.Ptr(nil))
 }
 
 // Regexec is regexec. With REG_STARTEND (glibc's), the string is

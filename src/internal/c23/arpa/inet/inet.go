@@ -124,11 +124,11 @@ func InetNtop(family int32, src, dst Ptr, n uint32) Ptr {
 		}
 	default:
 		c23.SetErrno(c23.EAFNOSUPPORT)
-		return Ptr{}
+		return Ptr(nil)
 	}
 	if !putString(dst, n, s) {
 		c23.SetErrno(c23.ENOSPC)
-		return Ptr{}
+		return Ptr(nil)
 	}
 	return dst
 }

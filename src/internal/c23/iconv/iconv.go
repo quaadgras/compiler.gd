@@ -73,15 +73,15 @@ func IconvOpen(tocode, fromcode c23.Ptr) c23.Ptr {
 		return c23.FromInt(^uintptr(0))
 	}
 	p := c23.New[iconvT]()
-	*(*iconvT)(p.Obj) = iconvT{from: from, to: to, translit: translit, ignore: ignore}
+	*(*iconvT)(p) = iconvT{from: from, to: to, translit: translit, ignore: ignore}
 	return p
 }
 
 func iconvOf(p c23.Ptr) *iconvT {
-	if p.Obj == nil || p.Info() != iconvInfo || p.Off != 0 {
+	if p == nil {
 		return nil
 	}
-	return (*iconvT)(p.Obj)
+	return (*iconvT)(p)
 }
 
 // IconvClose is iconv_close.

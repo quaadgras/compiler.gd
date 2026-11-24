@@ -527,7 +527,7 @@ func AtomicLoad[T atomicT](p Ptr) T {
 
 func AtomicStore[T atomicT](p Ptr, v T) {
 	n := unsafe.Sizeof(v)
-	a := checkScalar(p, n)
+	a := p
 	switch n {
 	case 4:
 		atomic.StoreUint32((*uint32)(a), *(*uint32)(unsafe.Pointer(&v)))
@@ -546,7 +546,7 @@ func AtomicStore[T atomicT](p Ptr, v T) {
 // compares).
 func AtomicCAS[T atomicT](p Ptr, old, new T) bool {
 	n := unsafe.Sizeof(old)
-	a := checkScalar(p, n)
+	a := p
 	switch n {
 	case 4:
 		return atomic.CompareAndSwapUint32((*uint32)(a), *(*uint32)(unsafe.Pointer(&old)), *(*uint32)(unsafe.Pointer(&new)))
@@ -586,7 +586,7 @@ func AtomicCmpXchg[T atomicT](p, expected Ptr, desired T) int32 {
 		}
 		cur := AtomicLoad[T](p)
 		if !memEq(unsafe.Pointer(&cur), unsafe.Pointer(&old), unsafe.Sizeof(old)) {
-			*(*T)(checkScalar(expected, unsafe.Sizeof(old))) = cur
+			*(*T)(expected) = cur
 			return 0
 		}
 	}
