@@ -4,6 +4,8 @@
 
 package ccmain
 
+import "strings"
+
 // What C++ does with objects of class type (doc/gd/cxx.md):
 // construction, temporaries and their destruction, passing and
 // returning, conversions, overloaded operators, new and delete.
@@ -132,6 +134,15 @@ func ctors(t *ctype) []*symbol {
 func (p *parser) constructAt(dst expr, t *ctype, args []expr, at pos, mode int) expr {
 	t = t.unqual()
 	p.requireComplete(t, at)
+	if p.ctorDepth++; p.ctorDepth > 100 {
+		p.ctorDepth = 0
+		var ts []string
+		for _, a := range args {
+			ts = append(ts, a.ty().String())
+		}
+		p.errorAt(at, "the conversion to %s from (%s) does not end", t, strings.Join(ts, ", "))
+	}
+	defer func() { p.ctorDepth-- }()
 	if len(args) == 1 {
 		if pr, ok := args[0].(*classPR); ok && sameType(pr.t.unqual(), t) {
 			return pr.build(dst) // constructed in place
@@ -449,11 +460,15 @@ func (p *parser) classInit(sym *symbol, s specs, at pos) bool {
 		args := p.callArgs()
 		sym.ctor = p.constructAt(ref, t, args, at, mValue)
 	case p.is("{") || p.is("=") && p.isAt(1, "{"):
+		if !ci.userCtor && (ci.nontrivCtor || ci.nontrivDtor || needsCopy(t)) {
+			// An aggregate with members that constructors initialize:
+			// member by member.
+			p.accept("=")
+			sym.ctor = p.listInit(ref, t, p.braceList(), at)
+			break
+		}
 		if !ci.userCtor {
 			// An aggregate: C's initializer.
-			if needsCopy(t) {
-				p.errorAt(at, "braces for an aggregate with members that are copied by constructors are not supported yet")
-			}
 			if p.is("{") {
 				if sym.global {
 					p.staticInit++

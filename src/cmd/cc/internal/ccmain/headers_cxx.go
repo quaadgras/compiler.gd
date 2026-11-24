@@ -267,6 +267,60 @@ template <class E> constexpr const E *end(initializer_list<E> il) noexcept { ret
 #endif
 `
 
+	sysHeaders["array"] = `#ifndef __CC_ARRAY
+#define __CC_ARRAY
+#include <stddef.h>
+#include <initializer_list>
+namespace std {
+template <class T, size_t N>
+struct array {
+	typedef T value_type;
+	typedef size_t size_type;
+	typedef ptrdiff_t difference_type;
+	typedef T &reference;
+	typedef const T &const_reference;
+	typedef T *pointer;
+	typedef const T *const_pointer;
+	typedef T *iterator;
+	typedef const T *const_iterator;
+	T __elems[N];
+	constexpr T *data() noexcept { return __elems; }
+	constexpr const T *data() const noexcept { return __elems; }
+	constexpr size_t size() const noexcept { return N; }
+	constexpr size_t max_size() const noexcept { return N; }
+	constexpr bool empty() const noexcept { return N == 0; }
+	constexpr T &operator[](size_t i) { return __elems[i]; }
+	constexpr const T &operator[](size_t i) const { return __elems[i]; }
+	constexpr T &at(size_t i) { return __elems[i]; }
+	constexpr const T &at(size_t i) const { return __elems[i]; }
+	constexpr T &front() { return __elems[0]; }
+	constexpr const T &front() const { return __elems[0]; }
+	constexpr T &back() { return __elems[N - 1]; }
+	constexpr const T &back() const { return __elems[N - 1]; }
+	constexpr T *begin() noexcept { return __elems; }
+	constexpr const T *begin() const noexcept { return __elems; }
+	constexpr T *end() noexcept { return __elems + N; }
+	constexpr const T *end() const noexcept { return __elems + N; }
+	constexpr const T *cbegin() const noexcept { return __elems; }
+	constexpr const T *cend() const noexcept { return __elems + N; }
+	void fill(const T &v) {
+		for (size_t i = 0; i < N; i++)
+			__elems[i] = v;
+	}
+};
+template <class T, size_t N>
+bool operator==(const array<T, N> &a, const array<T, N> &b) {
+	for (size_t i = 0; i < N; i++)
+		if (!(a[i] == b[i]))
+			return false;
+	return true;
+}
+template <class T, size_t N>
+bool operator!=(const array<T, N> &a, const array<T, N> &b) { return !(a == b); }
+}
+#endif
+`
+
 	sysHeaders["atomic"] = `#ifndef __CC_ATOMIC
 #define __CC_ATOMIC
 #include <stddef.h>

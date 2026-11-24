@@ -561,6 +561,11 @@ func (p *parser) condDeclExpr(inFor bool) ([]stmt, expr) {
 	if !p.isDecl() {
 		return nil, p.expr()
 	}
+	if p.cxx && (!p.declAhead() || p.isAt(p.typeSpecEnd(0), "(")) {
+		// T(x) == y: a condition's declaration has no parentheses
+		// after its type.
+		return nil, p.expr()
+	}
 	at := p.here()
 	var decls []stmt
 	var last *symbol

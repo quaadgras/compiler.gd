@@ -524,6 +524,11 @@ func (p *parser) bindRef(t *ctype, e expr, at pos, what string) expr {
 	if to.kind == kFunc {
 		return p.convertAt(p.rvalue(e), t, at)
 	}
+	if pr, ok := e.(*classPR); ok && to.kind == kStruct && !sameType(to.unqual(), et.unqual()) && isBaseOf(to, et) {
+		// A prvalue of a derived class: the reference binds to the base
+		// of its temporary.
+		e = p.materializePR(pr)
+	}
 	lv := p.isLvalueCxx(e) && et.kind != kFunc
 	same := sameType(to.unqual(), et.unqual()) || isBaseOf(to, et) || similarArrays(to, et)
 	if same && (lv && t.ref == 1 || !lv && isLvalue(e)) {
@@ -609,7 +614,7 @@ func sameType(a, b *ctype) bool {
 		return a.mp != nil && b.mp != nil && sameType(a.mp.cls, b.mp.cls) && sameType(a.mp.t, b.mp.t)
 	}
 	switch a.kind {
-	case kBitInt, kUBitInt:
+	case kBitInt, kUBitInt, kTParam:
 		return a.n == b.n
 	case kPtr, kComplex:
 		return sameType(a.elem, b.elem)

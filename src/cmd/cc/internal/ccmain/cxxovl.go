@@ -305,7 +305,8 @@ type adlRef struct {
 type candidate struct {
 	sym   *symbol
 	ranks []int
-	tmpl  bool // a function template's instance
+	tmpl  bool      // a function template's instance
+	from  *template // tmpl: the template
 }
 
 // viable ranks a call of sym with the arguments args, on the object obj
@@ -318,7 +319,7 @@ func (p *parser) viable(sym *symbol, obj expr, args []expr) (candidate, bool) {
 			return candidate{}, false
 		}
 		c, ok := p.viable(inst, obj, args)
-		c.tmpl = true
+		c.tmpl, c.from = true, sym.tmpl
 		return c, ok
 	}
 	ft := sym.t.fn
@@ -401,7 +402,7 @@ func (p *parser) resolve(set []*symbol, obj expr, args []expr, at pos, name stri
 	}
 	best := cands[0]
 	for _, c := range cands[1:] {
-		if better(c, best) || !better(best, c) && best.tmpl && !c.tmpl {
+		if better(c, best) || !better(best, c) && best.tmpl && (!c.tmpl || p.moreSpecialized(c.from, best.from)) {
 			best = c
 		}
 	}
@@ -418,6 +419,47 @@ func (p *parser) resolve(set []*symbol, obj expr, args []expr, at pos, name stri
 		}
 	}
 	return best.sym
+}
+
+// moreSpecialized reports whether the function template a is more
+// specialized than b: b's parameters can be deduced from a's, and a's
+// cannot be from b's.
+func (p *parser) moreSpecialized(a, b *template) bool {
+	if a == nil || b == nil || a == b {
+		return false
+	}
+	pa, pb := p.funcPattern(a), p.funcPattern(b)
+	if pa == nil || pb == nil {
+		return false
+	}
+	// from reports whether y's parameters are deduced from x's.
+	from := func(x *funcType, y *funcType, ty *template) bool {
+		xs, ys := x.params, y.params
+		if x.recv != nil {
+			xs = xs[1:]
+		}
+		if y.recv != nil {
+			ys = ys[1:]
+		}
+		if len(xs) != len(ys) {
+			return false
+		}
+		bound, set := make([]targ, len(ty.params)), make([]bool, len(ty.params))
+		for i := range xs {
+			xt, yt := xs[i], ys[i]
+			if xt.isRef() {
+				xt = xt.elem
+			}
+			if yt.isRef() {
+				yt = yt.elem
+			}
+			if !p.unify(yt.unqual(), xt.unqual(), bound, set) {
+				return false
+			}
+		}
+		return true
+	}
+	return from(pa, pb, b) && !from(pb, pa, a)
 }
 
 // callArgs parses a call's arguments, after its "(", unconverted.

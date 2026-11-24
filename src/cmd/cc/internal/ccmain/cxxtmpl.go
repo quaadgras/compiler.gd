@@ -626,6 +626,18 @@ func (p *parser) templateDecl() {
 		for k := 0; k < nameAt; k++ {
 			switch p.peekAt(k).text {
 			case "explicit", "inline", "constexpr", "friend":
+			case "__attribute__", "__attribute":
+				// With its arguments in parentheses.
+				depth := 0
+				for k++; k < nameAt; k++ {
+					if t := p.peekAt(k).text; t == "(" {
+						depth++
+					} else if t == ")" {
+						if depth--; depth == 0 {
+							break
+						}
+					}
+				}
 			default:
 				ctor = false
 			}
@@ -1315,6 +1327,10 @@ func (p *parser) unify(pt, at *ctype, bound []targ, set []bool) bool {
 	case kDependent:
 		if pt.dep == nil || pt.dep.tmpl == nil {
 			return true // not deduced
+		}
+		if at.kind == kDependent && at.dep != nil && at.dep.tmpl == pt.dep.tmpl {
+			// Another pattern's, when two templates are ordered.
+			return p.unifyArgs(pt.dep.args, at.dep.args, bound, set)
 		}
 		if at.kind != kStruct || at.q&pt.q != pt.q {
 			return false

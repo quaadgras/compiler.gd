@@ -85,12 +85,14 @@ type parser struct {
 	pending       []*symbol // used, and not yet defined: template instances' functions
 	draining      bool
 	tids          map[tidKey]tidVal
-	direct        bool          // the next call of a virtual function is not virtual: its name is qualified
-	qualified     map[expr]bool // the functions named with a qualified name
-	condDepth     int           // in an operand that is not always evaluated
-	convType      *ctype        // the type of the conversion function whose name was last parsed
-	exprType      int           // parsing a type specifier in an expression: T(x)
-	xvalues       map[expr]bool // lvalues of the tree that are rvalues to C++: temporaries, what T && casts and calls give
+	ctorDepth     int // constructAt calls in progress
+
+	direct    bool          // the next call of a virtual function is not virtual: its name is qualified
+	qualified map[expr]bool // the functions named with a qualified name
+	condDepth int           // in an operand that is not always evaluated
+	convType  *ctype        // the type of the conversion function whose name was last parsed
+	exprType  int           // parsing a type specifier in an expression: T(x)
+	xvalues   map[expr]bool // lvalues of the tree that are rvalues to C++: temporaries, what T && casts and calls give
 }
 
 type parseError struct{ msg string }
@@ -1759,7 +1761,7 @@ func (p *parser) params() *funcType {
 				p.expand(n, end, func() {
 					s := p.declSpecs()
 					if s.t == nil {
-						p.errorf("expected a parameter type")
+						p.errorf("expected a parameter type, found %s", p.peek())
 					}
 					name, t, _ := p.declarator(s.t)
 					pk.name = name
@@ -1785,7 +1787,7 @@ func (p *parser) params() *funcType {
 		one := func() {
 			s := p.declSpecs()
 			if s.t == nil {
-				p.errorf("expected a parameter type")
+				p.errorf("expected a parameter type, found %s", p.peek())
 			}
 			name, t, _ = p.declarator(s.t)
 		}
@@ -2286,9 +2288,34 @@ func (p *parser) funcDef(name string, t *ctype, s specs, a attrs, at pos) {
 			if name == in.rec.tag && s.noType {
 				key = "{ctor}"
 			}
+			// Static if the overload with these parameters is, or if
+			// none of the name's functions has a this.
 			s.storage = sStatic
-			for o := in.vars[key]; o != nil; o = o.next {
-				if o.kind == symFunc && o.t.fn.recv != nil {
+			exact := false
+			for o := in.vars[key]; o != nil && !exact; o = o.next {
+				if o.kind != symFunc || o.tmpl != nil {
+					continue
+				}
+				ops := o.t.fn.params
+				if o.t.fn.recv != nil {
+					ops = ops[1:]
+				}
+				same := len(ops) == len(t.fn.params) && o.t.fn.variadic == t.fn.variadic
+				for i := 0; same && i < len(ops); i++ {
+					x, y := ops[i], t.fn.params[i]
+					if x.ref == 0 && y.ref == 0 {
+						x, y = x.unqual(), y.unqual()
+					}
+					same = sameType(x, y)
+				}
+				switch {
+				case same:
+					exact = true
+					s.storage = sAuto
+					if o.t.fn.recv == nil {
+						s.storage = sStatic
+					}
+				case o.t.fn.recv != nil:
 					s.storage = sAuto
 				}
 			}

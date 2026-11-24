@@ -157,9 +157,13 @@ func (p *parser) listInit(dst expr, t *ctype, l *initList, at pos) expr {
 		if len(l.args) > len(fields) {
 			p.errorAt(at, "too many initializers for %s", t)
 		}
-		for i, a := range l.args {
-			f := fields[i]
-			list = append(list, &exprStmt{p.initWith(&member{node{f.t, at}, dst, f}, a, at)})
+		for i, f := range fields {
+			m := &member{node{f.t, at}, dst, f}
+			if i < len(l.args) {
+				list = append(list, &exprStmt{p.initWith(m, l.args[i], at)})
+			} else if e := p.defaultMember(m, ci, f, at); e != nil {
+				list = append(list, &exprStmt{e})
+			}
 		}
 		return &stmtExpr{node{tVoid, at}, &block{list: list}, nil}
 	case t.kind == kArray:
@@ -172,6 +176,13 @@ func (p *parser) listInit(dst expr, t *ctype, l *initList, at pos) expr {
 			elem := &deref{node{t.elem, at}, &binary{node{ptrTo(t.elem), at}, "+", base, p.intc(int64(i), tLong, at)}}
 			list = append(list, &exprStmt{p.initWith(elem, a, at)})
 		}
+		if needsCtor(t.elem) {
+			// The elements the list does not give: constructed.
+			for i := int64(len(l.args)); i < t.n; i++ {
+				elem := &deref{node{t.elem, at}, &binary{node{ptrTo(t.elem), at}, "+", base, p.intc(i, tLong, at)}}
+				list = append(list, &exprStmt{p.initWith(elem, &initList{node{tVoid, at}, nil}, at)})
+			}
+		}
 		return &stmtExpr{node{tVoid, at}, &block{list: list}, nil}
 	case len(l.args) == 0:
 		return p.zeroObject(dst, at)
@@ -179,6 +190,31 @@ func (p *parser) listInit(dst expr, t *ctype, l *initList, at pos) expr {
 		return p.initWith(dst, l.args[0], at)
 	}
 	p.errorAt(at, "too many initializers for a %s", t)
+	return nil
+}
+
+// defaultMember is the expression that initializes m, the member f of
+// an aggregate, when a braced list gives it no initializer: with its
+// default member initializer, or its default constructor. It is nil if
+// the member is only zeroed.
+func (p *parser) defaultMember(m expr, ci *classInfo, f *field, at pos) expr {
+	if ci != nil {
+		if d, has := ci.nsdmi[f]; has {
+			save, saveSc, saveThis := p.pos, p.sc, p.this
+			p.pos, p.sc, p.this = d.start, ci.scope, nil
+			var e expr
+			if p.accept("=") && !p.is("{") {
+				e = p.initExpr()
+			} else {
+				e = p.braceList()
+			}
+			p.pos, p.sc, p.this = save, saveSc, saveThis
+			return p.initWith(m, e, at)
+		}
+	}
+	if needsCtor(f.t) {
+		return p.initWith(m, &initList{node{tVoid, at}, nil}, at)
+	}
 	return nil
 }
 
