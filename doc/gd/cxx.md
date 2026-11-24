@@ -145,5 +145,33 @@ compiled: the mangled names are the Itanium ABI's, the calls are Go's.
 
 ## Status
 
-See the tests: `go test cmd/cc -run Cxx` compiles `testdata/cxx/*.cc`
-with cmd/cc and with g++ and compares what they print.
+`go test cmd/cc -run Cxx` compiles `testdata/cxx/*.cc` with cmd/cc and
+with g++ and compares what they print.
+
+There (step 1 of the order above):
+
+- references (`&`, `&&`, binding to temporaries, lifetime extension),
+  overloaded functions and default arguments, namespaces (nested,
+  inline, unnamed), using declarations, directives and aliases,
+  `extern "C"`, scoped enumerations, the named casts and `T(x)`, `auto`
+  with declarators, argument-dependent lookup for calls and operators;
+- classes: data members with default member initializers, member
+  functions defined in or out of the class, `static` members, `mutable`,
+  constructors with member initializers and delegation, destructors,
+  conversion functions, `explicit`, `= default` and `= delete`, friends,
+  the implicit default and copy constructors, copy assignment and
+  destructor (member by member where a member needs it, the bytes
+  otherwise);
+- objects: temporaries destroyed at the end of their full expression
+  (conditionally made ones too), classes passed and returned in the
+  caller's memory, copy elision and the named return value
+  optimization, overloaded operators (members and not), `new`,
+  `new[]`, placement `new`, `delete`, and allocation functions of the
+  program's own.
+
+Not there yet, of step 1: static locals with constructors, `delete[]`
+of objects with destructors, braces for aggregates whose members have
+copy constructors, comparisons of type `bool` (they are `int`, as in C,
+which only overload resolution and `auto` can tell), move construction
+by implicit members (they copy), and access checking, which is not
+planned. Then steps 2 to 5.

@@ -63,7 +63,10 @@ type parser struct {
 	declIn     *scope        // the scope the last declarator's qualified name is in
 	this       *symbol       // in a non-static member function
 	cls        *ctype        // the class whose members are being declared
-	temps      []*symbol     // the temporaries with destructors of the full expression being parsed
+	temps      []*tempObj    // the temporaries with destructors of the full expression being parsed
+	extend     *[]*symbol    // where temporaries a declared reference binds are kept, to live as long
+	declTo     *scope        // the scope the next function is declared in, if not the current one
+	userConv   int           // ranking a user-defined conversion's own argument
 	condDepth  int           // in an operand that is not always evaluated
 	convType   *ctype        // the type of the conversion function whose name was last parsed
 	exprType   int           // parsing a type specifier in an expression: T(x)
@@ -782,11 +785,24 @@ done:
 // recordSpec parses a struct or union specifier, after its keyword.
 func (p *parser) recordSpec(union bool, kw token) *ctype {
 	a := p.attributes()
+	if p.cxx {
+		// A class that is named, perhaps with a qualified name.
+		if sym, n := p.cxxTypeAt(0); sym != nil && sym.t.kind == kStruct && (n > 1 || !sym.tagName) && !p.isAt(n, "{") && !p.isAt(n, ":") && !p.isAt(n, ";") && !p.isAt(n, "final") {
+			p.pos += n
+			return sym.t
+		}
+	}
 	tag := ""
 	if p.peek().kind == tkIdent && !p.is("__attribute__") {
 		tag = p.ident()
 	}
 	a.merge(p.attributes())
+	if p.cxx && p.is("final") && (p.isAt(1, "{") || p.isAt(1, ":")) {
+		p.next()
+	}
+	if p.cxx && p.is(":") && tag != "" {
+		p.errorf("base classes are not supported yet")
+	}
 	if tag != "" && !p.is("{") {
 		if t, _ := p.lookupTag(tag); t != nil && !p.is(";") {
 			if t.kind != kStruct || t.rec.union != union {
@@ -830,12 +846,21 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 		r.packed = kw.pack
 	}
 	var fields []*field
+	var saveSc *scope
+	var saveCls *ctype
+	if p.cxx {
+		saveSc, saveCls = p.beginClass(t)
+	}
 	for !p.accept("}") {
 		if p.is("_Static_assert") || p.is("static_assert") {
 			p.staticAssert()
 			continue
 		}
 		if p.accept(";") {
+			continue
+		}
+		if p.cxx {
+			p.classMember(t, &fields)
 			continue
 		}
 		s := p.declSpecs()
@@ -889,6 +914,9 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 		}
 		p.expect(";")
 	}
+	if p.cxx {
+		p.sc, p.cls = saveSc, saveCls
+	}
 	a.merge(p.attributes())
 	for _, f := range fields {
 		if f.t.kind == kArray && f.t.n < 0 {
@@ -917,6 +945,9 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 		return prev
 	}
 	p.u.records = append(p.u.records, t)
+	if p.cxx {
+		p.completeClass(t)
+	}
 	return t
 }
 
@@ -1671,6 +1702,24 @@ func (p *parser) isKRDecls(t *ctype) bool {
 // declarator2 declares name, of type t, at file or block scope, and
 // parses its initializer.
 func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *symbol {
+	if !p.cxx {
+		return p.declarator2C(name, t, s, a, at)
+	}
+	if in := p.declIn; in != nil && t.kind != kFunc {
+		// A static member's definition: in its class's scope.
+		save := p.sc
+		p.sc = in
+		defer func() { p.sc = save }()
+	}
+	mark := len(p.temps)
+	sym := p.declarator2C(name, t, s, a, at)
+	if sym.kind == symVar {
+		p.finishVar(sym, mark, at)
+	}
+	return sym
+}
+
+func (p *parser) declarator2C(name string, t *ctype, s specs, a attrs, at pos) *symbol {
 	t = withMode(t, a.mode)
 	if s.storage == sTypedef {
 		if s.align > 0 || a.aligned > 0 {
@@ -1761,7 +1810,11 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 			p.fn.locals = append(p.fn.locals, sym)
 		}
 	}
-	if p.cxx && p.cxxInit(sym, s, at) {
+	inited := false
+	if p.cxx {
+		p.extending(sym, func() { inited = p.cxxInit(sym, s, at) })
+	}
+	if inited {
 		// Initialized as C++ initializes.
 	} else if p.accept("=") {
 		if s.storage == sExtern && p.fn != nil {
@@ -1791,7 +1844,11 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 			if sym.global || s.constx {
 				p.translationTime++
 			}
-			sym.init = p.initializer(sym)
+			if p.cxx {
+				p.extending(sym, func() { sym.init = p.initializer(sym) })
+			} else {
+				sym.init = p.initializer(sym)
+			}
 			if sym.global || s.constx {
 				p.translationTime--
 			}
@@ -1873,6 +1930,25 @@ func (p *parser) lookupFunc(name string) *symbol {
 
 // funcDef parses a function definition after its declarator.
 func (p *parser) funcDef(name string, t *ctype, s specs, a attrs, at pos) {
+	if in := p.declIn; p.cxx && in != nil {
+		// Defined with a qualified name: in that scope.
+		save := p.sc
+		defer func() { p.sc = save }()
+		if in.kind == skClass && t.fn.recv == nil {
+			// A member function: static if it was declared so.
+			key := name
+			if name == in.rec.tag && s.noType {
+				key = "{ctor}"
+			}
+			s.storage = sStatic
+			for o := in.vars[key]; o != nil; o = o.next {
+				if o.kind == symFunc && o.t.fn.recv != nil {
+					s.storage = sAuto
+				}
+			}
+			t = p.memberType(in.rec.cls.t, name, t, s)
+		}
+	}
 	if a.noreturn || s.noreturn {
 		ft := *t.fn
 		ft.noreturn = true
@@ -1909,8 +1985,23 @@ func (p *parser) funcDef(name string, t *ctype, s specs, a attrs, at pos) {
 	if sym.defined {
 		p.errorAt(at, "redefinition of %q", name)
 	}
+	if p.cxx {
+		st := p.saveFunc()
+		if p.declIn != nil {
+			p.sc = p.declIn
+		}
+		p.defineFunc(sym, ft, name, at, s.inline)
+		p.restoreFunc(st)
+		return
+	}
+	p.defineFunc(sym, ft, name, at, s.inline)
+}
+
+// defineFunc parses the body of the function sym, declared with the
+// type ft (its parameters' names) as name.
+func (p *parser) defineFunc(sym *symbol, ft *funcType, name string, at pos, inline bool) {
 	sym.defined = true
-	f := &funcDecl{sym: sym, labels: map[string]*label{}, inline: s.inline}
+	f := &funcDecl{sym: sym, labels: map[string]*label{}, inline: inline}
 	sym.fn = f
 	p.fn = f
 	p.pushParams(ft)
@@ -1930,7 +2021,13 @@ func (p *parser) funcDef(name string, t *ctype, s specs, a attrs, at pos) {
 		} else {
 			p.declare(ps, at)
 		}
+		if p.cxx && nontrivialABI(pt) {
+			ps.noCopy, ps.addr = true, true
+		}
 		f.params = append(f.params, ps)
+	}
+	if ft.recv != nil {
+		p.this = f.params[0]
 	}
 	// __func__.
 	fs := &symbol{name: "__func__", kind: symVar, t: arrayOf(tChar.qualified(qConst), int64(len(name)+1)), global: true, storage: sStatic, p: at}
@@ -1940,7 +2037,14 @@ func (p *parser) funcDef(name string, t *ctype, s specs, a attrs, at pos) {
 	p.sc.vars["__FUNCTION__"] = fs
 	p.u.statics = append(p.u.statics, fs)
 	f.locals = append(f.locals, ft.vlas...)
-	f.body = p.funcBody()
+	if ft.ctor || ft.dtor {
+		f.body = p.ctorBody(sym, at)
+	} else {
+		f.body = p.funcBody()
+	}
+	if p.cxx {
+		p.nrvo(f)
+	}
 	if len(ft.vlas) > 0 {
 		// The parameters' VLA lengths, on entry, in order.
 		f.body.list = append([]stmt{&declStmt{syms: ft.vlas}}, f.body.list...)

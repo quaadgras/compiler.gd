@@ -84,6 +84,8 @@ func (g *gen) lv(e expr) lval {
 		return lval{addr: g.compound(e), t: e.t}
 	case *strLit:
 		return lval{addr: g.str(e), t: e.t}
+	case *retSlot:
+		return lval{addr: "sret", t: e.t}
 	}
 	if e.ty().kind == kStruct {
 		return lval{addr: g.rv(e), t: e.ty()}
@@ -407,7 +409,7 @@ func (g *gen) effect(e expr) {
 		g.p("}")
 	case *call:
 		v := g.fenvCall(e, g.callCode(e))
-		if strings.HasPrefix(v, "t") && isSimple(v) {
+		if strings.HasPrefix(v, "t") && isSimple(v) || g.u.callInto[e] != nil {
 			return
 		}
 		if e.t.kind != kVoid && e.t.kind != kStruct {
@@ -444,6 +446,10 @@ func (g *gen) effect(e expr) {
 	case *deref:
 		v := g.rv(e)
 		if e.t.kind != kStruct && e.t.kind != kArray {
+			g.p("_ = %s", v)
+		} else if e.t.kind == kStruct && !isSimple(v) && !isPure(v) {
+			// Not loaded, but its address is computed: a call's
+			// result (C++: a reference).
 			g.p("_ = %s", v)
 		}
 	case *compoundLit:
@@ -1168,7 +1174,16 @@ func (g *gen) callCode(c *call) string {
 	}
 	var args []string
 	var sret string
-	if c.ft.ret.kind == kStruct {
+	if into := g.u.callInto[c]; into != nil {
+		// C++: the object the call constructs.
+		sret = g.lv(into).addr
+		if !isSimple(sret) {
+			t := g.tmp("c23.Ptr")
+			g.p("%s = %s", t, sret)
+			sret = t
+		}
+		args = append(args, sret)
+	} else if c.ft.ret.kind == kStruct {
 		sret = g.cellTmp(c.ft.ret)
 		args = append(args, sret)
 	}
@@ -1332,6 +1347,12 @@ func (g *gen) builtinCode(e *builtinCall) string {
 		x := g.tmp(goType(e.t))
 		g.p("%s = %s", x, g.rv(e.args[0]))
 		return fmt.Sprintf("complex(real(%s), -imag(%s))", x, x)
+	case "cxx_zero":
+		g.p("c23.Memset(%s, 0, %d)", g.rv(e.args[0]), e.args[1].(*intConst).v)
+		return ""
+	case "cxx_copy":
+		g.p("c23.Memmove(%s, %s, %d)", g.rv(e.args[0]), g.rv(e.args[1]), e.args[2].(*intConst).v)
+		return ""
 	case "creal":
 		return fmt.Sprintf("real(%s)", g.rv(e.args[0]))
 	case "cimag":

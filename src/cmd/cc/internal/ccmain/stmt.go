@@ -151,6 +151,7 @@ func (p *parser) declaration() []stmt {
 			p.pendingVLA = nil
 		}
 		if sym != nil && sym.kind == symVar && !sym.global {
+			syms = append(syms, sym.extended...)
 			syms = append(syms, sym)
 		}
 		if sym != nil && sym.kind == symTypedef && sym.t.isVLA() {
@@ -241,7 +242,8 @@ func (p *parser) statement() stmt {
 				}
 			} else {
 				if !p.is(";") {
-					f.init = &exprStmt{p.rvalueVoid(p.expr())}
+					mark := len(p.temps)
+					f.init = &exprStmt{p.fullExpr(mark, p.rvalueVoid(p.expr()))}
 				}
 				p.expect(";")
 			}
@@ -251,7 +253,8 @@ func (p *parser) statement() stmt {
 			}
 			p.expect(";")
 			if !p.is(")") {
-				f.post = p.rvalueVoid(p.expr())
+				mark := len(p.temps)
+				f.post = p.fullExpr(mark, p.rvalueVoid(p.expr()))
 			}
 			p.expect(")")
 			f.body = p.loopBody()
@@ -368,10 +371,11 @@ func (p *parser) statement() stmt {
 			if p.accept(";") {
 				return &returnStmt{}
 			}
+			mark := len(p.temps)
 			x := p.expr()
 			p.expect(";")
 			if rt.kind == kVoid {
-				x = p.rvalueVoid(x)
+				x = p.fullExpr(mark, p.rvalueVoid(x))
 				if x.ty().kind != kVoid {
 					// GCC: a warning.
 					return &block{list: []stmt{&exprStmt{x}, &returnStmt{}}}
@@ -379,7 +383,7 @@ func (p *parser) statement() stmt {
 				return &block{list: []stmt{&exprStmt{x}, &returnStmt{}}}
 			}
 			if p.cxx {
-				return p.returnValue(x, rt, at)
+				return p.returnValue(x, rt, at, mark)
 			}
 			return &returnStmt{p.assignConvert(p.rvalue(x), rt, at, "return")}
 		case "_Defer":
@@ -422,9 +426,10 @@ func (p *parser) statement() stmt {
 			return &labelStmt{l, p.labeledBody()}
 		}
 	}
+	mark := len(p.temps)
 	x := p.expr()
 	p.expect(";")
-	x = p.rvalueVoid(x)
+	x = p.fullExpr(mark, p.rvalueVoid(x))
 	if len(p.pendingVLA) > 0 {
 		// Variable length array lengths in the expression's types.
 		pre := p.pendingVLA
@@ -493,9 +498,10 @@ func (p *parser) condDecl() ([]stmt, expr) {
 // condDeclIn is condDecl, for a for's condition if inFor (where ";"
 // ends it).
 func (p *parser) condDeclIn(inFor bool) ([]stmt, expr) {
+	mark := len(p.temps)
 	decls, x := p.condDeclExpr(inFor)
 	x = p.rvalue(x)
-	return decls, p.scalarCond(x, x.at())
+	return decls, p.fullExpr(mark, p.scalarCond(x, x.at()))
 }
 
 func (p *parser) condDeclExpr(inFor bool) ([]stmt, expr) {
@@ -514,7 +520,7 @@ again:
 		decls = append(decls, p.pendingVLA...)
 		p.pendingVLA = nil
 		if sym.kind == symVar && !sym.global {
-			decls = append(decls, &declStmt{syms: []*symbol{sym}})
+			decls = append(decls, &declStmt{syms: append(sym.extended[:len(sym.extended):len(sym.extended)], sym)})
 		}
 		last = sym
 		if !p.accept(",") {
@@ -665,7 +671,7 @@ func declLoopBody(decls []stmt, c expr, body stmt) stmt {
 
 func hasCleanup(d *declStmt) bool {
 	for _, s := range d.syms {
-		if s.cleanup != nil {
+		if s.cleanup != nil || s.dtor != nil {
 			return true
 		}
 	}
@@ -732,8 +738,9 @@ func withDecls(decls []stmt, s stmt) stmt {
 
 // condition parses the controlling expression of if, while, do and for.
 func (p *parser) condition() expr {
+	mark := len(p.temps)
 	x := p.rvalue(p.expr())
-	return p.scalarCond(x, x.at())
+	return p.fullExpr(mark, p.scalarCond(x, x.at()))
 }
 
 func (p *parser) caseValue(sw *switchStmt) int64 {

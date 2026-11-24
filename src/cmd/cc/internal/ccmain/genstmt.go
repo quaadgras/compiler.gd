@@ -99,6 +99,10 @@ func (g *gen) localName(s *symbol) string {
 
 // declareLocal declares a local at the top of the function.
 func (g *gen) declareLocal(s *symbol) {
+	if s.nrvo {
+		g.names[s] = "sret"
+		return
+	}
 	n := g.localName(s)
 	switch localKindOf(s) {
 	case lkVar:
@@ -142,6 +146,11 @@ func (g *gen) funcLit(f *funcDecl) string {
 		g.tmpN++
 		pn := fmt.Sprintf("p%d", g.tmpN)
 		names = append(names, pn)
+		if ps.noCopy {
+			// C++: the caller's object.
+			g.names[ps] = pn
+			continue
+		}
 		g.declareLocal(ps)
 		g.store(g.localName(ps), ps.t, pn, nil)
 	}
@@ -636,15 +645,20 @@ func (g *gen) localInit(s *symbol) {
 			// interpreter loop reloaded 15 such floats each instruction.
 			g.p("%s = %s", n, zeroOf(s.t))
 		}
+		if s.ctor != nil {
+			g.effect(s.ctor)
+		}
 		return
 	}
-	if s.init == nil {
-		return
+	if s.init != nil {
+		if s.init.scalar == nil {
+			g.p("c23.Memset(%s, 0, %d)", n, s.t.sizeof())
+		}
+		g.initObject(n, s.t, s.init)
 	}
-	if s.init.scalar == nil {
-		g.p("c23.Memset(%s, 0, %d)", n, s.t.sizeof())
+	if s.ctor != nil {
+		g.effect(s.ctor)
 	}
-	g.initObject(n, s.t, s.init)
 }
 
 func baseElem(t *ctype) *ctype {

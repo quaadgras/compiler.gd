@@ -102,6 +102,8 @@ type field struct {
 	unit   *ctype
 	packed bool  // __attribute__((packed)) on the member: alignment 1
 	ubytes int64 // a packed bit-field's: the bytes it spans, from off
+
+	mutable bool // C++: not const in a const object
 }
 
 type funcType struct {

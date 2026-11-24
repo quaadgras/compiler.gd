@@ -349,6 +349,12 @@ func (g *gen) globalVar(s *symbol) {
 		g.initObject(name, s.t, s.init)
 		g.out, g.ind = save, saveInd
 	}
+	if s.ctor != nil {
+		save, saveInd := g.out, g.ind
+		g.out, g.ind = &g.inits, 1
+		g.effect(s.ctor)
+		g.out, g.ind = save, saveInd
+	}
 }
 
 // Types.

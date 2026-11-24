@@ -23,15 +23,22 @@ type defArg struct {
 // function, or one declared before with the same parameters.
 func (p *parser) cxxDeclareFunc(name string, t *ctype, s specs, at pos) *symbol {
 	sc := p.sc
-	if p.fn != nil || sc.kind == skBlock {
+	if sc.kind == skBlock {
 		sc = p.nsScope()
 	}
 	qualified := p.declIn != nil
 	if qualified {
 		sc = p.declIn
 	}
+	if p.declTo != nil {
+		sc, qualified = p.declTo, false
+	}
 	clink := p.cLinkage(at) && sc.kind == skNamespace || name == "main" && sc.parent == nil
-	head := sc.vars[name]
+	key := name
+	if t.fn.ctor {
+		key = "{ctor}"
+	}
+	head := sc.vars[key]
 	if head != nil && head.kind != symFunc {
 		if !head.tagName {
 			p.errorAt(at, "%q redeclared as a function", name)
@@ -78,7 +85,7 @@ func (p *parser) cxxDeclareFunc(name string, t *ctype, s specs, at pos) *symbol 
 	if last != nil {
 		last.next = sym
 	} else {
-		sc.vars[name] = sym
+		sc.vars[key] = sym
 	}
 	if sc.parent == nil {
 		p.u.scope[sym.name] = sym
@@ -250,6 +257,14 @@ func (p *parser) convRank(a expr, pt *ctype) int {
 		return rkConv
 	}
 	return rkNone
+}
+
+// An adlRef is an unqualified function name that is called: set are
+// the functions ordinary lookup finds.
+type adlRef struct {
+	node
+	name string
+	set  []*symbol
 }
 
 // A candidate is a function a call may be to, with the rank of each
@@ -442,6 +457,43 @@ func (p *parser) callResult(c *call, ft *funcType, at pos) expr {
 func (p *parser) cxxCall(x expr, at pos) expr {
 	args := p.callArgs()
 	switch x := x.(type) {
+	case *adlRef:
+		set := x.set
+		seen := map[*symbol]bool{}
+		for _, s := range set {
+			seen[s] = true
+		}
+		for _, a := range args {
+			t := a.ty()
+			for t.kind == kPtr || t.kind == kArray {
+				t = t.elem
+			}
+			var sc *scope
+			switch {
+			case t.kind == kStruct:
+				sc = t.rec.sc
+			case t.enum != nil:
+				sc = t.enum.sc
+			}
+			for sc != nil && sc.kind != skNamespace {
+				sc = sc.parent
+			}
+			if sc == nil {
+				continue
+			}
+			if s := sc.find(x.name); s != nil && s.kind == symFunc {
+				for _, o := range funcSet(s) {
+					if !seen[o] {
+						seen[o] = true
+						set = append(set, o)
+					}
+				}
+			}
+		}
+		if len(set) == 0 {
+			p.errorAt(at, "%q undeclared", x.name)
+		}
+		return p.callFunc(p.resolve(set, nil, args, at, x.name, false), nil, args, at)
 	case *varRef:
 		if x.sym.kind == symFunc {
 			sym := p.resolve(funcSet(x.sym), nil, args, at, x.sym.src, false)

@@ -660,6 +660,10 @@ func (p *parser) castTo(e expr, t *ctype, at pos, how string) expr {
 // conversion, or a temporary's construction.
 func (p *parser) functionalCast(t *ctype, at pos) expr {
 	brace := p.is("{")
+	if ci := classOf(t); brace && (t.kind == kArray || t.kind == kStruct && (ci == nil || !ci.userCtor)) {
+		// An aggregate's: a compound literal.
+		return p.compoundLiteral(t, at)
+	}
 	p.next()
 	var args []expr
 	end := ")"
@@ -985,9 +989,35 @@ func (p *parser) initVar(sym *symbol, e expr, at pos) {
 	sym.init = &initializer{scalar: p.initConvert(e, sym.t, at, "initializer")}
 }
 
+// extending runs f, the parsing of the initializer of sym: if sym is a
+// reference, the temporaries bound to it live as long as it does.
+func (p *parser) extending(sym *symbol, f func()) {
+	if !sym.t.isRef() || sym.global || p.fn == nil {
+		f()
+		return
+	}
+	save := p.extend
+	var ext []*symbol
+	p.extend = &ext
+	f()
+	p.extend = save
+	sym.extended = ext
+}
+
 // cxxName parses a name in an expression, which may be qualified.
 func (p *parser) cxxName(at pos) expr {
 	sym, in, n := p.qualName(0)
+	if in == nil && n == 1 && p.isAt(1, "(") && (sym == nil || sym.kind == symFunc && sym.t.fn.recv == nil && (sym.sc == nil || sym.sc.kind != skClass)) {
+		// An unqualified function's call: the functions of its
+		// arguments' namespaces are candidates too.
+		name := p.next().text
+		a := &adlRef{node{tVoid, at}, name, nil}
+		if sym != nil {
+			sym.used = true
+			a.set = funcSet(sym)
+		}
+		return a
+	}
 	if sym == nil {
 		t := p.peekAt(n)
 		if n > 0 && p.peekAt(n-1).kind == tkIdent {
@@ -1102,9 +1132,84 @@ func (p *parser) declAhead() bool {
 
 // returnValue is the return statement of the value e from a function
 // that returns rt.
-func (p *parser) returnValue(e expr, rt *ctype, at pos) stmt {
+func (p *parser) returnValue(e expr, rt *ctype, at pos, mark int) stmt {
 	if rt.kind == kStruct {
-		return p.classReturn(e, rt, at)
+		return p.classReturn(e, rt, at, mark)
 	}
-	return &returnStmt{p.initConvert(e, rt, at, "return")}
+	return &returnStmt{p.fullExpr(mark, p.initConvert(e, rt, at, "return"))}
+}
+
+// cxxUnary parses the unary expressions that are C++'s own, or that an
+// operand of class type makes a function's call: ok is false for the
+// rest.
+func (p *parser) cxxUnary(t token, at pos) (expr, bool) {
+	if t.kind == tkIdent {
+		switch t.text {
+		case "new":
+			p.next()
+			return p.newExpr(at), true
+		case "delete":
+			p.next()
+			return p.deleteExpr(at), true
+		}
+		return nil, false
+	}
+	if t.kind == tkPunct && t.text == "::" && (p.isAt(1, "new") || p.isAt(1, "delete")) {
+		p.next()
+		if p.next().text == "new" {
+			return p.newExpr(at), true
+		}
+		return p.deleteExpr(at), true
+	}
+	if t.kind != tkPunct {
+		return nil, false
+	}
+	switch t.text {
+	case "+", "-", "~", "!", "*", "++", "--":
+	default:
+		return nil, false
+	}
+	// The operand first: if it is not of a class or an enumeration, the
+	// operator is C's, parsed again.
+	save := p.pos
+	p.next()
+	var x expr
+	if t.text == "++" || t.text == "--" {
+		x = p.unaryExpr()
+	} else {
+		x = p.castExpr()
+	}
+	if !overloadable(x.ty()) {
+		p.pos = save
+		return nil, false
+	}
+	if e := p.overloaded(t.text, []expr{x}, at); e != nil {
+		return e, true
+	}
+	if x.ty().kind == kStruct {
+		if t.text == "!" {
+			return p.fold(&unary{node{tInt, at}, "!", p.boolOf(x, at)}), true
+		}
+		p.errorAt(at, "no match for operator%s (operand type is %s)", t.text, x.ty())
+	}
+	p.pos = save
+	return nil, false
+}
+
+// classOperand is x as an operand of a built-in operator whose other
+// operand is y: an object of class type is converted by its conversion
+// function.
+func (p *parser) classOperand(x, y expr, at pos) expr {
+	if x.ty().kind != kStruct {
+		return x
+	}
+	to := y.ty()
+	if to.kind == kStruct || to.kind == kArray {
+		to = tInt
+	}
+	if c := p.convertClass(x, valueType(&goVal{node{to, at}, ""}), at); c != nil {
+		return c
+	}
+	p.errorAt(at, "no match for an operator with operands of types %s and %s", x.ty(), y.ty())
+	return nil
 }

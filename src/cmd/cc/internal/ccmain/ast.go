@@ -235,6 +235,16 @@ type symbol struct {
 	comdat  bool    // inline: each unit that uses it defines it
 	tagName bool    // a class or enumeration's name, as a type name
 	ctor    expr    // a class object's construction, after its (C) initializer
+	dtor    stmt    // its destruction, when its block is left
+
+	explicit bool // a constructor or conversion function declared explicit
+	implicit bool // a member function the class declares implicitly, or = default
+	deleted  bool // = delete
+	trivial  bool // an implicit member that does nothing, or copies bytes: never called
+	noCopy   bool // a parameter of class type that is the caller's object, not a copy
+	nrvo     bool // a local that is the function's result: in the caller's memory
+
+	extended []*symbol // the temporaries whose lifetime a reference's declaration extends
 }
 
 type funcDecl struct {
@@ -250,6 +260,11 @@ type funcDecl struct {
 
 	labelIDs   int
 	addrLabels []*label // labels whose address is taken
+
+	// C++: the return statements of a function that returns a class,
+	// and the local each returns (nil if it is not one).
+	rets    []*block
+	retVars []*symbol
 }
 
 type label struct {
@@ -342,6 +357,8 @@ type unit struct {
 	tags    map[string]*ctype
 	scope   map[string]*symbol   // file scope: for cgo's names
 	fenv    map[expr]fenvPragmas // operations under floating-point pragmas (fenv.go)
+
+	callInto map[*call]expr // C++: the object a call that returns a class constructs
 }
 
 // goName is a label's Go name, without its L_.

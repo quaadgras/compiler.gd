@@ -134,6 +134,10 @@ func (g *gen) blockStmts(b *block, gen func(stmt)) {
 		case *declStmt:
 			gen(s)
 			for _, sym := range s.syms {
+				if sym.dtor != nil {
+					d := sym.dtor
+					f.exits = append(f.exits, func() { gen(d) })
+				}
 				if sym.cleanup != nil {
 					sym := sym
 					f.exits = append(f.exits, func() {
