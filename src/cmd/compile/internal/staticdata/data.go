@@ -100,6 +100,12 @@ func StringSym(gd *base.Invocation, pos src.XPos, s string) (data *obj.LSym) {
 	symdata := gd.Ctxt.Lookup(stringSymPrefix + symname)
 	if !symdata.OnList() {
 		off := dstringdata(gd, symdata, 0, s, pos, "string")
+		// A 0 byte follows the string (not counted in its length), so
+		// the data of a string constant is also a C string. Nothing
+		// points into the middle of another string's symbol, so this
+		// costs one byte per distinct string.
+		symdata.WriteInt(gd.Ctxt, int64(off), 1, 0)
+		off++
 		objw.Global(gd, symdata, int32(off), obj.DUPOK|obj.RODATA|obj.LOCAL)
 		symdata.Set(obj.AttrContentAddressable, true)
 		symdata.Align = 1
@@ -163,7 +169,7 @@ func fileStringSym(gd *base.Invocation, pos src.XPos, file string, readonly bool
 		}
 		return sym, size, nil
 	}
-	if size > maxFileSize {
+	if size+1 > maxFileSize { // +1 for the 0 byte after it
 		// ggloblsym takes an int32,
 		// and probably the rest of the toolchain
 		// can't handle such big symbols either.
@@ -195,7 +201,11 @@ func fileStringSym(gd *base.Invocation, pos src.XPos, file string, readonly bool
 			info := symdata.NewFileInfo()
 			info.Name = file
 			info.Size = size
-			objw.Global(gd, symdata, int32(size), obj.DUPOK|obj.RODATA|obj.LOCAL)
+			// One more than the file: the 0 byte StringSym writes
+			// after a string (the linker zero-fills the rest of a
+			// symbol), as this symbol may be StringSym's for the
+			// same content.
+			objw.Global(gd, symdata, int32(size+1), obj.DUPOK|obj.RODATA|obj.LOCAL)
 			symdata.Align = 1
 			// Note: AttrContentAddressable cannot be set here,
 			// because the content-addressable-handling code
