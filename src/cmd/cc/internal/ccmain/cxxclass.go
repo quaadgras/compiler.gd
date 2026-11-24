@@ -828,11 +828,25 @@ func (p *parser) completeClass(t *ctype) {
 	}
 	if !userCopy {
 		sym := implicit(r.tag, &funcType{ret: tVoid, proto: true, ctor: true, params: []*ctype{cref}, names: []string{"o"}}, !ci.nontrivCopy)
-		later(sym, func() { p.implicitCopy(sym, t, false) })
+		later(sym, func() { p.implicitCopy(sym, t, false, false) })
 	}
 	if !userAssign {
 		sym := implicit("operator=", &funcType{ret: refTo(self, 1), proto: true, params: []*ctype{cref}, names: []string{"o"}}, !ci.nontrivCopy)
-		later(sym, func() { p.implicitCopy(sym, t, true) })
+		later(sym, func() { p.implicitCopy(sym, t, true, false) })
+	}
+	// A move constructor or move assignment declared = default: member
+	// by member, each moved. (One that is not declared is not made: the
+	// copy is used.)
+	for _, key := range []string{"{ctor}", "operator="} {
+		for o := sc.vars[key]; o != nil; o = o.next {
+			ps := o.t.fn.params
+			if o.tmpl != nil || !o.implicit || len(ps) != 2 || ps[1].ref != 2 || !isSelf(ps[1]) {
+				continue
+			}
+			o, isAssign := o, key == "operator="
+			o.comdat, o.trivial = true, !ci.nontrivCopy
+			later(o, func() { p.implicitCopy(o, t, isAssign, true) })
+		}
 	}
 	if userDtor == nil || userDtor.implicit {
 		sym := implicit("~"+r.tag, &funcType{ret: tVoid, proto: true, dtor: true}, !ci.nontrivDtor)
@@ -917,8 +931,9 @@ func (p *parser) implicitCtor(sym *symbol, t *ctype) {
 }
 
 // implicitCopy defines a class's implicit copy constructor, or copy
-// assignment operator: base by base, then member by member.
-func (p *parser) implicitCopy(sym *symbol, t *ctype, isAssign bool) {
+// assignment operator: base by base, then member by member. With move
+// it is the move constructor or move assignment: each is moved.
+func (p *parser) implicitCopy(sym *symbol, t *ctype, isAssign, move bool) {
 	p.synth(sym, func(ps []*symbol) []stmt {
 		at := sym.p
 		ci := t.rec.cls
@@ -926,6 +941,9 @@ func (p *parser) implicitCopy(sym *symbol, t *ctype, isAssign bool) {
 		other := p.unref(&varRef{node{ps[1].t, at}, ps[1]})
 		var out []stmt
 		copyObj := func(dst, src expr) {
+			if move && dst.ty().kind == kStruct {
+				src = p.xvalue(src)
+			}
 			switch {
 			case !needsCopy(dst.ty()):
 				if dst.ty().sizeof() > 0 {
@@ -952,6 +970,9 @@ func (p *parser) implicitCopy(sym *symbol, t *ctype, isAssign bool) {
 			}
 			dst := &member{node{f.t, at}, this, f}
 			src := &member{node{qualifyDeep(f.t, qConst), at}, other, f}
+			if move {
+				src.t = f.t
+			}
 			if f.bits >= 0 {
 				out = append(out, &exprStmt{&assign{node{f.t.unqual(), at}, "=", dst, &cast{node{f.t.unqual(), at}, src}, f.t}})
 				continue

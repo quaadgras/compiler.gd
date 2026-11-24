@@ -148,12 +148,13 @@ compiled: the mangled names are the Itanium ABI's, the calls are Go's.
 ## Status
 
 `go test cmd/cc -run Cxx` compiles `testdata/cxx/*.cc` with cmd/cc and
-with g++ and compares what they print (34 programs). Against Godot
+with g++ and compares what they print (36 programs). Against Godot
 (4.7.1, with its own defines and include directories, and `__GNUC__`
-defined: Godot expects its compiler to be GCC, clang or MSVC), 175 of
-the 177 `.cpp` files of `core` translate, each alone. The two others
-include `<vector>` and `<algorithm>` for third-party code (clipper2,
-GamepadMotionHelpers).
+defined: Godot expects its compiler to be GCC, clang or MSVC), 176 of
+the 177 `.cpp` files of `core` translate, each alone, and the 176
+together, as one program of 1.9 million lines of Go. The other,
+`core/math/geometry_2d.cpp`, includes clipper2, which uses `<vector>`,
+`<string>`, `<queue>` and `<iostream>`.
 
 Translated together with `cc -undef` (a call of a function that no file
 defines panics, so a part of a program can be built), seven of them run:
@@ -205,8 +206,9 @@ What is there, by step of the order above:
 4. **The library**: `<type_traits>`, `<utility>`, `<initializer_list>`,
    `<new>`, `<atomic>`, `<limits>`, `<functional>`, `<mutex>`,
    `<condition_variable>`, `<shared_mutex>`, `<thread>`, `<typeinfo>`,
-   `<array>`, `<cmath>` with its overloads, and the other `<c...>`
-   headers.
+   `<array>`, `<algorithm>` (min, max, clamp, sort and the simple
+   algorithms on iterators), `<cmath>` with its overloads, and the
+   other `<c...>` headers.
 
 Not there yet:
 
@@ -225,8 +227,8 @@ Not there yet:
   deduction guides, member templates of class templates defined outside
   both, designated initializers and brace elision for aggregates with
   members that have constructors;
-- the containers and algorithms of the standard library (`<vector>`,
-  `<string>`, `<algorithm>`): Godot's own code does not use them, some
+- the containers and streams of the standard library (`<vector>`,
+  `<string>`, `<iostream>`): Godot's own code does not use them, some
   of its third-party libraries do;
 - access checking, which is not planned.
 

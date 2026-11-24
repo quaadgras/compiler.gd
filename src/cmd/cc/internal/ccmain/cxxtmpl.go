@@ -56,7 +56,9 @@ type template struct {
 	// A class template.
 	specs   []*template            // its specializations
 	members map[string][]*template // its members defined outside it, by name
-	insts   map[string]*tinst
+	outer   map[string][]*template // its member templates defined outside it, by name
+
+	insts map[string]*tinst
 
 	// A specialization.
 	primary *template
@@ -504,10 +506,28 @@ func (p *parser) templateDecl() {
 	params := p.templateParams()
 	if p.is("template") {
 		// A member template of a class template, defined outside
-		// both: not supported. It is an error only if it is used.
+		// both: kept with the class template, for the member template
+		// of each of its instances (outsideDef).
 		p.next()
-		p.skipAngles()
-		p.skipDecl(false)
+		if !p.is("<") {
+			p.skipDecl(false)
+			return
+		}
+		inner := p.templateParams()
+		def := &template{params: inner, start: p.pos, sc: p.sc, at: at}
+		name, nameAt, qual, isFunc := p.declName()
+		def.name, def.nameAt = name, p.pos+nameAt
+		var first *symbol
+		if qual >= 0 && isFunc {
+			first = p.lookup(p.peekAt(qual).text)
+		}
+		if p.skipDecl(false) && first != nil && first.kind == symTemplate && first.tmpl.kind == 'c' {
+			ct := first.tmpl
+			if ct.outer == nil {
+				ct.outer = map[string][]*template{}
+			}
+			ct.outer[name] = append(ct.outer[name], def)
+		}
 		return
 	}
 	tm := &template{params: params, start: p.pos, sc: p.sc, at: at}
@@ -1843,6 +1863,9 @@ func (p *parser) drain(final bool) {
 			// once that is seen.
 			tm := sym.inst.tmpl
 			if !tm.hasBody {
+				p.outsideDef(tm)
+			}
+			if !tm.hasBody {
 				sym.queued = false
 				if !final {
 					wait = append(wait, sym)
@@ -1891,6 +1914,11 @@ func (p *parser) drain(final bool) {
 					p.replay(def.start, dsc, func() { p.topLevel() })
 				})
 			}
+			if !sym.defined && (sym.late != nil || sym.synth != nil) {
+				// Its body was kept for when it is used: it is.
+				p.pending = append(p.pending, sym)
+				continue
+			}
 			if !sym.defined {
 				sym.queued = false
 				if !final {
@@ -1903,6 +1931,39 @@ func (p *parser) drain(final bool) {
 		sym.queued = true
 	}
 	p.pending = wait
+}
+
+// outsideDef gives tm, a member function template declared in a class
+// template's instance, the definition that was written outside the
+// class template, if there is one:
+//
+//	template <class T> template <class U> void C<T>::f(U) {...}
+//
+// The class's parameters are in scope by the names the class gives
+// them.
+func (p *parser) outsideDef(tm *template) {
+	sc := tm.sc
+	for sc != nil && sc.kind == skTemplate {
+		sc = sc.parent
+	}
+	if sc == nil || sc.kind != skClass || sc.rec == nil || sc.rec.inst == nil {
+		return
+	}
+	for ct := sc.rec.inst.tmpl; ct != nil; ct = ct.primary {
+		for _, def := range ct.outer[tm.name] {
+			if len(def.params) != len(tm.params) {
+				continue
+			}
+			params := append([]tparam(nil), def.params...)
+			for i := range params {
+				if params[i].dflt == 0 {
+					params[i].dflt = tm.params[i].dflt // the declaration's default
+				}
+			}
+			tm.params, tm.start, tm.hasBody, tm.nameAt = params, def.start, true, def.nameAt
+			return
+		}
+	}
 }
 
 // flatToParams are the arguments args of a class template's instance as
