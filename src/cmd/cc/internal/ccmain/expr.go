@@ -295,7 +295,7 @@ func (p *parser) binaryExpr(min int) expr {
 	for {
 		t := p.peek()
 		prec, ok := binPrec[t.text]
-		if t.kind != tkPunct || !ok || prec <= min || p.noGT > 0 && t.text == ">" {
+		if t.kind != tkPunct || !ok || prec <= min || p.noGT > 0 && (t.text == ">" || t.text == ">>") {
 			return x
 		}
 		at := p.here()
@@ -309,17 +309,7 @@ func (p *parser) binaryExpr(min int) expr {
 			if short {
 				p.condDepth--
 			}
-			if overloadable(x.ty()) || overloadable(y.ty()) {
-				if e := p.overloaded(t.text, []expr{x, y}, at); e != nil {
-					x = e
-					continue
-				}
-				x, y = p.classOperand(x, y, at), p.classOperand(y, x, at)
-			}
-			x = p.binop(at, t.text, p.rvalue(x), p.rvalue(y))
-			if prec <= 7 && prec != 3 && prec != 4 && prec != 5 {
-				x = p.boolResult(x) // &&, ||, comparisons
-			}
+			x = p.cxxBinary(at, t.text, x, y)
 			continue
 		}
 		y := p.binaryExpr(prec)
@@ -845,6 +835,15 @@ func (p *parser) unaryExpr() expr {
 		switch t.text {
 		case "sizeof":
 			p.next()
+			if p.cxx && p.accept("...") {
+				p.expect("(")
+				s := p.lookup(p.ident())
+				p.expect(")")
+				if s == nil || s.kind != symPack {
+					p.errorAt(at, "sizeof... of what is not a parameter pack")
+				}
+				return p.intc(int64(packLen(s)), tULong, at)
+			}
 			n := len(p.pendingVLA)
 			if p.is("(") && p.isTypeStart(1) {
 				p.next()
@@ -1277,10 +1276,22 @@ func (p *parser) primary() expr {
 			if p.is("{") {
 				return p.stmtExprOf(at)
 			}
-			if p.isTypeStart(0) {
+			if p.isTypeStart(0) && !p.cxx {
 				ty := p.typeName()
 				p.expect(")")
 				return p.compoundLiteral(ty, at)
+			}
+			if p.cxx {
+				if e, ok := p.foldExpr(at); ok {
+					return e
+				}
+				// Within parentheses, ">" is an operator again.
+				save := p.noGT
+				p.noGT = 0
+				x := p.expr()
+				p.noGT = save
+				p.expect(")")
+				return x
 			}
 			x := p.expr()
 			p.expect(")")
@@ -1315,6 +1326,9 @@ func (p *parser) primary() expr {
 				return &varRef{node{p.this.t, at}, p.this}
 			case "static_cast", "const_cast", "reinterpret_cast", "dynamic_cast":
 				return p.namedCast(t.text, at)
+			}
+			if isTraitName(t.text) && p.is("(") {
+				return p.typeTrait(t.text, at)
 			}
 			p.pos--
 			return p.cxxName(at)

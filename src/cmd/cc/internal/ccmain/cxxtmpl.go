@@ -5,6 +5,7 @@
 package ccmain
 
 import (
+	"os"
 	"strings"
 )
 
@@ -199,7 +200,7 @@ func (p *parser) skipAngles() {
 				if depth < 0 {
 					// The second ">" is another's.
 					p.pos--
-					p.toks[p.pos].text = ">"
+					p.gtHalf = p.pos
 					depth = 0
 				}
 			}
@@ -684,19 +685,26 @@ type replayState struct {
 	explicit []targ
 	tmplSufx string
 	instTag  *ctype
+	packOn   bool
+	packI    int
 }
 
 // replay parses from the token start in the scope sc, outside any
 // function, with f; then the parser is where it was.
 func (p *parser) replay(start int, sc *scope, f func()) {
-	st := replayState{p.pos, p.saveFunc(), p.cls, p.declIn, p.declTo, p.noGT, p.exprType, p.externC, p.pattern, p.explicitT, p.tmplSuffix, p.instTag}
+	saveGT := p.gtHalf
+	defer func() { p.gtHalf = saveGT }()
+	st := replayState{p.pos, p.saveFunc(), p.cls, p.declIn, p.declTo, p.noGT, p.exprType, p.externC, p.pattern, p.explicitT, p.tmplSuffix, p.instTag, p.packOn, p.packI}
 	defer func() {
 		p.pos = st.pos
 		p.restoreFunc(st.fs)
 		p.cls, p.declIn, p.declTo, p.noGT, p.exprType, p.externC, p.pattern = st.cls, st.declIn, st.declTo, st.noGT, st.exprType, st.externC, st.pattern
 		p.explicitT, p.tmplSuffix, p.instTag = st.explicit, st.tmplSufx, st.instTag
+		p.packOn, p.packI = st.packOn, st.packI
 	}()
 	p.pos, p.sc = start, sc
+	p.packOn = false
+	p.gtHalf = -1
 	p.cls, p.declIn, p.declTo, p.noGT, p.exprType, p.externC, p.explicitT, p.tmplSuffix, p.instTag = nil, nil, nil, 0, 0, 0, nil, "", nil
 	f()
 }
@@ -706,8 +714,12 @@ func (p *parser) replay(start int, sc *scope, f func()) {
 func (p *parser) try(f func()) (ok bool) {
 	defer func() {
 		if r := recover(); r != nil {
-			if _, isParse := r.(parseError); !isParse {
+			pe, isParse := r.(parseError)
+			if !isParse {
 				panic(r)
+			}
+			if debugSFINAE {
+				println("substitution failure:", pe.msg)
 			}
 			ok = false
 		}
@@ -778,7 +790,28 @@ func (p *parser) templateArgs() []targ {
 	var args []targ
 	for !p.is(">") && !p.is(">>") {
 		var a targ
-		if p.isTypeStart(0) {
+		if n, dots, end, ok := p.packAhead(true); ok && dots == end-1 && p.pattern == 0 {
+			// A pack expansion: an argument for each element.
+			p.expand(n, end, func() {
+				var a targ
+				if p.typeArgAhead() {
+					a.t = p.typeName()
+				} else {
+					e := p.rvalue(p.conditional())
+					v, ok := p.foldInt(e)
+					if !ok {
+						p.errorAt(e.at(), "a template argument is not a constant")
+					}
+					a.isVal, a.v, a.vt = true, v, e.ty().unqual()
+				}
+				args = append(args, a)
+			})
+			if !p.accept(",") {
+				break
+			}
+			continue
+		}
+		if p.typeArgAhead() {
 			a.t = p.typeName()
 		} else if s := p.lookupAt0(); s != nil && s.kind == symTemplate && s.tmpl.kind == 'c' && !p.isAt(1, "<") && !p.isAt(1, "::") {
 			a.tmpl = s.tmpl // a template as an argument
@@ -872,7 +905,7 @@ func (p *parser) fullArgs(tm *template, given []targ, at pos) []targ {
 			var a targ
 			p.replay(tp.dflt, sc, func() {
 				p.noGT = 1
-				if p.isTypeStart(0) {
+				if p.typeArgAhead() {
 					a.t = p.typeName()
 					return
 				}
@@ -911,8 +944,12 @@ func (p *parser) valueParamType(tm *template, i int, before []targ) *ctype {
 	sc := p.bindParams(tm, before)
 	p.try(func() {
 		p.replay(tp.vtype, sc, func() {
-			vt := p.typeName()
-			if p.pos == tp.vend && (vt.isInteger() || vt.isPtr()) {
+			s := p.declSpecs()
+			if s.t == nil {
+				return
+			}
+			_, vt, _ := p.declarator(s.t)
+			if p.pos >= tp.vend && (vt.isInteger() || vt.isPtr()) {
 				t = vt.unqual()
 			}
 		})
@@ -1057,6 +1094,24 @@ func (p *parser) selectSpec(tm *template, args []targ) (*template, []targ) {
 			}
 		}
 		if !ok {
+			continue
+		}
+		// The pattern with what was deduced must be the arguments: its
+		// parts that deduce nothing are checked so, and a failure to
+		// substitute is no match.
+		var subst []targ
+		ssc := p.bindParams(sp, bound)
+		if !p.try(func() {
+			p.replay(sp.pattern, ssc, func() { subst = p.templateArgs() })
+		}) {
+			continue
+		}
+		subst = flatArgs(subst)
+		same := len(subst) == len(flat)
+		for i := 0; same && i < len(subst); i++ {
+			same = sameArg(subst[i], flat[i])
+		}
+		if !same {
 			continue
 		}
 		if best == nil || len(sp.params) <= len(best.params) {
@@ -1230,8 +1285,24 @@ func (p *parser) funcPattern(tm *template) *funcType {
 		p.replay(tm.start, sc, func() {
 			p.pattern = 1
 			p.cls = p.enclosingClass(tm.sc)
-			s := p.declSpecs()
-			_, t, _ := p.declarator(p.baseOr(s))
+			// The return type, if it can be parsed: nothing is deduced
+			// from it.
+			var base *ctype
+			start := p.pos
+			if !p.try(func() {
+				s := p.declSpecs()
+				base = tVoid
+				if !s.noType {
+					base = p.baseOr(s)
+				}
+			}) || p.pos > tm.nameAt {
+				p.pos, p.sc = start, sc
+				for p.pos < tm.nameAt && !p.is("*") && !p.is("&") && !p.is("&&") {
+					p.next()
+				}
+				base = &ctype{kind: kDependent, dep: &depType{}}
+			}
+			_, t, _ := p.declarator(base)
 			if t.kind == kFunc {
 				tm.pat = t.fn
 			}
@@ -1319,7 +1390,7 @@ func (p *parser) deduce(tm *template, given []targ, args []expr, at pos) ([]targ
 			ok := p.try(func() {
 				p.replay(tp.dflt, sc, func() {
 					p.noGT = 1
-					if p.isTypeStart(0) {
+					if p.typeArgAhead() {
 						a.t = p.typeName()
 						return
 					}
@@ -1339,6 +1410,23 @@ func (p *parser) deduce(tm *template, given []targ, args []expr, at pos) ([]targ
 			return nil, false
 		}
 		set[i] = true
+	}
+	for i, tp := range tm.params {
+		if tp.kind != 'v' || tp.vend <= tp.vtype {
+			continue
+		}
+		// The parameter's type, with the arguments: if it cannot be
+		// made, a substitution failure.
+		sc := p.bindParams(tm, bound[:i])
+		if !p.try(func() {
+			p.replay(tp.vtype, sc, func() {
+				if s := p.declSpecs(); s.t != nil {
+					p.declarator(s.t)
+				}
+			})
+		}) {
+			return nil, false
+		}
 	}
 	return bound, true
 }
@@ -1611,3 +1699,25 @@ func (p *parser) completeFor(t *ctype) {
 	}
 	p.complete(t)
 }
+
+// typeArgAhead reports whether a type, not an expression, is next: where
+// either may be (a template argument). T(x) and T{x} are expressions.
+func (p *parser) typeArgAhead() bool {
+	if !p.isTypeStart(0) {
+		return false
+	}
+	n := p.typeSpecEnd(0)
+	switch {
+	case p.isAt(n, "{"):
+		return false
+	case p.isAt(n, "::") && p.pattern > 0 && !p.is("typename"):
+		return false // a member of a type that depends on a parameter: a value
+	case p.isAt(n, "("):
+		return p.isAt(n+1, ")") || p.isAt(n+1, "*") || p.isAt(n+1, "&") || p.isAt(n+1, "&&") || p.isAt(n+1, "...") || p.isTypeStart(n+1)
+	}
+	return true
+}
+
+// debugSFINAE prints the errors that are not reported because they are
+// substitution failures: CCDEBUG=sfinae.
+var debugSFINAE = os.Getenv("CCDEBUG") == "sfinae"

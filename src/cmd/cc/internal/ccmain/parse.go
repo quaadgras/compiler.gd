@@ -68,10 +68,13 @@ type parser struct {
 	declTo     *scope     // the scope the next function is declared in, if not the current one
 	userConv   int        // ranking a user-defined conversion's own argument
 	pattern    int        // parsing a template's pattern: its parameters are placeholders
-	explicitT  []targ     // the explicit template arguments of the call being resolved
-	tmplSuffix string     // the template arguments, mangled, of the function being instantiated
-	instTag    *ctype     // the class template instance whose definition is being parsed
-	pending    []*symbol  // used, and not yet defined: template instances' functions
+	packOn     bool       // parsing a pack expansion's pattern, for the element packI
+	packI      int
+	gtHalf     int       // the ">>" token whose first ">" has closed template brackets, or -1
+	explicitT  []targ    // the explicit template arguments of the call being resolved
+	tmplSuffix string    // the template arguments, mangled, of the function being instantiated
+	instTag    *ctype    // the class template instance whose definition is being parsed
+	pending    []*symbol // used, and not yet defined: template instances' functions
 	draining   bool
 	tids       map[tidKey]tidVal
 	direct     bool          // the next call of a virtual function is not virtual: its name is qualified
@@ -112,6 +115,7 @@ func parse(file string, toks []token) (u *unit, err error) {
 	p.u = &unit{file: file, tags: map[string]*ctype{}}
 	p.push()
 	p.sc.kind = skNamespace
+	p.gtHalf = -1
 	p.u.scope = p.sc.vars
 	p.u.tags = p.sc.tags
 	for p.peek().kind != tkEOF {
@@ -526,7 +530,7 @@ func (p *parser) declSpecs() specs {
 				continue
 			case "typename":
 				p.next()
-				if _, n := p.cxxTypeAt(0); n == 0 && p.pattern > 0 && s.t == nil {
+				if _, n := p.cxxTypeAt(0); (n == 0 || p.isAt(n, "::")) && p.pattern > 0 && s.t == nil {
 					// In a pattern: a type that cannot be known.
 					p.skipQualName()
 					s.t = &ctype{kind: kDependent, dep: &depType{}}
@@ -554,6 +558,29 @@ func (p *parser) declSpecs() specs {
 				continue
 			case "decltype":
 				w = "typeof"
+			case "__underlying_type", "__make_unsigned", "__make_signed":
+				p.next()
+				p.expect("(")
+				et := p.typeName()
+				p.expect(")")
+				c := *et
+				c.enum = nil
+				switch {
+				case w == "__underlying_type":
+					c.q = 0
+				case !c.isInteger():
+				case w == "__make_unsigned":
+					c = *c.unsignedOf().qualified(et.q)
+				default:
+					for _, st := range []*ctype{tSChar, tShort, tInt, tLong, tLLong} {
+						if st.sizeof() == c.sizeof() && (st.kind != kLong || c.kind == kULong || c.kind == kLong) {
+							c = *st.qualified(et.q)
+							break
+						}
+					}
+				}
+				s.t, seen = &c, true
+				continue
 			}
 		}
 		switch w {
@@ -1235,6 +1262,9 @@ func (p *parser) declarator(base *ctype) (string, *ctype, attrs) {
 	ptrDone:
 	}
 	a.merge(p.attributes())
+	if p.cxx && p.is("...") && (p.packOn || p.pattern > 0) {
+		p.next() // a parameter pack: its elements are declared one by one
+	}
 	if p.is("(") && p.nestedDeclarator() {
 		// ( declarator ): parse what follows it first, then the inner
 		// declarator with that type.
@@ -1432,8 +1462,42 @@ func (p *parser) suffixes(t *ctype, a *attrs) *ctype {
 		}
 		a.merge(p.attributes())
 		ret := p.suffixes(t, a)
-		if p.cxx && ret.isAuto && p.accept("->") {
+		if p.cxx && ret.isAuto && p.is("->") && p.pattern > 0 {
+			// In a pattern: nothing is deduced from it.
+			depth := 0
+			for !(depth == 0 && (p.is("{") || p.is(";") || p.is("=") || p.is(",") || p.is(")"))) {
+				if p.is("(") || p.is("[") {
+					depth++
+				} else if p.is(")") || p.is("]") {
+					depth--
+				}
+				if p.next().kind == tkEOF {
+					p.errorf("unterminated return type")
+				}
+			}
+			ret = &ctype{kind: kDependent, dep: &depType{}}
+		} else if p.cxx && ret.isAuto && p.accept("->") {
+			// A trailing return type: the parameters are in scope.
+			p.push()
+			for i, name := range ft.names {
+				if name == "" || i >= len(ft.params) {
+					continue
+				}
+				for len(ft.psyms) <= i {
+					ft.psyms = append(ft.psyms, nil)
+				}
+				if ft.psyms[i] == nil {
+					ft.psyms[i] = &symbol{name: name, kind: symVar, t: ft.params[i]}
+				}
+				p.sc.vars[name] = ft.psyms[i]
+			}
+			for _, pk := range ft.packs {
+				if pk.name != "" {
+					p.sc.vars[pk.name] = &symbol{name: pk.name, src: pk.name, kind: symPack, isParamPack: true, packSyms: ft.psyms[pk.start : pk.start+pk.n], sc: p.sc}
+				}
+			}
 			ret = p.typeName()
+			p.pop()
 		}
 		if ret.kind == kFunc || ret.kind == kArray {
 			p.errorf("function returning an array or function")
@@ -1526,11 +1590,56 @@ func (p *parser) params() *funcType {
 			break
 		}
 		p.attributes()
-		s := p.declSpecs()
-		if s.t == nil {
-			p.errorf("expected a parameter type")
+		if p.cxx && p.pattern == 0 {
+			if n, _, end, ok := p.packAhead(false); ok {
+				// A parameter pack: a parameter for each element.
+				pk := paramPack{start: len(ft.params), n: n}
+				i := 0
+				p.expand(n, end, func() {
+					s := p.declSpecs()
+					if s.t == nil {
+						p.errorf("expected a parameter type")
+					}
+					name, t, _ := p.declarator(s.t)
+					pk.name = name
+					ft.params = append(ft.params, adjustParam(t))
+					ft.names = append(ft.names, name+"#"+itoa(int64(i)))
+					i++
+				})
+				if n == 0 {
+					// Its name, with no parameter to give it.
+					if t := p.toks[end-1]; t.kind == tkIdent && p.toks[end-2].text == "..." {
+						pk.name = t.text
+					}
+				}
+				ft.packs = append(ft.packs, pk)
+				if !p.accept(",") {
+					break
+				}
+				continue
+			}
 		}
-		name, t, _ := p.declarator(s.t)
+		var name string
+		var t *ctype
+		one := func() {
+			s := p.declSpecs()
+			if s.t == nil {
+				p.errorf("expected a parameter type")
+			}
+			name, t, _ = p.declarator(s.t)
+		}
+		if p.pattern > 0 {
+			// In a pattern: a parameter that cannot be parsed deduces
+			// nothing.
+			start, sc := p.pos, p.sc
+			if !p.try(one) {
+				p.pos, p.sc = start, sc
+				p.skipDefaultArg()
+				name, t = "", &ctype{kind: kDependent, dep: &depType{}}
+			}
+		} else {
+			one()
+		}
 		t = adjustParam(t)
 		ft.params = append(ft.params, t)
 		ft.names = append(ft.names, name)
@@ -1563,7 +1672,7 @@ func (p *parser) params() *funcType {
 	ft.tags = p.sc.tags
 	p.pop()
 	p.expect(")")
-	if len(ft.params) == 0 && !ft.variadic {
+	if len(ft.params) == 0 && !ft.variadic && len(ft.packs) == 0 {
 		p.errorf("expected a parameter")
 	}
 	return ft
@@ -1632,8 +1741,15 @@ func (p *parser) staticAssert() {
 	p.next()
 	p.expect("(")
 	e := p.conditional()
+	if p.cxx && e.ty().kind == kStruct {
+		e = p.boolOf(e, at)
+	}
 	v, ok := p.foldInt(e)
-	if !ok {
+	if !ok && p.cxx {
+		// A constant that cmd/cc does not evaluate (a constexpr
+		// function's call): not checked.
+		v = 1
+	} else if !ok {
 		p.errorAt(at, "static assertion is not an integer constant expression")
 	}
 	msg := ""
@@ -1918,7 +2034,10 @@ func (p *parser) declarator2C(name string, t *ctype, s specs, a attrs, at pos) *
 	} else if s.storage != sExtern {
 		sym.defined = true
 	}
-	if s.constx {
+	if s.constx && p.cxx && sym.init == nil && baseElem(sym.t).kind == kStruct {
+		// A constexpr object that a constructor makes: not a constant
+		// that cmd/cc knows.
+	} else if s.constx {
 		p.constexprValue(sym, at)
 	} else if p.cxx && !sym.constx && sym.t.q&qConst != 0 && sym.t.isArith() && sym.init != nil && sym.init.scalar != nil && p.constInit(sym.init) {
 		// C++: a const object of arithmetic type with a constant
@@ -2081,6 +2200,11 @@ func (p *parser) defineFunc(sym *symbol, ft *funcType, name string, at pos, inli
 	}
 	if ft.recv != nil {
 		p.this = f.params[0]
+	}
+	for _, pk := range ft.packs {
+		if pk.name != "" {
+			p.sc.vars[pk.name] = &symbol{name: pk.name, src: pk.name, kind: symPack, isParamPack: true, packSyms: f.params[pk.start : pk.start+pk.n], sc: p.sc}
+		}
 	}
 	// __func__.
 	fs := &symbol{name: "__func__", kind: symVar, t: arrayOf(tChar.qualified(qConst), int64(len(name)+1)), global: true, storage: sStatic, p: at}

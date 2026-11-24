@@ -129,9 +129,10 @@ type funcType struct {
 	tags     map[string]*ctype // the tags the parameters declare: a definition's body's too (C23 6.2.1)
 
 	// C++.
-	defaults []defArg // the parameters' default arguments, if any has one
-	recv     *ctype   // a non-static member function's: the type of this, its first parameter
-	thisQ    qual     // the qualifiers after a member function's declarator: of *this
+	defaults []defArg    // the parameters' default arguments, if any has one
+	packs    []paramPack // the parameter packs among the parameters
+	recv     *ctype      // a non-static member function's: the type of this, its first parameter
+	thisQ    qual        // the qualifiers after a member function's declarator: of *this
 	noexcept bool
 	ctor     bool
 	dtor     bool
@@ -695,6 +696,12 @@ func (t *ctype) String() string {
 			u = "unsigned "
 		}
 		return fmt.Sprintf("%s%s_BitInt(%d)", q, u, t.n)
+	}
+	switch t.kind {
+	case kTParam:
+		return q + "<template parameter " + itoa(t.n) + ">"
+	case kDependent:
+		return q + "<dependent type>"
 	}
 	return q + kindNames[t.kind]
 }

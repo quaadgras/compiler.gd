@@ -46,7 +46,8 @@ const (
 var cxxTypeWords = map[string]bool{
 	"class": true, "virtual": true, "explicit": true, "friend": true, "mutable": true,
 	"typename": true, "decltype": true, "wchar_t": true, "char8_t": true, "char16_t": true,
-	"char32_t": true, "consteval": true, "constinit": true,
+	"char32_t": true, "consteval": true, "constinit": true, "__underlying_type": true,
+	"__make_unsigned": true, "__make_signed": true,
 }
 
 // cxxKeywords are not names (of variables, labels, members).
@@ -273,9 +274,10 @@ type tidKey struct {
 }
 
 type tidVal struct {
-	tm  *template
-	sym *symbol
-	end int
+	tm   *template
+	sym  *symbol
+	end  int
+	half bool // it ends within a ">>" token, at end
 }
 
 // nameAt resolves the name at token offset j, in the scope in (nil: by
@@ -288,6 +290,9 @@ func (p *parser) nameAt(j int, in *scope) (*symbol, int) {
 		s = p.lookup(t.text)
 	} else {
 		s = in.find(t.text)
+	}
+	if s != nil && s.kind == symPack && p.packOn {
+		s = p.packElem(s)
 	}
 	if s == nil || !p.isAt(j+1, "<") {
 		return s, j + 1
@@ -304,13 +309,16 @@ func (p *parser) nameAt(j int, in *scope) (*symbol, int) {
 	}
 	key := tidKey{p.pos + j, p.sc, p.pattern}
 	if c, ok := p.tids[key]; ok && c.tm == tm {
+		if c.half {
+			p.gtHalf = c.end
+		}
 		return c.sym, c.end - p.pos
 	}
 	sym, end := p.templateID(tm, j+1, pos{t.file, t.line})
 	if p.tids == nil {
 		p.tids = map[tidKey]tidVal{}
 	}
-	p.tids[key] = tidVal{tm, sym, p.pos + end}
+	p.tids[key] = tidVal{tm, sym, p.pos + end, p.gtHalf == p.pos+end}
 	return sym, end
 }
 
@@ -653,15 +661,14 @@ func (p *parser) namedCast(kw string, at pos) expr {
 // cast's type: ">>" is two.
 func (p *parser) expectGT() {
 	if p.is(">>") {
-		p.toks[p.pos].text = ">"
-		return
-	}
-	if p.is(">=") {
-		p.toks[p.pos].text = "="
-		return
-	}
-	if p.is(">>=") {
-		p.toks[p.pos].text = ">="
+		// Two brackets in one token, which is not changed (a template's
+		// tokens are parsed again): gtHalf says its first is taken.
+		if p.gtHalf == p.pos {
+			p.gtHalf = -1
+			p.pos++
+		} else {
+			p.gtHalf = p.pos
+		}
 		return
 	}
 	p.expect(">")
@@ -910,6 +917,11 @@ func (p *parser) directInitAhead() bool {
 	if p.isAt(1, ")") || p.isAt(1, "...") || p.isTypeStart(1) {
 		return false
 	}
+	if t := p.peekAt(1); t.kind == tkIdent {
+		if s := p.lookup(t.text); s != nil && s.kind == symPack && !s.isParamPack {
+			return false // a pack of types: a parameter pack's
+		}
+	}
 	return true
 }
 
@@ -1072,6 +1084,12 @@ func (p *parser) extending(sym *symbol, f func()) {
 // cxxName parses a name in an expression, which may be qualified.
 func (p *parser) cxxName(at pos) expr {
 	sym, in, n := p.qualName(0)
+	if p.pattern > 0 && sym != nil && sym.kind == symTypedef && hasTParam(sym.t) && p.isAt(n, "::") {
+		// In a pattern: a member of a type that depends on a parameter.
+		p.pos += n + 1
+		p.skipQualName()
+		return &depConst{intConst{node{tInt, at}, 0}, -1}
+	}
 	if sym != nil && sym.kind == symFunc && p.isAt(n, "<") && hasTemplate(funcSet(sym)) {
 		// A function template with explicit arguments.
 		name := p.peekAt(n - 1).text
@@ -1344,6 +1362,57 @@ func (p *parser) skipQualName() {
 		}
 		if !p.accept("::") {
 			return
+		}
+	}
+}
+
+// skipStatement skips a statement without parsing it: a branch of if
+// constexpr that is not taken.
+func (p *parser) skipStatement() {
+	switch {
+	case p.is("{"):
+		p.skipBraces()
+		return
+	case p.is("if"):
+		p.next()
+		p.accept("constexpr")
+		p.skipParens()
+		p.skipStatement()
+		if p.accept("else") {
+			p.skipStatement()
+		}
+		return
+	case p.is("for") || p.is("while") || p.is("switch"):
+		p.next()
+		p.skipParens()
+		p.skipStatement()
+		return
+	case p.is("do"):
+		p.next()
+		p.skipStatement()
+		p.expect("while")
+		p.skipParens()
+		p.expect(";")
+		return
+	}
+	depth := 0
+	for {
+		t := p.next()
+		if t.kind == tkEOF {
+			p.errorf("unterminated statement")
+		}
+		if t.kind != tkPunct {
+			continue
+		}
+		switch t.text {
+		case "(", "[", "{":
+			depth++
+		case ")", "]", "}":
+			depth--
+		case ";":
+			if depth == 0 {
+				return
+			}
 		}
 	}
 }

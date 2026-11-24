@@ -586,6 +586,13 @@ func withRecv(ft *funcType, ct *ctype) *funcType {
 	if ft.defaults != nil {
 		n.defaults = append([]defArg{{}}, ft.defaults...)
 	}
+	if ft.packs != nil {
+		n.packs = nil
+		for _, pk := range ft.packs {
+			pk.start++ // after this
+			n.packs = append(n.packs, pk)
+		}
+	}
 	n.proto = true
 	return &n
 }

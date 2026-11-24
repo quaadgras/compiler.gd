@@ -395,17 +395,7 @@ func (p *parser) resolve(set []*symbol, obj expr, args []expr, at pos, name stri
 }
 
 // callArgs parses a call's arguments, after its "(", unconverted.
-func (p *parser) callArgs() []expr {
-	var args []expr
-	for !p.is(")") {
-		args = append(args, p.assignment())
-		if !p.accept(",") {
-			break
-		}
-	}
-	p.expect(")")
-	return args
-}
+func (p *parser) callArgs() []expr { return p.exprList(")") }
 
 // defaultArg parses parameter i's default argument again.
 func (p *parser) defaultArg(ft *funcType, i int) expr {
@@ -474,6 +464,7 @@ func (p *parser) callFunc(sym *symbol, obj expr, args []expr, at pos) expr {
 // callResult is a call's value to C++: what a returned reference refers
 // to, or a class's object.
 func (p *parser) callResult(c *call, ft *funcType, at pos) expr {
+	p.complete(ft.ret)
 	if ft.ret.kind == kStruct && !ft.ret.rec.complete {
 		p.errorAt(at, "calling a function returning an incomplete type")
 	}

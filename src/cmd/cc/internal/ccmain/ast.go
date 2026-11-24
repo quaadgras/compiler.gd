@@ -252,16 +252,18 @@ type symbol struct {
 	once     stmt      // a static local's initialization, the first time its declaration is reached
 
 	// Templates (cxxtmpl.go).
-	tmpl     *template // the template it is (symTemplate; a function template, in its overload set)
-	instOf   *template // a class template's name within its own instance
-	inst     *tinst    // the instance it is
-	pack     []targ    // symPack
-	depVal   bool      // a value parameter's placeholder, in a pattern
-	depParam int
-	late     *lateFunc // its body, not parsed until it is used
-	lateSc   *scope    // the scope late is parsed in, if not its own
-	synth    func()    // makes its (implicit) definition, when it is used
-	queued   bool
+	tmpl        *template // the template it is (symTemplate; a function template, in its overload set)
+	instOf      *template // a class template's name within its own instance
+	inst        *tinst    // the instance it is
+	pack        []targ    // symPack
+	packSyms    []*symbol // symPack: a function parameter pack's parameters
+	isParamPack bool
+	depVal      bool // a value parameter's placeholder, in a pattern
+	depParam    int
+	late        *lateFunc // its body, not parsed until it is used
+	lateSc      *scope    // the scope late is parsed in, if not its own
+	synth       func()    // makes its (implicit) definition, when it is used
+	queued      bool
 }
 
 type funcDecl struct {

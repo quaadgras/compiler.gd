@@ -202,6 +202,31 @@ func (p *parser) statement() stmt {
 		switch t.text {
 		case "if":
 			p.next()
+			if p.cxx && p.accept("constexpr") {
+				// The branch not taken is not parsed.
+				p.expect("(")
+				c := p.rvalue(p.expr())
+				if c.ty().kind == kStruct {
+					c = p.boolOf(c, at)
+				}
+				v, ok := p.foldTruth(c)
+				if !ok {
+					p.errorAt(at, "the condition of if constexpr is not a constant")
+				}
+				p.expect(")")
+				if v {
+					then := p.subStatement()
+					if p.accept("else") {
+						p.skipStatement()
+					}
+					return then
+				}
+				p.skipStatement()
+				if p.accept("else") {
+					return p.subStatement()
+				}
+				return &emptyStmt{}
+			}
 			p.expect("(")
 			p.push()
 			decls, c := p.condDecl()
