@@ -99,6 +99,11 @@ How it is checked:
   `checkptrView` does for types of alignment 1, which need no other check.
   Objects with a malloc header and large objects record their type.
 
+A type longer than its object, as in `(*[1<<30]byte)(p)`, is compared up to
+the value `p` is in: an object may have room after its last value, which
+holds nothing. Generic code has a type's shape, so the shapes of
+`reflect.Value` and of `internal/abi`'s interfaces count as what they are.
+
 `-d=checkptr=0` turns it off. `-d=unsafewhole=1` reports the conversions
 the compiler proves partial instead of failing, and `=2` also those whose
 source it does not know.

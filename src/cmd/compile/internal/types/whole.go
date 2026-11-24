@@ -41,27 +41,49 @@ func WholeKindOf(t *Type) WholeKind {
 		return WholeSlice
 	case t.IsInterface(), isABIInterface(t):
 		return WholeIface
-	case IsWholeStruct(t):
+	case IsWholeStruct(t), isWholeShape(t):
 		return WholeStruct
 	}
 	return NotWhole
 }
 
 // isABIInterface reports whether t is internal/abi's description of an
-// interface, which is the same four words.
+// interface, which is the same words, or the shape of one, which is what
+// generic code has for it.
 func isABIInterface(t *Type) bool {
 	if !t.IsStruct() {
 		return false
 	}
-	s := t.Sym()
-	if s == nil || s.Pkg == nil || s.Pkg.Path != "internal/abi" {
+	if s := t.Sym(); s != nil && s.Pkg != nil && s.Pkg.Path == "internal/abi" {
+		switch s.Name {
+		case "EmptyInterface", "NonEmptyInterface", "CommonInterface":
+			return true
+		}
+	}
+	if !t.IsShape() || t.NumFields() != 3 {
 		return false
 	}
-	switch s.Name {
-	case "EmptyInterface", "NonEmptyInterface", "CommonInterface":
-		return true
+	f := t.Fields()
+	if !f[1].Type.IsUnsafePtr() || f[2].Type.Kind() != TCOMPLEX128 || f[1].Sym.Name != "Data" || f[2].Sym.Name != "Inline" {
+		return false
 	}
-	return false
+	if f[0].Sym.Name == "_" {
+		return f[0].Sym.Pkg != nil && f[0].Sym.Pkg.Path == "internal/abi" && f[0].Type.IsUnsafePtr()
+	}
+	if !f[0].Type.IsPtr() {
+		return false
+	}
+	e := f[0].Type.Elem().Sym()
+	return e != nil && e.Pkg != nil && e.Pkg.Path == "internal/abi" && (e.Name == "Type" || e.Name == "ITab")
+}
+
+// isWholeShape reports whether t is the shape of reflect.Value.
+func isWholeShape(t *Type) bool {
+	if !t.IsShape() || !t.IsStruct() || t.NumFields() != 4 {
+		return false
+	}
+	f := t.Fields()
+	return f[0].Sym.Name == "typ_" && f[1].Sym.Name == "ptr" && f[0].Sym.Pkg != nil && f[0].Sym.Pkg.Path == "reflect"
 }
 
 // holdsWhole reports whether a value of type t holds a whole value.

@@ -7,7 +7,9 @@ package main
 import (
 	"fmt"
 	"internal/abi"
+	"reflect"
 	"slices"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -60,6 +62,7 @@ func init() {
 	viewDynamic[[]byte]("Slice")
 	viewDynamic[any]("Iface")
 	viewPuns()
+	viewLong()
 	viewNil[string]("String")
 	viewNil[[]byte]("Slice")
 	viewNil[any]("Iface")
@@ -259,4 +262,49 @@ func viewPuns() {
 		s := "a string"
 		sink2 = *(*[]byte)(unsafe.Pointer(&s))
 	})
+}
+
+// viewLong adds views in generic code, where a type is its shape, and
+// views whose type is longer than the object.
+func viewLong() {
+	viewCase("CheckPtrWholeGenericShapes", func() {
+		// What generic code has for these types is their shape.
+		x := make([]reflect.Value, 40)
+		viewAs[reflect.Value](viewPlain(&x[1]))
+		y := make([]any, 40)
+		viewAs[abi.EmptyInterface](viewPlain(&y[1]))
+		viewAs[reflect.Value](viewPlain(new(reflect.Value)))
+		var q atomic.Pointer[reflect.Value]
+		q.Store(&x[2])
+		sink2 = q.Load()
+		viewShapeStatic[abi.EmptyInterface]()
+	})
+	viewCase("CheckPtrWholePastObject", func() {
+		// A view whose type is longer than the object is of the
+		// object up to its end.
+		x := new(struct {
+			s   string
+			pad [1000]byte
+		})
+		sink2 = x
+		viewAs[[1 << 20]byte](viewPlain(&x.pad[990]))
+		y := new(struct {
+			s   string
+			pad [64]byte
+		})
+		sink2 = y
+		viewAs[[1 << 20]byte](viewPlain(&y.pad[60]))
+	})
+}
+
+//go:noinline
+func viewPlain[T any](p *T) unsafe.Pointer {
+	sink2 = p
+	return unsafe.Pointer(p)
+}
+
+//go:noinline
+func viewShapeStatic[T any]() {
+	var e any = 1
+	sink2 = *(*T)(unsafe.Pointer(&e))
 }

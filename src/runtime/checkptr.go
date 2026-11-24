@@ -153,7 +153,7 @@ func wordState(t *_type, off uintptr) uint8 {
 			off %= a.Elem.Size_
 			t = a.Elem
 		case abi.Struct:
-			if isWholeStruct(t) || isABIInterface(t) {
+			if isWholeStruct(t) || isABIInterface(t) || isWholeShape(t) {
 				if off == 0 {
 					return wordFirst
 				}
@@ -180,20 +180,30 @@ func wordState(t *_type, off uintptr) uint8 {
 }
 
 // isABIInterface reports whether the struct type t is internal/abi's
-// description of an interface, which is the same words.
+// description of an interface, which is the same words, or the shape of
+// one, which is what generic code has for it: it is known by its fields.
 func isABIInterface(t *_type) bool {
-	if t.TFlag&abi.TFlagNamed == 0 {
+	st := (*structtype)(unsafe.Pointer(t))
+	if len(st.Fields) != 3 {
 		return false
 	}
-	rt := toRType(t)
-	if rt.pkgpath() != "internal/abi" {
+	f := st.Fields
+	if f[1].Typ.Kind() != abi.UnsafePointer || f[2].Typ.Kind() != abi.Complex128 ||
+		f[1].Name.Name() != "Data" || f[2].Name.Name() != "Inline" {
 		return false
 	}
-	switch rt.name() {
-	case "EmptyInterface", "NonEmptyInterface", "CommonInterface":
+	switch f[0].Typ {
+	case abi.TypeOf((*abi.Type)(nil)), abi.TypeOf((*abi.ITab)(nil)):
 		return true
 	}
-	return false
+	return f[0].Name.Name() == "_" && f[0].Typ.Kind() == abi.UnsafePointer && st.PkgPath.Name() == "internal/abi"
+}
+
+// isWholeShape reports whether the struct type t is the shape of
+// reflect.Value, which is what generic code has for it.
+func isWholeShape(t *_type) bool {
+	st := (*structtype)(unsafe.Pointer(t))
+	return len(st.Fields) == 4 && st.Fields[0].Name.Name() == "typ_" && st.Fields[1].Name.Name() == "ptr" && st.PkgPath.Name() == "reflect"
 }
 
 // wholeStringAt reports whether a string begins at offset off of a value
@@ -239,11 +249,18 @@ func wholeStringAt(t *_type, off uintptr) bool {
 // have the same state, and the word after the view must not be the rest
 // of a value that the view began.
 func checkptrWhole(typ *_type, tbase, limit, p uintptr, elem *_type, size uintptr) {
-	if size == 0 || p < tbase || tearKind(typ) == 0 {
+	if size == 0 || p < tbase || p >= limit || tearKind(typ) == 0 {
 		return
 	}
 	const word = goarch.PtrSize
 	lo := p - tbase
+	if size > limit-p {
+		// A type longer than the object, as (*[1<<30]byte)(p) has.
+		// The object may have room past its last value, which
+		// holds nothing: go no further than the value p is in.
+		limit = min(limit, tbase+(lo/typ.Size_+1)*typ.Size_)
+		size = limit - p
+	}
 	aligned := lo&(word-1) == 0
 	end := alignUp(lo+size, word)
 	excused := ^uintptr(0) // the third word of a slice viewed as a string
