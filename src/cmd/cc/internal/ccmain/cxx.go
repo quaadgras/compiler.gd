@@ -271,6 +271,7 @@ type tidKey struct {
 	pos     int
 	sc      *scope
 	pattern int
+	pack    int // the element of the packs being expanded, -1 outside an expansion
 }
 
 type tidVal struct {
@@ -307,7 +308,10 @@ func (p *parser) nameAt(j int, in *scope) (*symbol, int) {
 	if tm == nil {
 		return s, j + 1
 	}
-	key := tidKey{p.pos + j, p.sc, p.pattern}
+	key := tidKey{p.pos + j, p.sc, p.pattern, -1}
+	if p.packOn {
+		key.pack = p.packI
+	}
 	if c, ok := p.tids[key]; ok && c.tm == tm {
 		if c.half {
 			p.gtHalf = c.end
@@ -1241,6 +1245,13 @@ func (p *parser) cxxName(at pos) expr {
 				name = in.rec.mtag
 			}
 			p.errorAt(at, "%q is not a member of %s", t.text, name)
+		}
+		if in != nil && debugSFINAE {
+			var names []string
+			for k := range in.vars {
+				names = append(names, k)
+			}
+			println("scope", in.name, "kind", in.kind, "has", strings.Join(names, " "))
 		}
 		p.errorAt(at, "%q undeclared", t.text)
 	}

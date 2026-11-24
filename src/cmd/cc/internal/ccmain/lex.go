@@ -144,6 +144,37 @@ func lexRaw(file, s string, line int) (toks []token, err error) {
 			space = true
 			continue
 		}
+		// C++'s raw string literals, R"delim(...)delim": as the string
+		// literal with escapes that means the same.
+		if n := rawPrefix(s[i:]); n >= 0 {
+			open := strings.IndexByte(s[i+n+1:], '(')
+			if open >= 0 && open <= 16 && !strings.ContainsAny(s[i+n+1:i+n+1+open], " \\\n\")") {
+				delim := s[i+n+1 : i+n+1+open]
+				body := s[i+n+2+open:]
+				if end := strings.Index(body, ")"+delim+"\""); end >= 0 {
+					var b strings.Builder
+					b.WriteString(s[i : i+n-1]) // the prefix, without its R
+					b.WriteByte('"')
+					for k := 0; k < end; k++ {
+						switch body[k] {
+						case '\\':
+							b.WriteString("\\\\")
+						case '"':
+							b.WriteString("\\\"")
+						case '\n':
+							b.WriteString("\\n")
+						default:
+							b.WriteByte(body[k])
+						}
+					}
+					b.WriteByte('"')
+					add(tkString, b.String())
+					line += strings.Count(body[:end], "\n")
+					i += n + 2 + open + end + len(delim) + 2
+					continue
+				}
+			}
+		}
 		// Literals, with an encoding prefix or none.
 		if n := quotePrefix(s[i:]); n >= 0 {
 			q := s[i+n]
@@ -394,4 +425,15 @@ func identName(s string) string {
 		i++
 	}
 	return b.String()
+}
+
+// rawPrefix is the length of the prefix of a raw string literal at the
+// start of s, its R included (R", u8R", LR"...): -1 if there is none.
+func rawPrefix(s string) int {
+	for _, p := range []string{"u8R", "uR", "UR", "LR", "R"} {
+		if strings.HasPrefix(s, p) && len(s) > len(p) && s[len(p)] == '"' {
+			return len(p)
+		}
+	}
+	return -1
 }

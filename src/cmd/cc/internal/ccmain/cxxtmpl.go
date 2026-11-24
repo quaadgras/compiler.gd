@@ -68,6 +68,8 @@ type template struct {
 	static    bool        // a static member function
 	convPat   *ctype      // a conversion function template's type, with the parameters as placeholders
 	ctorPats  []*funcType // a class template's constructors' types, as patterns
+	ctorExtra []int       // for each, the number of parameters of its own template that follow the class's
+
 	ctorsDone bool
 }
 
@@ -1525,6 +1527,12 @@ func (p *parser) deduceArg(pt *ctype, a expr, bound []targ, set []bool) bool {
 		if at.kind == kArray && inner.kind != kArray && inner.kind != kTParam {
 			at = ptrTo(at.elem)
 		}
+		if at.kind == kArray && inner.kind == kArray && inner.elem.q&^at.elem.q != 0 {
+			// const T (&)[N] binds to an array of T.
+			u := *at
+			u.elem = withQual(at.elem, at.elem.q|inner.elem.q)
+			at = &u
+		}
 		if inner.q != 0 && inner.kind != kTParam {
 			// const X<T> &: the argument's own qualifiers do not matter.
 			u := *inner
@@ -1919,6 +1927,7 @@ func (p *parser) ctad(tm *template, args []expr, at pos) *ctype {
 			self := &ctype{kind: kDependent, dep: &depType{tmpl: tm, args: placeholders(tm)}}
 			sc.vars[tm.name] = &symbol{name: tm.name, src: tm.name, kind: symTypedef, t: self, sc: sc}
 			depth := 0
+			hdr := -1 // the "template" of the member being scanned, if it is one
 			for i++; depth >= 0 && p.toks[i].kind != tkEOF; i++ {
 				t := p.toks[i]
 				if t.kind == tkPunct {
@@ -1927,31 +1936,58 @@ func (p *parser) ctad(tm *template, args []expr, at pos) *ctype {
 						depth++
 					case "}", ")", "]":
 						depth--
+						if depth == 0 && t.text == "}" {
+							hdr = -1
+						}
+					case ";":
+						if depth == 0 {
+							hdr = -1
+						}
 					}
 					continue
+				}
+				if depth == 0 && t.text == "template" && p.toks[i+1].text == "<" && hdr < 0 {
+					hdr = i
 				}
 				if depth != 0 || t.kind != tkIdent || t.text != tm.name || p.toks[i+1].text != "(" || p.toks[i-1].text == "~" || p.toks[i-1].text == "::" {
 					continue
 				}
-				start := i
+				start, in, extra := i, sc, 0
+				if hdr >= 0 {
+					// A constructor template: its parameters are
+					// deduced with the class's, after them.
+					var own []tparam
+					if !p.try(func() {
+						p.replay(hdr+1, sc, func() { own = p.templateParams() })
+					}) {
+						continue
+					}
+					all := &template{name: tm.name, kind: 'c', sc: tm.sc, at: tm.at}
+					all.params = append(append(all.params, tm.params...), own...)
+					in = p.bindParams(all, placeholders(all))
+					in.vars[tm.name] = sc.vars[tm.name]
+					extra = len(own)
+				}
 				p.try(func() {
-					p.replay(start, sc, func() {
+					p.replay(start, in, func() {
 						p.pattern = 1
 						p.next()
 						t := p.suffixes(tVoid, &attrs{})
 						if t.kind == kFunc {
 							tm.ctorPats = append(tm.ctorPats, t.fn)
+							tm.ctorExtra = append(tm.ctorExtra, extra)
 						}
 					})
 				})
 			}
 		}
 	}
-	for _, pat := range tm.ctorPats {
+	for k, pat := range tm.ctorPats {
 		if len(args) > len(pat.params) {
 			continue
 		}
-		bound, set := make([]targ, len(tm.params)), make([]bool, len(tm.params))
+		all := len(tm.params) + tm.ctorExtra[k]
+		bound, set := make([]targ, all), make([]bool, all)
 		ok := true
 		for i, a := range args {
 			if !p.deduceArg(pat.params[i], a, bound, set) {
@@ -1962,7 +1998,7 @@ func (p *parser) ctad(tm *template, args []expr, at pos) *ctype {
 		if !ok {
 			continue
 		}
-		n := countSet(set)
+		n := countSet(set[:len(tm.params)])
 		full := true
 		for i := n; i < len(tm.params); i++ {
 			if tm.params[i].dflt == 0 && !tm.params[i].pack {

@@ -1154,7 +1154,6 @@ func (p *parser) enumSpec1(scoped bool) *ctype {
 		// Its earlier constants are in scope in its body.
 		names.parent = p.sc
 		p.sc = names
-		defer func() { p.sc = names.parent }()
 	}
 	var consts []*symbol
 	next := int64(0)
@@ -1225,6 +1224,9 @@ func (p *parser) enumSpec1(scoped bool) *ctype {
 			p.expect("}")
 			break
 		}
+	}
+	if scoped {
+		p.sc = names.parent
 	}
 	// The type: as GCC chooses it.
 	kind := kUInt
@@ -2341,6 +2343,9 @@ func (p *parser) defineFunc(sym *symbol, ft *funcType, name string, at pos, inli
 	}
 	if p.cxx {
 		p.nrvo(f)
+		if sym.t.fn.ret.isAuto {
+			sym.t.fn.ret = tVoid // no return statement gave it a type
+		}
 	}
 	if len(ft.vlas) > 0 {
 		// The parameters' VLA lengths, on entry, in order.
