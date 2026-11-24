@@ -15,3 +15,14 @@ int main() {
 	switch (int(s[1])) { case 'a': n += 100; }
 	printf("%d\n", n);
 }
+struct Proxy { int i; const char *s; operator char() const { return s[i]; } };
+struct Text { const char *s; Proxy operator[](int i) const { return Proxy{i, s}; } };
+int kind(const Text &t) {
+	switch (t[0]) {
+		case 'b': return 1;
+		case 'a': return 2;
+		default: return 3;
+	}
+}
+static int kinds = kind(Text{"b1"}) * 100 + kind(Text{"a2"}) * 10 + kind(Text{"+"});
+struct Report { Report() { printf("%d\n", kinds); } } report;

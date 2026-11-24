@@ -558,6 +558,16 @@ func (p *parser) staticMember(name string, t *ctype, s specs, at pos) {
 	p.declare(sym, at)
 	p.u.syms = append(p.u.syms, sym)
 	if !p.is("=") && !p.is("{") {
+		if s.inline {
+			// An inline variable: this is its definition.
+			if t.kind == kStruct {
+				p.complete(t)
+				p.staticInit++
+				p.classInit(sym, s, at)
+				p.staticInit--
+			}
+			sym.defined, sym.storage, sym.comdat = true, sAuto, true
+		}
 		return
 	}
 	if t.kind == kStruct {

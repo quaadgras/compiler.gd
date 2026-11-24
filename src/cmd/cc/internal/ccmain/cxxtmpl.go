@@ -1592,8 +1592,24 @@ func (p *parser) deduceArg(pt *ctype, a expr, bound []targ, set []bool) bool {
 	if !hasTParam(pt) {
 		return true
 	}
-	if _, ok := a.(*initList); ok {
-		return true // nothing is deduced from a braced list
+	if l, ok := a.(*initList); ok {
+		// Nothing is deduced from a braced list, but for a parameter
+		// that is a std::initializer_list<P>: P from each element.
+		q := pt
+		if q.isRef() {
+			q = q.elem
+		}
+		if q.kind == kDependent && q.dep != nil && q.dep.tmpl != nil && q.dep.tmpl.name == "initializer_list" && len(q.dep.args) == 1 && q.dep.args[0].t != nil {
+			for _, e := range l.args {
+				if _, nested := e.(*initList); nested {
+					continue
+				}
+				if !p.deduceArg(q.dep.args[0].t, e, bound, set) {
+					return false
+				}
+			}
+		}
+		return true
 	}
 	at := a.ty()
 	if pt.isRef() {

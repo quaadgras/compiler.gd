@@ -267,6 +267,116 @@ template <class E> constexpr const E *end(initializer_list<E> il) noexcept { ret
 #endif
 `
 
+	// The algorithms that need no more than iterators that are
+	// pointers or behave as them.
+	sysHeaders["algorithm"] = `#ifndef __CC_ALGORITHM
+#define __CC_ALGORITHM
+#include <stddef.h>
+#include <utility>
+#include <initializer_list>
+namespace std {
+template <class T> constexpr const T &min(const T &a, const T &b) { return b < a ? b : a; }
+template <class T> constexpr const T &max(const T &a, const T &b) { return a < b ? b : a; }
+template <class T, class C> constexpr const T &min(const T &a, const T &b, C less) { return less(b, a) ? b : a; }
+template <class T, class C> constexpr const T &max(const T &a, const T &b, C less) { return less(a, b) ? b : a; }
+template <class T> constexpr T min(initializer_list<T> l) {
+	const T *m = l.begin();
+	for (const T *p = l.begin(); p != l.end(); ++p)
+		if (*p < *m)
+			m = p;
+	return *m;
+}
+template <class T> constexpr T max(initializer_list<T> l) {
+	const T *m = l.begin();
+	for (const T *p = l.begin(); p != l.end(); ++p)
+		if (*m < *p)
+			m = p;
+	return *m;
+}
+template <class T> constexpr const T &clamp(const T &v, const T &lo, const T &hi) { return v < lo ? lo : hi < v ? hi : v; }
+template <class It, class T> It find(It first, It last, const T &v) {
+	for (; first != last; ++first)
+		if (*first == v)
+			break;
+	return first;
+}
+template <class It, class P> It find_if(It first, It last, P pred) {
+	for (; first != last; ++first)
+		if (pred(*first))
+			break;
+	return first;
+}
+template <class It, class T> ptrdiff_t count(It first, It last, const T &v) {
+	ptrdiff_t n = 0;
+	for (; first != last; ++first)
+		if (*first == v)
+			n++;
+	return n;
+}
+template <class It, class F> F for_each(It first, It last, F f) {
+	for (; first != last; ++first)
+		f(*first);
+	return f;
+}
+template <class It, class T> void fill(It first, It last, const T &v) {
+	for (; first != last; ++first)
+		*first = v;
+}
+template <class In, class Out> Out copy(In first, In last, Out out) {
+	for (; first != last; ++first, ++out)
+		*out = *first;
+	return out;
+}
+template <class It> void reverse(It first, It last) {
+	while (first != last && first != --last) {
+		swap(*first, *last);
+		++first;
+	}
+}
+template <class It> It min_element(It first, It last) {
+	It m = first;
+	for (; first != last; ++first)
+		if (*first < *m)
+			m = first;
+	return m;
+}
+template <class It> It max_element(It first, It last) {
+	It m = first;
+	for (; first != last; ++first)
+		if (*m < *first)
+			m = first;
+	return m;
+}
+template <class It, class C> void __cc_sift(It first, ptrdiff_t i, ptrdiff_t n, C less) {
+	for (;;) {
+		ptrdiff_t k = 2 * i + 1;
+		if (k >= n)
+			return;
+		if (k + 1 < n && less(first[k], first[k + 1]))
+			k++;
+		if (!less(first[i], first[k]))
+			return;
+		swap(first[i], first[k]);
+		i = k;
+	}
+}
+template <class It, class C> void sort(It first, It last, C less) {
+	ptrdiff_t n = last - first;
+	for (ptrdiff_t i = n / 2 - 1; i >= 0; i--)
+		__cc_sift(first, i, n, less);
+	for (ptrdiff_t i = n - 1; i > 0; i--) {
+		swap(first[0], first[i]);
+		__cc_sift(first, (ptrdiff_t)0, i, less);
+	}
+}
+template <class T> struct __cc_less {
+	constexpr bool operator()(const T &a, const T &b) const { return a < b; }
+};
+template <class T> void sort(T *first, T *last) { sort(first, last, __cc_less<T>()); }
+}
+#endif
+`
+
 	sysHeaders["array"] = `#ifndef __CC_ARRAY
 #define __CC_ARRAY
 #include <stddef.h>

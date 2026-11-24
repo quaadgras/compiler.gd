@@ -317,6 +317,13 @@ func (p *parser) statement() stmt {
 			p.expect("(")
 			p.push()
 			decls, x := p.condDeclExpr(false)
+			if p.cxx && x.ty().kind == kStruct {
+				// A class: converted by its conversion function to an
+				// integer.
+				if c := p.convertClass(x, tLLong, at); c != nil {
+					x = c
+				}
+			}
 			x = p.rvalue(x)
 			if !x.ty().isInteger() {
 				p.errorAt(at, "switch quantity not an integer")
