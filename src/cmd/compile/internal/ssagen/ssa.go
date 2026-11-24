@@ -152,6 +152,8 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).
 		CheckPtrAlignmentC = typecheck.LookupRuntimeFunc(gd, "checkptrAlignmentC")
 	ir.Syms(gd).
+		C23StorePtr = typecheck.LookupRuntimeFunc(gd, "c23StorePtr")
+	ir.Syms(gd).
 		CheckPtrView = typecheck.LookupRuntimeFunc(gd, "checkptrView")
 	ir.Syms(gd).
 		Deferproc = typecheck.LookupRuntimeFunc(gd, "deferproc")
@@ -2823,6 +2825,15 @@ func (s *state) moveWhichMayOverlap(t *types.Type, dst, src *ssa.Value, mayOverl
 	}
 	if s.tear && s.tearable(t) && !(isStackAddr(dst) && isStackAddr(src)) {
 		s.shareMove(t, dst, src)
+		return
+	}
+	if t.HasPointers() && s.cStore(dst) {
+		// The words may be C's (runtime/cspan.go): typedmemmove
+		// says where the pointers are. It is nosplit, and its
+		// arguments are in registers, so it writes nothing where
+		// the results of a call are, if src is one.
+		s.rtcall(ir.Syms(s.gd).Typedmemmove, true, nil, s.reflectType(t), dst, src)
+		s.curfn.SetWBPos(s.gd, s.peekPos())
 		return
 	}
 	s.rawMove(t, dst, src)
@@ -7368,6 +7379,13 @@ func (s *state) rawStoreType(t *types.Type, left, right *ssa.Value, skip skipMas
 	}
 }
 
+// cStore reports whether a store of pointers at dst may be one in the
+// memory that C allocates, which the runtime is to know of
+// (base.Invocation.CStores): dst is not a variable's address.
+func (s *state) cStore(dst *ssa.Value) bool {
+	return s.gd.CStores && !ssa.IsStackAddr(dst) && !ssa.IsGlobalAddr(dst)
+}
+
 // do *left = right for all scalar (non-pointer) parts of t.
 func (s *state) storeTypeScalars(t *types.Type, left, right *ssa.Value, skip skipMask) {
 	switch {
@@ -7463,6 +7481,12 @@ func (s *state) storeTypePtrs(t *types.Type, left, right *ssa.Value) {
 	case t.IsPtrShaped():
 		if t.IsPtr() && t.Elem().NotInHeap() {
 			break // see issue 42032
+		}
+		if s.cStore(left) && right.Op != ssa.OpConstNil {
+			// The word may be one of C's that holds no pointer
+			// (runtime/cspan.go).
+			s.rtcall(ir.Syms(s.gd).C23StorePtr, true, nil, left, right)
+			break
 		}
 		s.store(t, left, right)
 	case t.IsString():

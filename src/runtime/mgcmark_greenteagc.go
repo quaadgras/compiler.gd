@@ -176,14 +176,14 @@ func (imb *spanInlineMarkBits) release() spanScanOwnership {
 
 // spanInlineMarkBitsFromBase returns the spanInlineMarkBits for a span whose start address is base.
 //
-// The span must be gcUsesSpanInlineMarkBits(span.elemsize).
+// The span must be span.usesInlineMarkBits().
 func spanInlineMarkBitsFromBase(base uintptr) *spanInlineMarkBits {
 	return (*spanInlineMarkBits)(unsafe.Pointer(base + gc.PageSize - unsafe.Sizeof(spanInlineMarkBits{})))
 }
 
 // initInlineMarkBits initializes the inlineMarkBits stored at the end of the span.
 func (s *mspan) initInlineMarkBits() {
-	if doubleCheckGreenTea && !gcUsesSpanInlineMarkBits(s.elemsize) {
+	if doubleCheckGreenTea && !s.usesInlineMarkBits() {
 		throw("expected span with inline mark bits")
 	}
 	// Zeroing is only necessary if this span wasn't just freshly allocated from the OS.
@@ -192,9 +192,9 @@ func (s *mspan) initInlineMarkBits() {
 
 // moveInlineMarks merges the span's inline mark bits into dst and clears them.
 //
-// gcUsesSpanInlineMarkBits(s.elemsize) must be true.
+// s.usesInlineMarkBits() must be true.
 func (s *mspan) moveInlineMarks(dst *gcBits) {
-	if doubleCheckGreenTea && !gcUsesSpanInlineMarkBits(s.elemsize) {
+	if doubleCheckGreenTea && !s.usesInlineMarkBits() {
 		throw("expected span with inline mark bits")
 	}
 	bytes := divRoundUp(uintptr(s.nelems), 8)
@@ -217,16 +217,16 @@ func (s *mspan) moveInlineMarks(dst *gcBits) {
 
 // inlineMarkBits returns the inline mark bits for the span.
 //
-// gcUsesSpanInlineMarkBits(s.elemsize) must be true.
+// s.usesInlineMarkBits() must be true.
 func (s *mspan) inlineMarkBits() *spanInlineMarkBits {
-	if doubleCheckGreenTea && !gcUsesSpanInlineMarkBits(s.elemsize) {
+	if doubleCheckGreenTea && !s.usesInlineMarkBits() {
 		throw("expected span with inline mark bits")
 	}
 	return spanInlineMarkBitsFromBase(s.base())
 }
 
 func (s *mspan) markBitsForIndex(objIndex uintptr) (bits markBits) {
-	if gcUsesSpanInlineMarkBits(s.elemsize) {
+	if s.usesInlineMarkBits() {
 		bits.bytep = &s.inlineMarkBits().marks[objIndex/8]
 	} else {
 		bits.bytep = s.gcmarkBits.bytep(objIndex / 8)
@@ -237,7 +237,7 @@ func (s *mspan) markBitsForIndex(objIndex uintptr) (bits markBits) {
 }
 
 func (s *mspan) markBitsForBase() markBits {
-	if gcUsesSpanInlineMarkBits(s.elemsize) {
+	if s.usesInlineMarkBits() {
 		return markBits{&s.inlineMarkBits().marks[0], uint8(1), 0}
 	}
 	return markBits{&s.gcmarkBits.x, uint8(1), 0}
@@ -1206,6 +1206,10 @@ func scanObject(b uintptr, gcw *gcWork) {
 	n := s.elemsize
 	if n == 0 {
 		throw("scanObject n == 0")
+	}
+	if s.spanclass.c() {
+		scanObjectC(b, s, gcw)
+		return
 	}
 	if s.spanclass.noscan() {
 		// Correctness-wise this is ok, but it's inefficient

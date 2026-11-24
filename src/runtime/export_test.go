@@ -2262,3 +2262,28 @@ func WholeStates(p unsafe.Pointer, n int) string {
 	}
 	return string(b)
 }
+
+// The memory that C allocates (cspan.go).
+
+func MallocC(n uintptr) unsafe.Pointer { return mallocC(n) }
+
+// MallocCTyped is malloc for values of the type of e; MallocCScalar for
+// what holds no pointers.
+func MallocCTyped(n uintptr, e any) unsafe.Pointer { return c23Malloc(n, efaceOf(&e)._type, false) }
+
+func MallocCScalar(n uintptr) unsafe.Pointer { return c23Malloc(n, nil, true) }
+
+func CStorePtr(slot *unsafe.Pointer, val unsafe.Pointer) { c23StorePtr(slot, val) }
+
+// CScalar reports whether the word at p, in an object of C's, is known to
+// hold no pointer.
+func CScalar(p unsafe.Pointer) bool {
+	s := cSpanOf(uintptr(p))
+	return s != nil && s.cScalar(uintptr(p))
+}
+
+func CUsable(p unsafe.Pointer) (uintptr, bool) { return c23Usable(p) }
+
+func CMemmove(dst, src unsafe.Pointer, n uintptr) { c23Memmove(dst, src, n) }
+
+func CMemset(dst unsafe.Pointer, c byte, n uintptr) { c23Memset(dst, c, n) }

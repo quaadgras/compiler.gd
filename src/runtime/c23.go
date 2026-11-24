@@ -25,6 +25,10 @@ func c23Object(p unsafe.Pointer) (unsafe.Pointer, uintptr) {
 	}
 	base := s.base() + s.objIndex(a)*s.elemsize
 	size := s.elemsize
+	if s.spanclass.c() {
+		// What malloc gave ends where it was asked to.
+		size = s.cSizeOf(s.objIndex(a))
+	}
 	if !s.spanclass.noscan() && !heapBitsInSpan(size) && s.spanclass.sizeclass() != 0 {
 		base += gc.MallocHeaderSize
 		size -= gc.MallocHeaderSize

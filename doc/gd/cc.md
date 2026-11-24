@@ -98,13 +98,10 @@ func c0_name(c c23.UInt) *c23.Char {
   through one passes every pointer as a `*c23.Void`: C and C++ call
   functions whose types differ in what their pointers point to (a
   virtual function's `this`), which to Go are different types.
-- **malloc** converted to a pointer to a type that has pointers is a Go
-  allocation of that type. Otherwise it is memory in which every word
-  may hold a pointer (`c23.AllocRaw`), which the collector looks at word
-  by word. It is to become an allocation in spans of C's own, whose
-  words all start as possible pointers, with a bit for each that a
-  scalar store clears and a pointer store sets again, under a seqlock
-  of the span taken only when a bit changes. `free` does nothing.
+- **malloc** gives an object of spans that the runtime keeps for C
+  (below): n bytes to every check, and words that the collector knows
+  to hold a pointer or none from what C stores in them. `free` does
+  nothing.
 - **A union** (and a struct that Go cannot lay out as C does: packed,
   over-aligned) is its bytes to Go; its words, each a possible pointer,
   if a member is a pointer, so that the collector sees what C stores.
@@ -149,8 +146,10 @@ Where C and Go's rules for pointers disagree:
   pointer into an object of the heap be if its type reaches past the
   object's end. This is the one place where C is checked less than Go:
   a load or a store through such a pointer reaches up to one value
-  past the end, and nothing stops it. C's spans (above) would know the
-  size that was asked for, and with it the end exactly.
+  past the end, and nothing stops it. For what malloc gave, the end is
+  where C asked for it, not where the allocator's slot ends: a pointer
+  that arithmetic takes past it, or that is converted there, stops the
+  program.
 - **Integers in pointers.** C keeps them there (`SIG_IGN`, `(void *)1`,
   a union's `int`) and adds to a null pointer. Such a conversion goes
   through `c23.FromInt`, unchecked; a pointer to a function is a
@@ -166,6 +165,85 @@ runtime lacks two of internal/c23's hooks), where the older one ran
 `CCDEBUG=layout` (or `cc -debug`) adds to the generated Go the
 declarations that fail to compile if Go lays a struct out other than C
 does; the tests set it.
+
+## The memory that malloc gives
+
+What malloc gives has no type. C makes of it what it stores there, and
+may make something else of it later: an allocator hands out parts of a
+block of bytes, a node that was freed to a list holds text next. So it
+is not a Go object of some type, whose pointers the collector would
+know from the type. It is an object of spans of its own
+(`runtime/cspan.go`), a third set of span classes after Go's and the
+ones of objects that one goroutine reaches, and such a span keeps what
+a type would have said:
+
+- **For each word, a bit: the word holds no pointer.** The collector
+  skips it. A word whose bit is clear may hold a pointer, and the
+  collector looks at it as it looks at a word of a stack frame that it
+  has no map for: what is there is a pointer if it is the address of
+  an object that is allocated, and is nothing otherwise. So an integer
+  that happens to be an address keeps an object alive at worst, and
+  never stops the program.
+- **For each object, the bytes that were asked for.** That is where the
+  object ends for pointer arithmetic and for conversions; the slot it
+  is in is a size class's, with a byte more for the pointer to its end.
+
+How a word comes to be one or the other:
+
+| What C does | The words |
+| --- | --- |
+| `malloc(n)` with no type (`void *p = malloc(n)`) | may all hold pointers |
+| `(T *)malloc(n)`, `calloc`, `realloc` to a `T *` | as an array of T: pointers where T has them |
+| stores a pointer | the word may hold one |
+| `memset` | the whole words it writes hold none |
+| `memcpy`, `memmove`, a struct assigned | as the words they are copied from |
+| stores an integer | unchanged (see below) |
+
+- **A store of a pointer** that the compiler makes in a package of C's,
+  and in internal/c23, where it is not to a variable, is a call to
+  `runtime.c23StorePtr`, and a copy of a value with pointers one to
+  `runtime.typedmemmove`: they clear the bit before the store, and
+  again after it if something set it meanwhile. The runtime's own
+  stores of pointers do the same (copies of slices, the atomic ones).
+- **A bit is set** before the words are written, and what they held is
+  the collector's to see first, as for any pointer that is written
+  over while it marks.
+- **The sequence of a span** (`cseq`) is odd while a bit of it changes,
+  as a seqlock's is. Stores do not read it: the order above is enough
+  for them. A copy from one span of C's to another does, since it reads
+  bits and the words they are for together. If the sequence moved while
+  it copied, it takes every word it wrote for a possible pointer.
+- **Go that is not C's** stores pointers with no call. Where such a
+  package converts an `unsafe.Pointer` into C's memory to a type with
+  pointers, the conversion's check clears the bits of those words.
+
+What it costs, on the benchmark above, against the same translation
+with malloc as Go objects: the vector 0.9 times, the strings 1.1, the
+tree 1.2, the hash map 1.6. A store of a pointer through a pointer is
+a call that finds the span of the word (3 to 5% of the time); an
+object of C's is scanned by itself, not with its span; and each check
+of a pointer finds the span once, as before.
+
+What this does not do:
+
+- **A store of an integer says nothing.** The bit stays as it was, so
+  a word that held a pointer and now holds an integer is looked at
+  still, which costs time and nothing else. But the collector is not
+  shown the pointer that an integer is written over while it marks.
+  If that was the last pointer to an object but for one that C has
+  just loaded, the object is freed while C still uses it. The same is
+  true of a union in a Go variable. The cure is a barrier on C's stores
+  of integers through pointers, which would also set the bits.
+- **An integer read as a pointer** is the integer: a word of C's is
+  what was last stored in it, and a conversion cannot know what will
+  be loaded. What Go's rule refuses for a Go object (`unsafe.md`: a
+  pointer where the memory has an integer) is not refused here.
+- **A package of Go's that C hands a typed pointer to**, with no
+  conversion of its own, stores pointers through it unseen. If C has
+  set the word's bit since, the collector does not see what is stored.
+- **`new`** and the variables that the compiler moves to the heap are
+  Go objects still, with the byte after them.
+- **wasm.**
 
 ## cgo packages, with cgo off
 

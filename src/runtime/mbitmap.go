@@ -418,6 +418,10 @@ func bulkBarrierPreWrite(dst, src, size uintptr, typ *abi.Type) {
 		// though that should never have.
 		return
 	}
+	if s.spanclass.c() {
+		bulkBarrierC(s, dst, src, size, true)
+		return
+	}
 	buf := &getg().m.p.ptr().wbBuf
 
 	// Double-check that the bitmaps generated in the two possible paths match.
@@ -480,6 +484,10 @@ func bulkBarrierPreWriteSrcOnly(dst, src, size uintptr, typ *abi.Type) {
 	}
 	buf := &getg().m.p.ptr().wbBuf
 	s := spanOf(dst)
+	if s.spanclass.c() {
+		bulkBarrierC(s, dst, src, size, false)
+		return
+	}
 
 	// Double-check that the bitmaps generated in the two possible paths match.
 	const doubleCheck = false
@@ -515,7 +523,7 @@ func (s *mspan) initHeapBits() {
 		b := s.heapBits()
 		clear(b)
 	}
-	if goexperiment.GreenTeaGC && gcUsesSpanInlineMarkBits(s.elemsize) {
+	if goexperiment.GreenTeaGC && s.usesInlineMarkBits() {
 		s.initInlineMarkBits()
 	}
 }

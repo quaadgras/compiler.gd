@@ -10,7 +10,8 @@ unsafe's six patterns); the fork checks them in every build.
 > was kept (a `uintptr` field, an argument of a callback, which C-style
 > APIs have) is a pointer again if its object is exposed. Not yet: the
 > integer keeping its object alive, bounds of stack objects and globals,
-> and exact sizes in the heap (an object's bound is its size class).
+> and exact sizes in the heap (an object's bound is its size class,
+> but for what C's malloc gave: `cc.md`).
 
 ## What is checked
 

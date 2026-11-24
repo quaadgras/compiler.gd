@@ -1462,11 +1462,9 @@ func (g *gen) tcallPtr(c *call) string {
 }
 
 // tallocCall is malloc, calloc or realloc whose result is converted to
-// the pointer type to: an allocation of to's elements, which the
-// collector knows the pointers of. Memory for elements that have no
-// pointers is not given their type: it may come to hold pointers (a
-// header before what an allocator gives out), so it is memory in which
-// any word may be one.
+// the pointer type to: an allocation whose words begin as those of to's
+// elements, pointers where the elements have them and none elsewhere
+// (c23.AllocOf). The runtime follows what C stores there after.
 func (g *gen) tallocCall(c *call, to *ctype) (string, bool) {
 	name, ok := g.libcCallee(c)
 	if !ok {
@@ -1474,7 +1472,7 @@ func (g *gen) tallocCall(c *call, to *ctype) (string, bool) {
 	}
 	e := to.elem
 	switch e.kind {
-	case kVoid, kChar, kSChar, kUChar, kFunc:
+	case kVoid, kFunc:
 		return "", false
 	case kStruct:
 		if !e.rec.complete {
@@ -1485,7 +1483,9 @@ func (g *gen) tallocCall(c *call, to *ctype) (string, bool) {
 			return "", false
 		}
 	}
-	if !hasPointers(e) || g.gt(to) != "*"+g.mirror(e) {
+	// (A type without pointers too: the runtime then knows that the
+	// words hold none, until C stores one.)
+	if g.gt(to) != "*"+g.mirror(e) {
 		return "", false
 	}
 	m := g.mirror(e)

@@ -4,7 +4,10 @@
 
 package c23
 
-import "unsafe"
+import (
+	"internal/abi"
+	"unsafe"
+)
 
 // What cmd/cc's translation (doc/gd/cc.md) uses, which is 1:1: there a C
 // pointer is Go's, *T or unsafe.Pointer, a C object is a Go variable of
@@ -13,38 +16,61 @@ import "unsafe"
 // library is still this package's, which takes a *Void: Thin makes one of
 // a Go pointer where the library is called.
 
-const wordBytes = uint64(WordSize)
-
 // Lit is the array A whose bytes are s: a string literal's object.
 func Lit[A any](s string) (a A) {
 	copy(unsafe.Slice((*byte)(unsafe.Pointer(&a)), unsafe.Sizeof(a)), s)
 	return a
 }
 
-// Every object of C's on the heap has at least a byte after it, so that
-// the pointer one past its end, which C may make and keep, points into
-// it and to no other object: the collector would keep the other alive
-// in its place, or stop on a pointer to one that is free. The compiler
-// does the same for the variables of translated C (cmd/compile's
-// ir.CObjType).
+// What malloc gives is an object of the runtime's spans of C's objects
+// (runtime/cspan.go). It is n bytes to every check of a pointer, with a
+// byte after it that the pointer to its end points to. For each of its
+// words the runtime knows whether it holds a pointer or none, from what
+// C stores there, and the collector looks at a word that may hold one
+// as it looks at a word that it has no type for.
 
-// AllocOf is malloc(n) converted to *T: an array of T's of more than n
-// bytes, which the collector knows the pointers of.
+// AllocOf is malloc(n) converted to *T: its words begin as those of an
+// array of T's, pointers where T has them.
 func AllocOf[T any](n uint64) *T {
-	var z T
-	size := uint64(unsafe.Sizeof(z))
-	if size == 0 {
-		return new(T)
+	if n != uint64(uintptr(n)) {
+		return nil
 	}
-	return unsafe.SliceData(make([]T, n/size+1))
+	return (*T)(malloc(uintptr(n), unsafe.Pointer(abi.TypeFor[T]()), false))
 }
 
-// AllocRaw is malloc(n) that is given no type: memory in which any word
-// may come to hold a pointer, which the collector therefore looks at
-// word by word.
+// AllocRaw is malloc(n) that is given no type: any word of it may hold
+// a pointer, until C stores something else there. NULL if there is no
+// object of n bytes.
 func AllocRaw(n uint64) *Void {
-	return (*Void)(unsafe.Pointer(unsafe.SliceData(make([]unsafe.Pointer, n/wordBytes+1))))
+	if n != uint64(uintptr(n)) {
+		return nil
+	}
+	return (*Void)(malloc(uintptr(n), nil, false))
 }
+
+// malloc allocates n bytes, zeroed: for values of typ, a *abi.Type, if
+// it is not nil, and for no pointers if scalar is set.
+//
+//go:linkname malloc runtime.c23Malloc
+func malloc(n uintptr, typ unsafe.Pointer, scalar bool) unsafe.Pointer
+
+// memmove copies n bytes, the words of them that may be pointers as
+// pointers are copied.
+//
+//go:linkname memmove runtime.c23Memmove
+//go:noescape
+func memmove(to, from unsafe.Pointer, n uintptr)
+
+//go:linkname memset runtime.c23Memset
+//go:noescape
+func memset(to unsafe.Pointer, c byte, n uintptr)
+
+// usable returns the number of bytes from p to the end of the object of
+// C's that it points into, and whether it points into one.
+//
+//go:linkname usable runtime.c23Usable
+//go:noescape
+func usable(p unsafe.Pointer) (uintptr, bool)
 
 // sizeOf is the number of bytes from p to the end of the heap object it
 // points into: 0 if it points to none.
@@ -59,12 +85,8 @@ func sizeOf(p unsafe.Pointer) uintptr {
 // ReallocOf1 is realloc(p, n) converted to *T.
 func ReallocOf1[T any](p *T, n uint64) *T {
 	q := AllocOf[T](n)
-	if p != nil {
-		var z T
-		if size := unsafe.Sizeof(z); size != 0 {
-			old := sizeOf(unsafe.Pointer(p)) / size
-			copy(unsafe.Slice(q, max((uintptr(n)+size-1)/size, 1)), unsafe.Slice(p, old))
-		}
+	if p != nil && q != nil {
+		memmove(unsafe.Pointer(q), unsafe.Pointer(p), min(uintptr(n), sizeOf(unsafe.Pointer(p))))
 	}
 	return q
 }
@@ -72,9 +94,8 @@ func ReallocOf1[T any](p *T, n uint64) *T {
 // ReallocRaw is realloc(p, n) that is given no type.
 func ReallocRaw(p *Void, n uint64) *Void {
 	q := AllocRaw(n)
-	if p != nil {
-		old := sizeOf(unsafe.Pointer(p)) / WordSize
-		copy(unsafe.Slice((*unsafe.Pointer)(unsafe.Pointer(q)), max((uintptr(n)+WordSize-1)/WordSize, 1)), unsafe.Slice((*unsafe.Pointer)(unsafe.Pointer(p)), old))
+	if p != nil && q != nil {
+		memmove(unsafe.Pointer(q), unsafe.Pointer(p), min(uintptr(n), sizeOf(unsafe.Pointer(p))))
 	}
 	return q
 }
@@ -122,54 +143,28 @@ func Strcmp1(a, b *Void) int32 {
 	}
 }
 
-// words reports whether the n bytes at each of ps are whole words, which
-// may hold pointers: the collector must see them copied and cleared.
-func words(n uint64, ps ...unsafe.Pointer) bool {
-	if n%wordBytes != 0 || n == 0 {
-		return false
-	}
-	for _, p := range ps {
-		if uintptr(p)%WordSize != 0 {
-			return false
-		}
-	}
-	return true
-}
-
 // Memcpy1 is memcpy and memmove.
 func Memcpy1(to, from *Void, n uint64) *Void {
-	dst, src := unsafe.Pointer(to), unsafe.Pointer(from)
-	if words(n, dst, src) {
-		copy(unsafe.Slice((*unsafe.Pointer)(dst), n/wordBytes), unsafe.Slice((*unsafe.Pointer)(src), n/wordBytes))
-		return to
-	}
-	copy(unsafe.Slice((*byte)(dst), n), unsafe.Slice((*byte)(src), n))
+	memmove(unsafe.Pointer(to), unsafe.Pointer(from), uintptr(n))
 	return to
 }
 
 // Memset1 is memset.
 func Memset1(to *Void, c int32, n uint64) *Void {
-	p := unsafe.Pointer(to)
-	if c == 0 && words(n, p) {
-		clear(unsafe.Slice((*unsafe.Pointer)(p), n/wordBytes))
-		return to
-	}
-	b := unsafe.Slice((*byte)(p), n)
-	if c == 0 {
-		clear(b)
-	} else {
-		for i := range b {
-			b[i] = byte(c)
-		}
-	}
+	memset(unsafe.Pointer(to), byte(c), uintptr(n))
 	return to
 }
 
 // SizeOf1 is the number of bytes from p to the end of the object it
-// points into, as the collector knows it: the object's size class, which
-// is more than what was asked for (malloc_usable_size), less the byte that
-// stays after every object (see AllocOf).
-func SizeOf1(p *Void) uint64 { return uint64(max(sizeOf(unsafe.Pointer(p)), 1) - 1) }
+// points into (malloc_usable_size): what was asked for, if malloc gave
+// it with no type, and otherwise what the collector knows, the object's
+// size class, less the byte that stays after every object (see AllocOf).
+func SizeOf1(p *Void) uint64 {
+	if n, ok := usable(unsafe.Pointer(p)); ok {
+		return uint64(n)
+	}
+	return uint64(max(sizeOf(unsafe.Pointer(p)), 1) - 1)
+}
 
 // labels are what the addresses of labels (GNU's &&label) point to: one
 // byte for each label of a function, by its number.

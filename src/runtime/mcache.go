@@ -239,7 +239,7 @@ func (c *mcache) refill(spc spanClass) {
 }
 
 // allocLarge allocates a span for a large object.
-func (c *mcache) allocLarge(size uintptr, noscan bool, local bool) *mspan {
+func (c *mcache) allocLarge(size uintptr, spc spanClass) *mspan {
 	if size+pageSize < size {
 		throw("out of memory")
 	}
@@ -253,7 +253,6 @@ func (c *mcache) allocLarge(size uintptr, noscan bool, local bool) *mspan {
 	// pays the debt down to npage pages.
 	deductSweepCredit(npages*pageSize, npages)
 
-	spc := makeSpanClass(0, noscan).in(local)
 	s := mheap_.alloc(npages, spc)
 	if s == nil {
 		throw("out of memory")

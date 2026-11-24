@@ -13,6 +13,15 @@ import (
 )
 
 func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
+	checkptrAlign(p, elem, n, true)
+}
+
+// checkptrAlign is checkptrAlignment. If claim is set and p is to an
+// object of C's (cspan.go), the words of it that elem has pointers in
+// may hold pointers from here on: the conversion is one of a package
+// whose stores of pointers the runtime does not see, as it sees those of
+// C translated by cmd/cc.
+func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, claim bool) {
 	// nil pointer is always suitably aligned (#47430).
 	if p == nil {
 		return
@@ -47,6 +56,9 @@ func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
 			return
 		}
 		if elem.Pointers() {
+			if claim && s.spanclass.c() {
+				cTypedPointers(uintptr(p), elem, n)
+			}
 			checkptrPointers(s, uintptr(p), elem, n)
 		}
 		if typ != nil {
@@ -81,11 +93,31 @@ func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
 // the object's end is let be. C must not load or store through it, and
 // nothing here stops that it does: what it reaches is less than one
 // value of the type past the end.
+//
+// What malloc gave (cspan.go) ends where C asked it to, which the
+// runtime knows: there the pointer is to the object or to its end, and
+// to nothing after it.
 func checkptrAlignmentC(p unsafe.Pointer, elem *_type, n uintptr) {
 	if p != nil {
 		if s := spanOfHeap(uintptr(p)); s != nil && !s.isUserArenaChunk {
-			base := s.base() + s.objIndex(uintptr(p))*s.elemsize
-			if end := uintptr(p) + n*elem.Size_; end > base+s.elemsize && end >= uintptr(p) {
+			i := s.objIndex(uintptr(p))
+			base := s.base() + i*s.elemsize
+			limit := base + s.elemsize
+			if s.spanclass.c() {
+				limit = base + s.cSizeOf(i)
+				if uintptr(p) > limit {
+					throw("checkptr: converted pointer is past the end of its object")
+				}
+				// That is all there is to check: an object of
+				// C's has no type, its words are what C
+				// stores in them (checkptrPointers), and it
+				// holds no string, slice or interface of Go's.
+				if elem.Pointers() && uintptr(p)&(uintptr(min(elem.Align_, goarch.PtrSize))-1) != 0 {
+					throw("checkptr: misaligned pointer conversion")
+				}
+				return
+			}
+			if end := uintptr(p) + n*elem.Size_; end > limit && end >= uintptr(p) {
 				if elem.Pointers() && uintptr(p)&(uintptr(min(elem.Align_, goarch.PtrSize))-1) != 0 {
 					throw("checkptr: misaligned pointer conversion")
 				}
@@ -93,7 +125,7 @@ func checkptrAlignmentC(p unsafe.Pointer, elem *_type, n uintptr) {
 			}
 		}
 	}
-	checkptrAlignment(p, elem, n)
+	checkptrAlign(p, elem, n, false)
 }
 
 // checkptrObjectType returns the type that the object at base of the span
@@ -373,7 +405,15 @@ func checkptrSameObject(s *mspan, a, v uintptr) bool {
 // pointer in a word the collector does not look at, and an integer stored
 // where the object has a pointer. A conversion cannot tell what will be
 // stored.
+//
+// A word of C's (cspan.go) is what was last stored in it, and has
+// neither kind for good: a pointer may be stored where an integer is,
+// which a conversion cannot refuse. So nothing is checked there, and
+// what C reads as a pointer where it stored an integer is the integer.
 func checkptrPointers(s *mspan, p uintptr, elem *_type, n uintptr) {
+	if s.spanclass.c() {
+		return
+	}
 	limit := p + n*elem.Size_
 	var tp typePointers
 	var slot uintptr // the next word of the object that holds a pointer
@@ -445,6 +485,26 @@ func checkptrArithmetic(p unsafe.Pointer, originals []unsafe.Pointer) {
 	// Check that if the computed pointer p points into a heap
 	// object, then one of the original pointers must have pointed
 	// into the same object.
+	//
+	// gd: the usual case first, with the span looked for once: p is
+	// in an object of the heap, and so is one of the originals.
+	if gp := getg(); uintptr(p) < gp.stack.lo || uintptr(p) >= gp.stack.hi {
+		if s := spanOfHeap(uintptr(p)); s != nil {
+			i := s.objIndex(uintptr(p))
+			base := s.base() + i*s.elemsize
+			// What malloc gave C (cspan.go) ends where C asked
+			// it to, and a pointer of C's is to its object or
+			// to the end of it.
+			if s.spanclass.c() && uintptr(p)-base > s.cSizeOf(i) {
+				throw("checkptr: pointer arithmetic result is past the end of its object")
+			}
+			for _, original := range originals {
+				if uintptr(original)-base < s.elemsize {
+					return
+				}
+			}
+		}
+	}
 	base := checkptrBase(p)
 	if base == 0 {
 		return

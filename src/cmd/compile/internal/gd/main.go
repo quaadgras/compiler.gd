@@ -40,6 +40,7 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 )
 
@@ -276,7 +277,11 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 	for _, p := range typecheck.Target(gd).Imports {
 		if p.Path == "internal/c23" {
 			gd.CObjects = true
+			gd.CStores = true
 		}
+	}
+	if p := gd.Ctxt.Pkgpath; p == "internal/c23" || strings.HasPrefix(p, "internal/c23/") {
+		gd.CStores = true
 	}
 
 	// As a convenience to users (toolchain maintainers, in particular),

@@ -374,6 +374,15 @@ type Invocation struct {
 	CObjects  bool
 	CObjTypes any
 
+	// CStores is set if the package may store pointers in the memory
+	// that C allocates (runtime/cspan.go), whose words are known to
+	// hold a pointer or none by what is stored in them: a package of
+	// C translated by cmd/cc, and internal/c23 and what is under it.
+	// A store of a pointer that is not to a variable goes through
+	// runtime.c23StorePtr, and a copy of a value with pointers through
+	// runtime.typedmemmove.
+	CStores bool
+
 	// inline package's PGO maps. Were package-level `var` maps,
 	// one of which (candHotEdgeMap) is written by PGOInlinePrologue
 	// in invocation A while invocation B reads it from inlineCostOK,

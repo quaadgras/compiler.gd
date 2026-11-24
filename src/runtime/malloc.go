@@ -1756,7 +1756,7 @@ func mallocgcLarge(size uintptr, typ *_type, needzero bool, local bool) (unsafe.
 	c := getMCache(mp)
 	// For large allocations, keep track of zeroed state so that
 	// bulk zeroing can be happen later in a preemptible context.
-	span := c.allocLarge(size, typ == nil || !typ.Pointers(), local)
+	span := c.allocLarge(size, makeSpanClass(0, typ == nil || !typ.Pointers()).in(local))
 	span.freeindex = 1
 	span.allocCount = 1
 	span.largeType = nil // Tell the GC not to look at this yet.

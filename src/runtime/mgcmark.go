@@ -478,7 +478,7 @@ func gcScanFinalizer(spf *specialfinalizer, s *mspan, gcw *gcWork) {
 	// Mark everything that can be reached from
 	// the object (but *not* the object itself or
 	// we'll never collect it).
-	if !s.spanclass.noscan() {
+	if !s.spanclass.noscan() || s.spanclass.c() {
 		scanObject(p, gcw)
 	}
 
@@ -1644,6 +1644,11 @@ func scanConservative(b, n uintptr, ptrmask *uint8, gcw *gcWork, state *stackSca
 //go:nowritebarrier
 func shade(b uintptr) {
 	gcw := &getg().m.p.ptr().gcw
+	if cSpansUsed {
+		// b may be an integer of C's.
+		greyConservative(b, 0, 0, gcw)
+		return
+	}
 	if !tryDeferToSpanScan(b, gcw) {
 		if obj, span, objIndex := findObject(b, 0, 0); obj != 0 {
 			greyobject(obj, 0, 0, span, gcw, objIndex)
@@ -1696,8 +1701,9 @@ func greyobject(obj, base, off uintptr, span *mspan, gcw *gcWork, objIndex uintp
 	}
 
 	// If this is a noscan object, fast-track it to black
-	// instead of greying it.
-	if span.spanclass.noscan() {
+	// instead of greying it. (An object of C's is scanned by
+	// its span's own bits: scanObjectC.)
+	if span.spanclass.noscan() && !span.spanclass.c() {
 		gcw.bytesMarked += uint64(span.elemsize)
 		return
 	}
@@ -1779,7 +1785,7 @@ func gcmarknewobject(span *mspan, obj uintptr) {
 	// Mark object.
 	objIndex := span.objIndex(obj)
 	span.markBitsForIndex(objIndex).setMarked()
-	if goexperiment.GreenTeaGC && gcUsesSpanInlineMarkBits(span.elemsize) {
+	if goexperiment.GreenTeaGC && span.usesInlineMarkBits() {
 		// No need to scan the new object.
 		span.scannedBitsForIndex(objIndex).setMarked()
 	}
