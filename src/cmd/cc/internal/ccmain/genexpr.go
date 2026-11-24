@@ -31,74 +31,8 @@ type lval struct {
 }
 
 func (g *gen) lv(e expr) lval {
-	if g.o.thin {
-		return g.tlv(e, false)
-	}
-	switch e := e.(type) {
-	case *varRef:
-		s := e.sym
-		if s.kind != symVar {
-			g.errorf(e.p, "%s is not an object", s.name)
-		}
-		if s.global {
-			if s.tls {
-				// The calling thread's.
-				return lval{addr: g.globalName(s) + ".Get()", t: s.t}
-			}
-			def := s
-			if d := g.ext[s.name]; s.linkage == 'e' && d != nil {
-				def = d
-			}
-			return lval{addr: g.globalName(s), t: s.t, direct: g.objs[def]}
-		}
-		n := g.localName(s)
-		if localKindOf(s) == lkVar {
-			return lval{goVar: n, t: s.t}
-		}
-		return lval{addr: n, t: s.t, direct: g.objs[s]}
-	case *deref:
-		if l, ok := g.directElem(e); ok {
-			return l
-		}
-		return lval{addr: g.rv(e.x), t: e.t}
-	case *member:
-		var base, direct string
-		if isLvalue(e.x) {
-			l := g.lv(e.x)
-			if l.goVar != "" {
-				g.errorf(e.p, "internal error: member of a register struct")
-			}
-			base = l.addr
-			if l.direct != "" && e.f.bits < 0 {
-				g.mirror(e.x.ty()) // its record's fields are named
-				if r := e.x.ty().rec; !r.bytes && r.goName != "" {
-					for i, f := range r.fields {
-						if f == e.f {
-							direct = l.direct + "." + g.fieldName(f, i)
-						}
-					}
-				}
-			}
-		} else {
-			base = g.rv(e.x)
-		}
-		l := lval{addr: addOff(base, e.f.off), t: e.t, direct: direct}
-		if e.f.bits >= 0 {
-			l.f = e.f
-		}
-		return l
-	case *compoundLit:
-		return lval{addr: g.compound(e), t: e.t}
-	case *strLit:
-		return lval{addr: g.str(e), t: e.t}
-	case *retSlot:
-		return lval{addr: "sret", t: e.t}
-	}
-	if e.ty().kind == kStruct {
-		return lval{addr: g.rv(e), t: e.ty()}
-	}
-	g.errorf(e.at(), "internal error: %T is not an lvalue", e)
-	return lval{}
+	return g.tlv(e, false)
+
 }
 
 func (g *gen) globalName(s *symbol) string {
@@ -121,24 +55,8 @@ func (g *gen) globalName(s *symbol) string {
 // compound initializes a compound literal where it is evaluated: its
 // object's *c23.Void.
 func (g *gen) compound(e *compoundLit) string {
-	if g.o.thin {
-		return taddr(g.tcompound(e))
-	}
-	s := e.sym
-	if s.global {
-		if s.tls {
-			return g.globalName(s) + ".Get()"
-		}
-		return g.globalName(s)
-	}
-	n := g.localName(s)
-	if s.init != nil {
-		if s.init.scalar == nil {
-			g.p("c23.Memset(%s, 0, %d)", n, s.t.sizeof())
-		}
-		g.initObject(n, s.t, s.init)
-	}
-	return n
+	return taddr(g.tcompound(e))
+
 }
 
 // bind makes l's address a temporary, so that it is evaluated once.
@@ -433,7 +351,7 @@ func (g *gen) effect(e expr) {
 		}
 		if e.t.kind != kVoid && e.t.kind != kStruct {
 			g.p("_ = %s", v)
-		} else if v != "" && !(g.o.thin && e.t.kind == kStruct) {
+		} else if v != "" && !(e.t.kind == kStruct) {
 			g.p("%s", v)
 		}
 	case *cast:
@@ -524,7 +442,7 @@ func (g *gen) cond(e expr) string {
 	}
 	v := g.rv(e)
 	t := e.ty()
-	if g.o.thin && (t.isPtr() || t.kind == kNullptr) {
+	if t.isPtr() || t.kind == kNullptr {
 		return fmt.Sprintf("(%s != nil)", v)
 	}
 	if t.isPtr() || t.kind == kNullptr || t.kind == kVaList || t.isCap() {
@@ -537,7 +455,7 @@ func (g *gen) cond(e expr) string {
 }
 
 func (g *gen) compare(e *binary) string {
-	if g.o.thin && (e.x.ty().isPtr() || e.x.ty().kind == kNullptr || e.y.ty().isPtr() || e.y.ty().kind == kNullptr) {
+	if e.x.ty().isPtr() || e.x.ty().kind == kNullptr || e.y.ty().isPtr() || e.y.ty().kind == kNullptr {
 		return g.tcompare(e)
 	}
 	x, y := g.rv(e.x), g.rv(e.y)
@@ -571,11 +489,10 @@ func (g *gen) addrCode(e expr, v string) string {
 
 // rv returns e's value.
 func (g *gen) rv(e expr) string {
-	if g.o.thin {
-		if v, ok := g.trv(e); ok {
-			return v
-		}
+	if v, ok := g.trv(e); ok {
+		return v
 	}
+
 	switch e := e.(type) {
 	case *intConst:
 		return constLit(e.t, e.v)
@@ -682,10 +599,9 @@ func (g *gen) binary(e *binary) string {
 		p := g.rv(e.x)
 		if e.y.ty().isPtr() {
 			q := g.rv(e.y)
-			if g.o.thin {
-				return g.tptrSub(p, q, xt, e.t)
-			}
-			return fmt.Sprintf("%s(c23.Sub(%s, %s) / %d)", goType(e.t), p, q, max(g.elemSize(xt), 1))
+
+			return g.tptrSub(p, q, xt, e.t)
+
 		}
 		return g.ptrAdd(p, xt, e.y, e.op == "-")
 	}
@@ -755,36 +671,8 @@ func (g *gen) elemSize(t *ctype) int64 {
 
 // ptrAdd is p plus or minus i elements.
 func (g *gen) ptrAdd(p string, pt *ctype, i expr, neg bool) string {
-	if g.o.thin {
-		return g.tptrAdd(p, pt, i, neg)
-	}
-	if pt.elem.isVLA() {
-		size := g.vlaSize(pt.elem)
-		sign := ""
-		if neg {
-			sign = "-"
-		}
-		return fmt.Sprintf("c23.Add(%s, %sint(%s)*int(%s))", p, sign, g.rv(i), size)
-	}
-	size := g.elemSize(pt)
-	if c, ok := i.(*intConst); ok {
-		n := c.v * size
-		if neg {
-			n = -n
-		}
-		if n == 0 {
-			return p
-		}
-		return fmt.Sprintf("c23.Add(%s, %d)", p, addrOff(n))
-	}
-	sign := ""
-	if neg {
-		sign = "-"
-	}
-	if size == 1 {
-		return fmt.Sprintf("c23.Add(%s, %sint(%s))", p, sign, g.rv(i))
-	}
-	return fmt.Sprintf("c23.Add(%s, %sint(%s)*%d)", p, sign, g.rv(i), size)
+	return g.tptrAdd(p, pt, i, neg)
+
 }
 
 func (g *gen) castCode(e *cast) string {
@@ -896,12 +784,10 @@ func (g *gen) assign(e *assign, value bool) string {
 		l := g.lv(e.x)
 		g.bind(&l)
 		src := g.rv(e.y)
-		if g.o.thin {
-			g.tstore(l, src, nil)
-			return l.addr
-		}
-		g.p("%s", moveCode(l.addr, src, t))
+
+		g.tstore(l, src, nil)
 		return l.addr
+
 	}
 	l := g.lv(e.x)
 	if isAtomic(l) && e.op != "=" {
@@ -971,7 +857,7 @@ func (g *gen) assign(e *assign, value bool) string {
 		return l.goVar
 	}
 	tv := g.tmp(g.gt(t))
-	if c, ok := e.y.(*intConst); ok && e.op == "=" && !(g.o.thin && (t.isPtr() || t.kind == kNullptr)) {
+	if c, ok := e.y.(*intConst); ok && e.op == "=" && !(t.isPtr() || t.kind == kNullptr) {
 		v = constLit(t, c.v)
 	}
 	g.p("%s = %s", tv, v)
@@ -1105,7 +991,7 @@ func (g *gen) condExpr(e *cond) string {
 // the length of an array that only the other operand's type has.
 func (g *gen) armValue(x expr, t *ctype) string {
 	v := g.rv(x)
-	if g.o.thin && t.isPtr() && x.ty().isPtr() {
+	if t.isPtr() && x.ty().isPtr() {
 		v = g.retype(v, g.gt(x.ty()), g.gt(t))
 	}
 	return v
@@ -1216,120 +1102,13 @@ func (g *gen) funcName(s *symbol, at pos) string {
 
 // funcPtr is the *c23.Void to a function: its descriptor.
 func (g *gen) funcPtr(s *symbol) string {
-	if g.o.thin {
-		return g.tfuncPtr(s)
-	}
-	name := g.funcName(s, s.p)
-	if name == "" {
-		return "(*c23.Void)(nil)" // weak, and not defined
-	}
-	if s.nested {
-		return fmt.Sprintf("c23.NewFunc(%s)", name)
-	}
-	d := "fd_" + strings.ReplaceAll(name, ".", "_")
-	if !g.descs[d] {
-		// Set in an init of its own, before C's initializers use it: a
-		// package-level initializer would make a cycle if the function
-		// uses its own address.
-		g.descs[d] = true
-		fmt.Fprintf(&g.vars, "var %s *c23.Void\n", d)
-		fmt.Fprintf(&g.descInit, "%s = c23.NewFunc(%s)\n", d, g.libcAdapter(name, s))
-	}
-	return d
+	return g.tfuncPtr(s)
+
 }
 
 func (g *gen) callCode(c *call) string {
-	if g.o.thin {
-		return g.tcall(c)
-	}
-	var fn string
-	direct := false
-	callee := c.ft // the type the function has where it is defined
-	if d, ok := c.fn.(*decay); ok {
-		if v, ok := d.x.(*varRef); ok && v.sym.kind == symFunc {
-			fn = g.funcName(v.sym, c.p)
-			direct = true
-			if t := g.calleeType(v.sym); t != nil {
-				callee = t.fn
-			}
-		}
-	}
-	if !direct || fn == "" {
-		fn = fmt.Sprintf("c23.FuncOf[%s](%s)", g.funcSig(c.ft, nil), g.rv(c.fn))
-	}
-	var args []string
-	var sret string
-	if into := g.u.callInto[c]; into != nil {
-		// C++: the object the call constructs.
-		sret = g.lv(into).addr
-		if !isSimple(sret) {
-			t := g.tmp("*c23.Void")
-			g.p("%s = %s", t, sret)
-			sret = t
-		}
-		args = append(args, sret)
-	} else if c.ft.ret.kind == kStruct {
-		sret = g.cellTmp(c.ft.ret)
-		args = append(args, sret)
-	}
-	for i, a := range c.args {
-		v := g.rv(a)
-		if i >= len(callee.params) && a.ty().kind == kStruct {
-			// By value, in variable arguments: a copy.
-			v = fmt.Sprintf("c23.ByValue{P: c23.Copy(%s, %d)}", v, a.ty().sizeof())
-		}
-		if callee != c.ft {
-			// Declared here with another type than where it is
-			// defined: what the ABI would pass.
-			switch {
-			case i < len(callee.params):
-				v = abiConvert(v, a, callee.params[i])
-			case !callee.variadic && (callee.proto || len(callee.params) > 0):
-				continue // an extra argument: ignored
-			}
-		}
-		if direct && isLibcGo(fn) && i < len(callee.params) {
-			v = libcConv(v, callee.params[i], true)
-		}
-		if !direct && !isSimple(v) && !isPure(v) {
-			// C evaluates the arguments before the call, whose pointer
-			// is checked when Go evaluates the function.
-			t := g.tmp(g.gt(a.ty()))
-			if i >= len(c.ft.params) && a.ty().kind == kStruct {
-				t = g.tmp("c23.ByValue")
-			}
-			g.p("%s = %s", t, v)
-			v = t
-		}
-		args = append(args, v)
-	}
-	code := fmt.Sprintf("%s(%s)", fn, strings.Join(args, ", "))
-	if direct && isLibcGo(fn) {
-		code = libcConv(code, callee.ret, false)
-	}
-	if callee != c.ft && !compatible(callee.ret.unqual(), c.ft.ret.unqual()) {
-		switch {
-		case callee.ret.kind == kVoid:
-			g.p("%s", code)
-			return zeroOf(c.ft.ret)
-		case c.ft.ret.kind == kVoid:
-			g.p("_ = %s", code)
-			return ""
-		case c.ft.ret.kind == kBool && callee.ret.isInteger():
-			// The low byte, as on x86-64.
-			return fmt.Sprintf("uint8(%s)", code)
-		case c.ft.ret.isScalar() && callee.ret.isScalar():
-			return convertCode(code, callee.ret, c.ft.ret)
-		}
-	}
-	if sret != "" {
-		g.p("%s", code)
-		return sret
-	}
-	if c.ft.noreturn || fn == "c23.Exit" || fn == "c23.Abort" {
-		return code
-	}
-	return code
+	return g.tcall(c)
+
 }
 
 // calleeType is the type of the function s calls: as its definition (or
@@ -1425,11 +1204,10 @@ func (g *gen) vaOp(e *vaOp) string {
 }
 
 func (g *gen) builtinCode(e *builtinCall) string {
-	if g.o.thin {
-		if v, ok := g.tbuiltin(e); ok {
-			return v
-		}
+	if v, ok := g.tbuiltin(e); ok {
+		return v
 	}
+
 	switch e.name {
 	case "trap":
 		return "c23.Trap()"
@@ -1563,57 +1341,6 @@ func directScalar(t *ctype) bool {
 		return true
 	}
 	return false
-}
-
-// directElem is the lvalue of *(a + i) or *a, where a is an array whose
-// object Go reaches directly: its element, by Go's index (which Go
-// checks).
-func (g *gen) directElem(e *deref) (lval, bool) {
-	var arr, idx expr
-	switch x := e.x.(type) {
-	case *decay:
-		arr = x.x
-	case *binary:
-		if x.op != "+" {
-			return lval{}, false
-		}
-		d, ok := x.x.(*decay)
-		if !ok || !x.y.ty().isInteger() {
-			return lval{}, false
-		}
-		arr, idx = d.x, x.y
-	default:
-		return lval{}, false
-	}
-	at := arr.ty()
-	if at.kind != kArray || at.n < 0 || at.isVLA() || !isLvalue(arr) {
-		return lval{}, false
-	}
-	if _, ok := arr.(*strLit); ok {
-		return lval{}, false
-	}
-	al := g.lv(arr)
-	if al.direct == "" {
-		return lval{}, false
-	}
-	if c, ok := idx.(*intConst); ok && (c.v < 0 || c.v >= at.n) {
-		return lval{}, false // Go would reject the constant index
-	}
-	i := "0"
-	if idx != nil {
-		i = g.rv(idx)
-		if !isSimple(i) && !isConvLit(i) {
-			t := g.tmp(g.gt(idx.ty()))
-			g.p("%s = %s", t, i)
-			i = t
-		}
-	}
-	pt := ptrTo(at.elem)
-	addr := al.addr
-	if idx != nil {
-		addr = g.ptrAdd(al.addr, pt, &goVal{node{idx.ty(), e.p}, i}, false)
-	}
-	return lval{addr: addr, t: e.t, direct: fmt.Sprintf("%s[%s]", al.direct, i)}, true
 }
 
 // capArith is x op y in intcap type t: on the addresses, keeping a

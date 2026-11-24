@@ -35,7 +35,6 @@ type options struct {
 	prefix string // of every package-level name: "_C23" in a package that
 	// imports "C", so that nothing clashes with the package's own names
 	undef bool // a call of an undefined function panics, instead of being an error
-	thin  bool // the 1:1 translation: C's pointers are Go's (thin.go)
 	debug bool // write the assertions that Go lays each record out as C does
 }
 
@@ -129,7 +128,6 @@ func newPkgGen(file string, o options) *pkgGen {
 // generate translates units, one program or package, to Go source.
 func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, err error) {
 	defer catch(&err)
-	o.thin = true // the translation is 1:1 (thin.go): the older one is being taken out
 	if os.Getenv("CCDEBUG") == "layout" {
 		o.debug = true
 	}
@@ -164,7 +162,7 @@ func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, er
 		args := ""
 		if len(m.t.fn.params) >= 2 {
 			args = "int32(len(os.Args)), c23.Args()"
-			if o.thin {
+			{
 				g := &gen{pkgGen: pg, u: units[0]}
 				args = "int32(len(os.Args)), " + g.retype("c23.Args()", voidPtr, g.gt(m.t.fn.params[1]))
 			}
@@ -358,76 +356,9 @@ func (g *gen) unit() {
 }
 
 func (g *gen) globalVar(s *symbol) {
-	if g.o.thin {
-		g.tglobalVar(s)
-		return
-	}
-	if v, ok := libcVars[s.name]; ok && s.storage == sExtern && !s.defined {
-		// The library's object (headers_env.go).
-		fmt.Fprintf(&g.vars, "var %s = %s()\n", g.names[s], g.libcFunc(v))
-		return
-	}
-	if s.t.kind == kArray && s.t.n < 0 && s.storage == sExtern && !s.defined {
-		return // declared, never defined: an error only if used
-	}
-	if s.t.kind == kArray && s.t.n < 0 {
-		g.errorf(s.p, "array %q has no length", s.name)
-	}
-	if !s.t.isComplete() {
-		if s.storage == sExtern && !s.defined {
-			// Declared, never defined: an error only if used.
-			return
-		}
-		g.errorf(s.p, "storage size of %q isn't known", s.name)
-	}
-	name := g.names[s]
-	if s.tls {
-		// Each thread's, made when it first uses it.
-		fmt.Fprintf(&g.vars, "var %s = c23.NewTLS(func() *c23.Void {\n", name)
-		fmt.Fprintf(&g.vars, "p := c23.New[%s]()\n", g.objMirror(s.t))
-		if s.init != nil {
-			save, saveInd := g.out, g.ind
-			g.out = &g.vars
-			g.initObject("p", s.t, s.init)
-			g.out, g.ind = save, saveInd
-		}
-		g.vars.WriteString("return p\n})\n")
-		return
-	}
-	if s.allocSize > s.t.sizeof() {
-		m := g.mirror(s.t)
-		if s.t.sizeof() == 0 {
-			// No members but a flexible array: an array of its elements.
-			for _, f := range s.t.rec.fields {
-				if f.t.kind == kArray && f.t.n == 0 {
-					m = g.mirror(f.t.elem)
-				}
-			}
-		}
-		fmt.Fprintf(&g.vars, "var %s = c23.NewArray[%s](%d)\n", name, m, s.allocSize)
-	} else if a := s.t.alignof(); a > 8 {
-		fmt.Fprintf(&g.vars, "var %s = c23.NewAligned[%s](%d)\n", name, g.objMirror(s.t), a)
-	} else {
-		if m := g.objMirror(s.t); m == g.mirror(s.t) {
-			// A Go object that Go code can reach directly.
-			fmt.Fprintf(&g.vars, "var o_%s = new(c23.Obj[%s])\nvar %s = c23.Local(o_%s)\n", name, m, name, name)
-			g.objs[s] = "o_" + name + ".V"
-		} else {
-			fmt.Fprintf(&g.vars, "var %s = c23.New[%s]()\n", name, m)
-		}
-	}
-	if s.init != nil {
-		save, saveInd := g.out, g.ind
-		g.out, g.ind = &g.inits, 1
-		g.initObject(name, s.t, s.init)
-		g.out, g.ind = save, saveInd
-	}
-	if s.ctor != nil {
-		save, saveInd := g.out, g.ind
-		g.out, g.ind = &g.inits, 1
-		g.effect(s.ctor)
-		g.out, g.ind = save, saveInd
-	}
+	g.tglobalVar(s)
+	return
+
 }
 
 // Types.
@@ -604,7 +535,7 @@ func (g *gen) record(t *ctype) string {
 		// As cgo does for unions, Go sees the bytes. The tag tells
 		// internal/c23 that they may hold pointers C stores, whose
 		// capabilities it keeps aside.
-		if w := target.ptrSize; g.o.thin && hasPointers(t) && r.size > 0 && r.size%w == 0 && r.align%w == 0 {
+		if w := target.ptrSize; hasPointers(t) && r.size > 0 && r.size%w == 0 && r.align%w == 0 {
 			// A member may be a pointer: Go sees words, each of which
 			// the collector takes for one.
 			fmt.Fprintf(&b, "// %s is C's %s, as Go sees it: its words, which may hold pointers.\ntype %s struct {\n%s\tb [%d]unsafe.Pointer\n}\n\n",
@@ -794,17 +725,6 @@ func constLitStr(t *ctype, s string) string {
 		return fmt.Sprintf("c23.U128U(%d)", u)
 	}
 	return constLit(t, v)
-}
-
-// objMirror is the Go type of an object of type t: its mirror, but for
-// an array of chars, which is untyped memory, so that C may keep
-// pointers in it (a struct copied there and back, as in Fil-C).
-func (g *gen) objMirror(t *ctype) string {
-	b := baseElem(t)
-	if t.kind == kArray && t.n > 0 && (b.kind == kChar || b.kind == kSChar || b.kind == kUChar) {
-		return fmt.Sprintf("[%d]c23.Raw", t.sizeof())
-	}
-	return g.mirror(t)
 }
 
 // typeDesc returns the package variable that holds the c23.Type of the

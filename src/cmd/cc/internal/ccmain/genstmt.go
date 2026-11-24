@@ -13,58 +13,10 @@ import (
 
 // Functions and statements.
 
-// local is how a local is held.
-type localKind uint8
-
-const (
-	lkVar     localKind = iota // a Go variable of its value
-	lkCell                     // a c23.Obj on the stack; the Go variable is its *c23.Void
-	lkHeap                     // a variable length array: the Go variable is its *c23.Void
-	lkAligned                  // aligned more than Go aligns: in the heap (c23.NewAligned)
-)
-
-func localKindOf(s *symbol) localKind {
-	switch {
-	case s.t.isVLA():
-		return lkHeap
-	case s.t.alignof() > 8 && (s.t.align > 0 || s.addr || s.t.isAggregate()):
-		return lkAligned
-	case s.addr || s.t.isAggregate():
-		return lkCell
-	}
-	return lkVar
-}
-
 // funcSig is the Go type of a C function of type ft.
 func (g *gen) funcSig(ft *funcType, names []string) string {
-	if g.o.thin {
-		return g.tfuncSig(ft, names)
-	}
-	var ps []string
-	if ft.ret.kind == kStruct && names != nil {
-		ps = append(ps, "sret *c23.Void")
-	} else if ft.ret.kind == kStruct {
-		ps = append(ps, "*c23.Void") // a type: its parameters have no names
-	}
-	for i, pt := range ft.params {
-		if names != nil {
-			ps = append(ps, names[i]+" "+goType(pt))
-		} else {
-			ps = append(ps, goType(pt))
-		}
-	}
-	if ft.variadic || !ft.proto && len(ft.params) == 0 {
-		if names != nil {
-			ps = append(ps, "va ...any")
-		} else {
-			ps = append(ps, "...any")
-		}
-	}
-	res := ""
-	if ft.ret.kind != kVoid && ft.ret.kind != kStruct {
-		res = " " + goType(ft.ret)
-	}
-	return fmt.Sprintf("func(%s)%s", strings.Join(ps, ", "), res)
+	return g.tfuncSig(ft, names)
+
 }
 
 // tmp declares a temporary of Go type t at the top of the function.
@@ -106,29 +58,9 @@ func (g *gen) localName(s *symbol) string {
 
 // declareLocal declares a local at the top of the function.
 func (g *gen) declareLocal(s *symbol) {
-	if g.o.thin {
-		g.tdeclareLocal(s)
-		return
-	}
-	if s.nrvo {
-		g.names[s] = "sret"
-		return
-	}
-	n := g.localName(s)
-	switch localKindOf(s) {
-	case lkVar:
-		fmt.Fprintf(&g.locals, "var %s %s\n_ = %s\n", n, goType(s.t), n)
-	case lkCell:
-		g.tmpN++
-		fmt.Fprintf(&g.cells, "var o%d c23.Obj[%s]\n%s := c23.LocalT(&o%d, %s)\n_ = %s\n", g.tmpN, g.objMirror(s.t), n, g.tmpN, g.typeDesc(g.objMirror(s.t)), n)
-		if g.objMirror(s.t) == g.mirror(s.t) {
-			g.objs[s] = fmt.Sprintf("o%d.V", g.tmpN)
-		}
-	case lkHeap:
-		fmt.Fprintf(&g.locals, "var %s *c23.Void\n_ = %s\n", n, n)
-	case lkAligned:
-		fmt.Fprintf(&g.cells, "%s := c23.NewAlignedT(%s, %d)\n_ = %s\n", n, g.typeDesc(g.objMirror(s.t)), s.t.alignof(), n)
-	}
+	g.tdeclareLocal(s)
+	return
+
 }
 
 func (g *gen) function(f *funcDecl) {
@@ -147,7 +79,7 @@ func (g *gen) funcLit(f *funcDecl) string {
 	// A goto may not jump over a Go declaration, and setjmp's and a flat
 	// function's code is entered at labels: there the locals are all
 	// declared at the top.
-	g.inPlace = g.o.thin && !needsFlat(f) && f.setjmps == 0 && len(f.labels) == 0 && len(f.addrLabels) == 0
+	g.inPlace = !needsFlat(f) && f.setjmps == 0 && len(f.labels) == 0 && len(f.addrLabels) == 0
 	var fb strings.Builder
 	ft := f.sym.t.fn
 	var body strings.Builder
@@ -155,41 +87,26 @@ func (g *gen) funcLit(f *funcDecl) string {
 	g.sret = ft.ret.kind == kStruct
 	names := []string{} // not nil: named
 	for _, ps := range f.params {
-		if g.o.thin {
-			if ps.t.kind != kStruct {
-				names = append(names, g.localName(ps)) // the Go parameter is the object
-				continue
-			}
-			g.tmpN++
-			pn := fmt.Sprintf("p%d", g.tmpN)
-			names = append(names, pn)
-			if ps.noCopy {
-				g.names[ps] = "(*" + pn + ")" // C++: the caller's object
-				continue
-			}
-			g.declareLocal(ps)
-			if overAligned(ps) {
-				g.p("%s = %s", g.localName(ps), allocAligned(ps))
-				g.p("%s = *%s", g.held(g.localName(ps), ps.t), pn)
-				continue
-			}
-			g.p("%s = *%s", g.localName(ps), pn)
-			continue
-		}
-		if localKindOf(ps) == lkVar {
-			names = append(names, g.localName(ps))
+		if ps.t.kind != kStruct {
+			names = append(names, g.localName(ps)) // the Go parameter is the object
 			continue
 		}
 		g.tmpN++
 		pn := fmt.Sprintf("p%d", g.tmpN)
 		names = append(names, pn)
 		if ps.noCopy {
-			// C++: the caller's object.
-			g.names[ps] = pn
+			g.names[ps] = "(*" + pn + ")" // C++: the caller's object
 			continue
 		}
 		g.declareLocal(ps)
-		g.store(g.localName(ps), ps.t, pn, nil)
+		if overAligned(ps) {
+			g.p("%s = %s", g.localName(ps), allocAligned(ps))
+			g.p("%s = *%s", g.held(g.localName(ps), ps.t), pn)
+			continue
+		}
+		g.p("%s = *%s", g.localName(ps), pn)
+		continue
+
 	}
 	for _, s := range f.locals {
 		g.declareLocal(s)
@@ -213,9 +130,9 @@ func (g *gen) funcLit(f *funcDecl) string {
 	}
 	text := body.String()
 	locals := g.locals.String()
-	if g.o.thin {
-		locals, text = usedLocals(locals, g.cells.String(), text, g.inBody)
-	}
+
+	locals, text = usedLocals(locals, g.cells.String(), text, g.inBody)
+
 	fb.WriteString(locals)
 	fb.WriteString(g.cells.String())
 	if g.flatSt != nil {
@@ -538,13 +455,11 @@ func (g *gen) stmt(s stmt) {
 			}
 		case s.x.ty().kind == kStruct:
 			v := g.rv(s.x)
-			if g.o.thin {
-				if v != "sret" {
-					g.p("*sret = *%s", v)
-				}
-			} else {
-				g.p("%s", moveCode("sret", v, s.x.ty()))
+
+			if v != "sret" {
+				g.p("*sret = *%s", v)
 			}
+
 			g.ret("")
 		default:
 			g.ret(g.rv(s.x))
@@ -552,11 +467,9 @@ func (g *gen) stmt(s stmt) {
 	case *gotoStmt:
 		if s.x != nil {
 			// goto *x: to the label whose address x is.
-			if g.o.thin {
-				g.p("switch c23.LabelOf(%s) {", g.vptr(g.rv(s.x), s.x.ty()))
-			} else {
-				g.p("switch c23.Addr(%s) {", g.rv(s.x))
-			}
+
+			g.p("switch c23.LabelOf(%s) {", g.vptr(g.rv(s.x), s.x.ty()))
+
 			for _, l := range g.fn.addrLabels {
 				g.p("case %d:", l.id)
 				g.p("goto L_%s", l.goName())
@@ -786,51 +699,9 @@ func containsLabel(s stmt) bool {
 
 // localInit runs a local's declaration: allocates a VLA, and initializes.
 func (g *gen) localInit(s *symbol) {
-	if g.o.thin {
-		g.tlocalInit(s)
-		return
-	}
-	n := g.localName(s)
-	switch localKindOf(s) {
-	case lkHeap:
-		size := g.vlaSize(s.t)
-		if a := s.t.alignof(); a > 8 {
-			// _Alignas
-			g.p("%s = c23.NewArrayAlignedT(%s, uintptr(%s), %d)", n, g.typeDesc(g.mirror(baseElem(s.t))), size, a)
-			return
-		}
-		g.p("%s = c23.NewArrayT(%s, uintptr(%s))", n, g.typeDesc(g.mirror(baseElem(s.t))), size)
-		return
-	case lkVar:
-		if s.init != nil {
-			if s.init.scalar == nil {
-				g.errorf(s.p, "internal error: %s has an aggregate initializer", s.name)
-			}
-			g.p("%s = %s", n, g.rv(s.init.scalar))
-		} else if !s.global {
-			// Without an initializer, its value becomes indeterminate
-			// each time the declaration is reached (C11 6.2.4): zero.
-			// The Go variable is the function's, declared at its top; set
-			// here, it does not carry a value from one pass of a loop to
-			// the next, which Go's compiler would otherwise keep live
-			// around the loop (and in registers at its head): Lua's
-			// interpreter loop reloaded 15 such floats each instruction.
-			g.p("%s = %s", n, zeroOf(s.t))
-		}
-		if s.ctor != nil {
-			g.effect(s.ctor)
-		}
-		return
-	}
-	if s.init != nil {
-		if s.init.scalar == nil {
-			g.p("c23.Memset(%s, 0, %d)", n, s.t.sizeof())
-		}
-		g.initObject(n, s.t, s.init)
-	}
-	if s.ctor != nil {
-		g.effect(s.ctor)
-	}
+	g.tlocalInit(s)
+	return
+
 }
 
 func baseElem(t *ctype) *ctype {
@@ -853,35 +724,6 @@ func (g *gen) vlaSize(t *ctype) string {
 		n = fmt.Sprintf("%s(%d)", goType(tULong), t.n)
 	}
 	return fmt.Sprintf("(%s * %s)", n, g.vlaSize(t.elem))
-}
-
-// initObject stores an initializer into the object of type t at addr,
-// which is zero.
-func (g *gen) initObject(addr string, t *ctype, in *initializer) {
-	if g.o.thin {
-		g.tinitObject(tderef(addr), t, in)
-		return
-	}
-	if in.scalar != nil {
-		g.store(addr, t, g.rv(in.scalar), in.scalar)
-		return
-	}
-	for _, it := range in.items {
-		dst := addOff(addr, it.off)
-		switch {
-		case it.zero:
-			g.p("c23.Memset(%s, 0, %d)", dst, it.t.sizeof())
-		case it.f != nil && it.f.bits >= 0:
-			g.bitStore(dst, it.f, g.rv(it.x), it.x)
-		default:
-			if s, ok := it.x.(*strLit); ok && it.t.kind == kArray {
-				n := min(it.t.sizeof(), s.t.sizeof())
-				g.p("c23.Memmove(%s, %s, %d)", dst, g.str(s), n)
-				continue
-			}
-			g.store(dst, it.t, g.rv(it.x), it.x)
-		}
-	}
 }
 
 func addOff(addr string, off int64) string {

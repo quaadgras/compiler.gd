@@ -6,7 +6,7 @@ package c23
 
 import "unsafe"
 
-// What cmd/cc's 1:1 translation (cc -thin, doc/gd/cc.md) uses: there a C
+// What cmd/cc's translation (doc/gd/cc.md) uses, which is 1:1: there a C
 // pointer is Go's, *T or unsafe.Pointer, a C object is a Go variable of
 // the type that mirrors it, and the checks are the ones the compiler
 // makes of unsafe.Pointer (doc/gd/unsafe.md), not this package's. The

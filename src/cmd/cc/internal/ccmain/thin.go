@@ -13,23 +13,22 @@ import (
 	"strings"
 )
 
-// The 1:1 translation (cc -thin, doc/gd/cc.md): C's objects are Go
-// variables of the types that mirror them, a C pointer is Go's (*T, or
-// unsafe.Pointer for void * and for a pointer to a type that is not
-// complete), and a load or a store is Go's. Nothing carries a
-// capability: what is checked is what the compiler checks of
-// unsafe.Pointer (doc/gd/unsafe.md), at the conversions and the
-// arithmetic, which is where this generates unsafe.
+// The translation is 1:1 (doc/gd/cc.md): C's objects are Go variables of
+// the types that mirror them, a C pointer is Go's (*T, or *c23.Void for
+// void *, for a pointer to a function and for one to a type that is not
+// complete), and a load or a store is Go's. What is checked is what the
+// compiler checks of unsafe.Pointer (doc/gd/unsafe.md), at the
+// conversions and the arithmetic, which is where this generates unsafe.
 //
-// It is a mode of the generator, not another one: statements and the
-// arithmetic of numbers are the same. An lvalue is an addressable Go
-// expression (lval.x) instead of a *c23.Void, the value of a struct or an
-// array is still the pointer to it, and a struct is still passed by the
+// An lvalue is an addressable Go expression (lval.x). The value of a
+// struct or an array is the pointer to it, and a struct is passed by the
 // pointer to it and returned in memory the caller gives.
 //
-// Not there yet, and an error: bit-fields, variable length arrays,
-// thread-local objects, _Atomic, va_arg, long double and _Complex in
-// memory.
+// What Go has no variable for is reached by its address instead (lval.addr,
+// a *c23.Void, and internal/c23's loads and stores): a bit-field, an
+// _Atomic object, a long double or a _Complex in memory, and what va_arg
+// reads. toOld and fromOld convert a value between the two, where every
+// pointer of the second is a *c23.Void.
 
 // voidPtr is the Go type of a void *, and of any pointer where the
 // library, or a call through a pointer to a function, does not say what
@@ -41,9 +40,6 @@ func (g *gen) vptr(p string, t *ctype) string { return g.retype(p, g.gt(t), void
 
 // gt is the Go type of a C value of type t.
 func (g *gen) gt(t *ctype) string {
-	if !g.o.thin {
-		return goType(t)
-	}
 	switch t.kind {
 	case kStruct, kArray:
 		return "*" + g.mirror(t)
@@ -55,9 +51,6 @@ func (g *gen) gt(t *ctype) string {
 
 // zero is the Go expression of t's zero value.
 func (g *gen) zero(t *ctype) string {
-	if !g.o.thin {
-		return zeroOf(t)
-	}
 	switch t.kind {
 	case kPtr, kNullptr, kStruct, kArray:
 		return g.nilOf(t)
@@ -118,10 +111,6 @@ func simpleLvalue(x string) bool {
 	return true
 }
 
-func (g *gen) unsupported(at pos, what string) {
-	g.errorf(at, "%s: not in the 1:1 translation yet", what)
-}
-
 // tlv is e, an lvalue: an addressable Go expression. For forAddr the
 // expression's address is what is wanted, which may be one past an
 // array's end: no index that Go checks is used.
@@ -149,7 +138,7 @@ func memValue(t *ctype) bool {
 // made, where every pointer is an unsafe.Pointer, as the 1:1
 // translation has a value of type t.
 func (g *gen) fromOld(v string, t *ctype) string {
-	if g.o.thin && v != "" && (t.isPtr() || t.kind == kNullptr || t.kind == kStruct || t.kind == kArray) {
+	if v != "" && (t.isPtr() || t.kind == kNullptr || t.kind == kStruct || t.kind == kArray) {
 		return g.retype(v, voidPtr, g.gt(t))
 	}
 	return v
@@ -157,7 +146,7 @@ func (g *gen) fromOld(v string, t *ctype) string {
 
 // toOld is the reverse of fromOld.
 func (g *gen) toOld(v string, t *ctype) string {
-	if g.o.thin && (t.isPtr() || t.kind == kNullptr || t.kind == kStruct || t.kind == kArray) {
+	if t.isPtr() || t.kind == kNullptr || t.kind == kStruct || t.kind == kArray {
 		return g.vptr(v, t)
 	}
 	return v

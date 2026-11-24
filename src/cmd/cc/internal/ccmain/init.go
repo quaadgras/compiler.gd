@@ -208,15 +208,6 @@ func (ip *initParser) braced(t *ctype, off int64) {
 	ip.list(t, off, true, false)
 }
 
-func (p *parser) peekString() (*strLit, bool) {
-	if p.peek().kind == tkString && (p.isAt(1, "}") || p.isAt(1, ",") && p.isAt(2, "}")) {
-		t := p.peek()
-		n := int64(len(t.str))/t.ty.sizeof() + 1
-		return &strLit{node{arrayOf(t.ty, n), p.here()}, t.str}, true
-	}
-	return nil, false
-}
-
 // initExprOrBraced parses one initializer for a scalar: a nested brace
 // level is the same scalar.
 func (p *parser) initExprOrBraced(t *ctype, off int64, ip *initParser) expr {
