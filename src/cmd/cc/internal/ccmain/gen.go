@@ -465,12 +465,19 @@ func (g *gen) record(t *ctype) string {
 			bytes = true
 		}
 	}
-	// The key: the layout, which identifies the mirror.
+	// The key: the layout, which identifies the mirror. A C++ class's
+	// tag does not say which class it is (a template's instances share
+	// it, and classes of several scopes may), nor do its fields' types'
+	// tags: there the names are the mangled ones.
 	var key strings.Builder
-	fmt.Fprintf(&key, "%s|%d|%d|%v|", r.tag, r.size, r.align, bytes)
+	keyTag, typeKey := r.tag, (*ctype).String
+	if r.sc != nil {
+		keyTag, typeKey = rawType(t.unqual()), rawType
+	}
+	fmt.Fprintf(&key, "%s|%d|%d|%v|", keyTag, r.size, r.align, bytes)
 	if !bytes {
 		for _, f := range r.fields {
-			fmt.Fprintf(&key, "%s:%d:%s;", f.name, f.off, f.t)
+			fmt.Fprintf(&key, "%s:%d:%s;", f.name, f.off, typeKey(f.t))
 		}
 	}
 	if n, ok := g.mirrors[key.String()]; ok {
