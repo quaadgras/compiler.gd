@@ -63,6 +63,13 @@ type pkgGen struct {
 	recN     int
 	uses     map[string]bool  // imports used
 	stubs    map[*symbol]bool // undefined functions that have a stub (options.undef)
+	// The 1:1 translation's objects whose initializer is in their Go
+	// declaration (thin.go's staticInit), and, while one's is being made,
+	// what it refers to.
+	declared map[*symbol]bool
+	refs     map[*symbol]bool // nil: not being made
+	refFunc  bool             // it refers to a function
+
 }
 
 // gen generates one function, or file-scope code, of a unit.

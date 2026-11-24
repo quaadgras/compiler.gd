@@ -6,6 +6,8 @@ package ccmain
 
 import (
 	"fmt"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -278,6 +280,9 @@ func (g *gen) tglobal(s *symbol) string {
 	if d := g.ext[s.name]; s.linkage == 'e' && d != nil {
 		def = d
 	}
+	if g.refs != nil {
+		g.refs[def] = true
+	}
 	if def.allocSize > def.t.sizeof() {
 		return fmt.Sprintf("(*(*%s)(unsafe.Pointer(%s)))", g.mirror(s.t), g.globalName(s))
 	}
@@ -346,9 +351,9 @@ func (g *gen) trv(e expr) (string, bool) {
 		if e.sym.kind == symFunc {
 			return g.tfuncPtr(e.sym), true
 		}
-		return g.tload(g.tlv(e, false)), true
+		return g.load(g.tlv(e, false)), true
 	case *deref, *member, *compoundLit:
-		return g.tload(g.tlv(e, false)), true
+		return g.load(g.tlv(e, false)), true
 	case *decay:
 		if e.x.ty().kind == kFunc {
 			if v, ok := e.x.(*varRef); ok {
@@ -566,9 +571,12 @@ func (g *gen) tlocalInit(s *symbol) {
 
 func (g *gen) tcompound(e *compoundLit) string {
 	s := e.sym
+	if s.global && g.refs != nil {
+		g.refs[s] = true
+	}
 	if s.global {
 		if s.tls {
-			return fmt.Sprintf("(*(*%s)(%s.Get()))", g.mirror(s.t), g.globalName(s))
+			return fmt.Sprintf("(*(*%s)(unsafe.Pointer(%s.Get())))", g.mirror(s.t), g.globalName(s))
 		}
 		return g.globalName(s)
 	}
@@ -685,18 +693,31 @@ func (g *gen) tglobalVar(s *symbol) {
 		g.vars.WriteString("return (*c23.Void)(unsafe.Pointer(p))\n})\n")
 		return
 	}
+	if g.declared == nil {
+		g.declared = map[*symbol]bool{}
+	}
+	defer func() { g.declared[s] = true }()
 	x := name
+	inDecl := false
 	if s.allocSize > s.t.sizeof() {
 		// With an initialized flexible array member: longer than its
 		// type. The Go variable is the pointer to it.
 		fmt.Fprintf(&g.vars, "var %s = c23.AllocRaw(%d)\n", name, s.allocSize)
 		x = g.tglobal(s)
+	} else if lit, ok := g.staticInit(s); ok {
+		// Initialized where Go declares it.
+		if s.t.isAggregate() {
+			fmt.Fprintf(&g.vars, "var %s = %s\n", name, lit)
+		} else {
+			fmt.Fprintf(&g.vars, "var %s %s = %s\n", name, g.mirror(s.t), lit)
+		}
+		inDecl = true
 	} else {
 		fmt.Fprintf(&g.vars, "var %s %s\n", name, g.mirror(s.t))
 	}
 	save, saveInd := g.out, g.ind
 	g.out, g.ind = &g.inits, 1
-	if s.init != nil {
+	if s.init != nil && !inDecl {
 		g.tinitObject(x, s.t, s.init)
 	}
 	if s.ctor != nil {
@@ -712,6 +733,163 @@ func cString(s *strLit) (string, bool) {
 		return "", false
 	}
 	return strconv.Quote(s.data), true
+}
+
+// staticInit is the initializer of the object s as a Go expression for
+// its declaration, if it can be one: a constant, or a composite literal
+// of them and of addresses. It cannot where Go would see a cycle that C
+// does not (an object whose initializer has its own address, or that of
+// an object declared after it, which may have this one's): the
+// expression may only name objects declared before, which makes the
+// references of declarations go one way. A function's address is left
+// to func init too: its descriptor is made there, and a function may
+// use the object. So are a union's members, and what Go sees as bytes.
+func (g *gen) staticInit(s *symbol) (string, bool) {
+	if s.init == nil || s.tls {
+		return "", false
+	}
+	g.refs, g.refFunc = map[*symbol]bool{}, false
+	var lit string
+	ok := false
+	pre := g.capture(func() { lit, ok = g.initLit(s.t, s.init) })
+	refs, refFunc := g.refs, g.refFunc
+	g.refs, g.refFunc = nil, false
+	if !ok || pre != "" || refFunc {
+		return "", false
+	}
+	for r := range refs {
+		if r == s || !g.declared[r] {
+			return "", false
+		}
+	}
+	return lit, true
+}
+
+// An initNode is an object's initializer as a tree: a value, or the
+// members and elements that have one.
+type initNode struct {
+	t    *ctype
+	leaf string
+	kids map[int64]*initNode // by field index, or by element
+}
+
+// initLit is the initializer in of an object of type t as a Go
+// expression.
+func (g *gen) initLit(t *ctype, in *initializer) (string, bool) {
+	if in.scalar != nil {
+		if t.isAggregate() {
+			return "", false
+		}
+		return g.initLeaf(t, in.scalar)
+	}
+	root := &initNode{t: t}
+	for _, it := range in.items {
+		switch {
+		case it.zero:
+			continue
+		case it.f != nil && it.f.bits >= 0:
+			return "", false
+		}
+		leaf, ok := g.initLeaf(it.t, it.x)
+		if !ok {
+			return "", false
+		}
+		// Down to the member or element at the item's offset.
+		n, off := root, it.off
+		for !(off == 0 && g.mirror(n.t) == g.mirror(it.t)) {
+			var i int64
+			var kt *ctype
+			switch {
+			case n.t.kind == kArray && n.t.n > 0 && !n.t.isVLA() && n.t.elem.sizeof() > 0:
+				i = off / n.t.elem.sizeof()
+				if i >= n.t.n {
+					return "", false
+				}
+				kt, off = n.t.elem, off-i*n.t.elem.sizeof()
+			case n.t.kind == kStruct && n.t.rec.complete:
+				g.mirror(n.t)
+				if n.t.rec.bytes || n.t.rec.union {
+					return "", false
+				}
+				i = -1
+				for k, f := range n.t.rec.fields {
+					if f.bits < 0 && off >= f.off && off < f.off+max(f.t.sizeof(), 1) {
+						i, kt, off = int64(k), f.t, off-f.off
+						break
+					}
+				}
+				if i < 0 {
+					return "", false
+				}
+			default:
+				return "", false
+			}
+			if n.kids == nil {
+				n.kids = map[int64]*initNode{}
+			}
+			if n.kids[i] == nil {
+				n.kids[i] = &initNode{t: kt}
+			}
+			n = n.kids[i]
+		}
+		n.leaf, n.kids = leaf, nil // a later initializer of the same object wins
+	}
+	return g.initNodeLit(root), true
+}
+
+// initLeaf is the value x that initializes an object of type t, as a Go
+// expression of the object's type in memory.
+func (g *gen) initLeaf(t *ctype, x expr) (string, bool) {
+	if s, ok := x.(*strLit); ok && t.kind == kArray {
+		if q, ok := cString(s); ok && t.n > 0 {
+			return fmt.Sprintf("c23.Lit[%s](%s)", g.mirror(t), q), true
+		}
+		return "", false
+	}
+	if t.isAggregate() || memValue(t) || t.q&qAtomic != 0 {
+		return "", false
+	}
+	v := g.rv(x)
+	// A constant has the type of what it initializes: 1, not int32(1).
+	if m := constConv.FindStringSubmatch(v); m != nil && m[1] == goType(t) {
+		v = m[3]
+	} else if m := floatConv.FindStringSubmatch(v); m != nil && m[1] == goType(t) {
+		v = m[2]
+	}
+	return v, true
+}
+
+var floatConv = regexp.MustCompile(`^(float(?:32|64))\(([-+0-9.e]+)\)$`)
+
+func (g *gen) initNodeLit(n *initNode) string {
+	if n.kids == nil {
+		if n.leaf == "" {
+			return g.mirror(n.t) + "{}"
+		}
+		return n.leaf
+	}
+	var keys []int64
+	for k := range n.kids {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	var parts []string
+	inOrder := true // elements 0, 1, 2...: no keys
+	for i, k := range keys {
+		inOrder = inOrder && k == int64(i)
+	}
+	for _, k := range keys {
+		v := g.initNodeLit(n.kids[k])
+		switch {
+		case n.t.kind == kStruct:
+			parts = append(parts, g.fieldName(n.t.rec.fields[k], int(k))+": "+v)
+		case inOrder:
+			parts = append(parts, v)
+		default:
+			parts = append(parts, fmt.Sprintf("%d: %s", k, v))
+		}
+	}
+	return g.mirror(n.t) + "{" + strings.Join(parts, ", ") + "}"
 }
 
 // tstr is the Go variable of the string literal s, whose characters are
@@ -762,6 +940,7 @@ func (g *gen) tfuncSig(ft *funcType, names []string) string {
 // tfuncPtr is the pointer to the function s: to its descriptor, a
 // c23.Func.
 func (g *gen) tfuncPtr(s *symbol) string {
+	g.refFunc = true
 	name := g.funcName(s, s.p)
 	if name == "" {
 		return "(*c23.Void)(nil)" // weak, and not defined
@@ -915,6 +1094,7 @@ func (g *gen) libcCallee(c *call) (string, bool) {
 }
 
 func (g *gen) tcall(c *call) string {
+	g.refFunc = true
 	var fn string
 	direct := false
 	callee := c.ft
