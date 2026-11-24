@@ -41,7 +41,7 @@ func WholeKindOf(t *Type) WholeKind {
 		return WholeSlice
 	case t.IsInterface(), isABIInterface(t):
 		return WholeIface
-	case IsWholeStruct(t), isWholeShape(t):
+	case IsWholeStruct(t):
 		return WholeStruct
 	}
 	return NotWhole
@@ -75,15 +75,6 @@ func isABIInterface(t *Type) bool {
 	}
 	e := f[0].Type.Elem().Sym()
 	return e != nil && e.Pkg != nil && e.Pkg.Path == "internal/abi" && (e.Name == "Type" || e.Name == "ITab")
-}
-
-// isWholeShape reports whether t is the shape of reflect.Value.
-func isWholeShape(t *Type) bool {
-	if !t.IsShape() || !t.IsStruct() || t.NumFields() != 4 {
-		return false
-	}
-	f := t.Fields()
-	return f[0].Sym.Name == "typ_" && f[1].Sym.Name == "ptr" && f[0].Sym.Pkg != nil && f[0].Sym.Pkg.Path == "reflect"
 }
 
 // holdsWhole reports whether a value of type t holds a whole value.

@@ -10,11 +10,13 @@ package types
 // those of one value (doc/gd/publication-point.md). As runtime's
 // isWholeStruct.
 func IsWholeStruct(t *Type) bool {
-	if !t.IsStruct() {
+	// By its fields, not its name: generic code has its shape, and a type
+	// defined from it, as in type V reflect.Value, has another name.
+	if !t.IsStruct() || t.NumFields() != 4 {
 		return false
 	}
-	s := t.Sym()
-	return s != nil && s.Name == "Value" && s.Pkg != nil && s.Pkg.Path == "reflect"
+	f := t.Fields()
+	return f[0].Sym != nil && f[1].Sym != nil && f[0].Sym.Name == "typ_" && f[1].Sym.Name == "ptr" && f[0].Sym.Pkg != nil && f[0].Sym.Pkg.Path == "reflect"
 }
 
 // HasTearable reports whether a value of type t holds a slice, a string

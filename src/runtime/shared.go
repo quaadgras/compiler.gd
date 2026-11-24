@@ -947,11 +947,10 @@ var tearableCache [256]uintptr
 // must be those of one value. As cmd/compile/internal/types's
 // IsWholeStruct.
 func isWholeStruct(t *_type) bool {
-	if t.TFlag&abi.TFlagNamed == 0 {
-		return false
-	}
-	rt := toRType(t)
-	return rt.name() == "Value" && rt.pkgpath() == "reflect"
+	// By its fields, not its name: generic code has its shape, and a type
+	// defined from it, as in type V reflect.Value, has another name.
+	st := (*structtype)(unsafe.Pointer(t))
+	return len(st.Fields) == 4 && st.Fields[0].Name.Name() == "typ_" && st.Fields[1].Name.Name() == "ptr" && st.PkgPath.Name() == "reflect"
 }
 
 // tearable reports whether a value of type t holds a slice, a string or

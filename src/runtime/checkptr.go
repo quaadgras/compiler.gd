@@ -153,7 +153,7 @@ func wordState(t *_type, off uintptr) uint8 {
 			off %= a.Elem.Size_
 			t = a.Elem
 		case abi.Struct:
-			if isWholeStruct(t) || isABIInterface(t) || isWholeShape(t) {
+			if isWholeStruct(t) || isABIInterface(t) {
 				if off == 0 {
 					return wordFirst
 				}
@@ -197,13 +197,6 @@ func isABIInterface(t *_type) bool {
 		return true
 	}
 	return f[0].Name.Name() == "_" && f[0].Typ.Kind() == abi.UnsafePointer && st.PkgPath.Name() == "internal/abi"
-}
-
-// isWholeShape reports whether the struct type t is the shape of
-// reflect.Value, which is what generic code has for it.
-func isWholeShape(t *_type) bool {
-	st := (*structtype)(unsafe.Pointer(t))
-	return len(st.Fields) == 4 && st.Fields[0].Name.Name() == "typ_" && st.Fields[1].Name.Name() == "ptr" && st.PkgPath.Name() == "reflect"
 }
 
 // wholeStringAt reports whether a string begins at offset off of a value
