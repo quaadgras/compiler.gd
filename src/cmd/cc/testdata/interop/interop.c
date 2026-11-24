@@ -92,6 +92,14 @@ int backwards_sum(int n) {
 	return s;
 }
 
+// The n ints that end at end, which is all the caller has of them.
+long sum_back(int *end, int n) {
+	long s = 0;
+	while (n-- > 0)
+		s += *--end;
+	return s;
+}
+
 // A tagged union, like Godot's Variant: the same words hold a long, a
 // double or a pointer.
 struct variant *make_variant(int n) {

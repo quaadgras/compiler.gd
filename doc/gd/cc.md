@@ -135,10 +135,12 @@ Where C and Go's rules for pointers disagree:
   variable that it moves to the heap as `struct { v T; _ byte }`
   (cmd/compile's `ir.CObjType`), as Go itself does for a struct that
   ends in a field of no size. The stack, and the program's data, are
-  each one allocation to both. Such a package is also compiled without
-  the escape bits (`-d=gdescbitsoff`), which move a variable from the
-  stack to the heap when a callee keeps its address: C has pointers to
-  it where the compiler sees none. `new T[n]` of a class with a
+  each one allocation to both. The escape bits (`escape-bits.md`) are
+  on in such a package as in any other: what they put on the heap as
+  the program runs, a variable moved there at a call whose callee
+  keeps its address and an object that a caller gave no buffer for,
+  is allocated with the byte too (`runtime.materializeToHeapC`,
+  `maybeInPlaceC`). `new T[n]` of a class with a
   destructor keeps n in front of the array, as other compilers do,
   since the size of the allocation no longer says it.
   A typed pointer to the end (`T *end = a + n`) is a conversion to

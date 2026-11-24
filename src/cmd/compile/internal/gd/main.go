@@ -271,13 +271,11 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 	// Parse and typecheck input.
 	noder.LoadPackage(gd, gd.Flagset.Args())
 
-	// C translated by cmd/cc: its objects are allocated with a byte
-	// after them (ir.CObjType), and stay where they are, since C keeps
-	// pointers to them where the compiler does not see pointers.
+	// C translated by cmd/cc: its objects on the heap are allocated
+	// with a byte after them (ir.CObjType).
 	for _, p := range typecheck.Target(gd).Imports {
 		if p.Path == "internal/c23" {
 			gd.CObjects = true
-			gd.Debug.GdEscBitsOff = 1
 		}
 	}
 

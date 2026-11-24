@@ -108,7 +108,31 @@ func main() {
 	fmt.Println("objects in a pool, after 3 collections:", C.pool_sum(), C.pool_root.v, C.pool_root.next.v)
 
 	fmt.Println("C frees what malloc and the like returned:", C.free_mallocd())
+
+	// What is put on the heap as the program runs has an end for C as
+	// well: a local that a call moves there because the function
+	// called keeps its address, and a result that the caller gave no
+	// buffer for (doc/gd/escape-bits.md).
+	fmt.Println("a local moved to the heap at a call, summed from its end:", movedSum(keep))
+	keptResult = fresh()
+	collect()
+	fmt.Println("a result that no buffer was given for, summed from its end:", C.sum_back((*C.int)(unsafe.Add(unsafe.Pointer(keptResult), 16)), 4))
 }
+
+var kept, keptResult *[4]C.int
+
+var keep = func(p *[4]C.int) { kept = p }
+
+//go:noinline
+func movedSum(f func(*[4]C.int)) C.long {
+	a := [4]C.int{1, 2, 3, 4}
+	f(&a)
+	collect()
+	return C.sum_back((*C.int)(unsafe.Add(unsafe.Pointer(kept), 16)), 4)
+}
+
+//go:noinline
+func fresh() *[4]C.int { return &[4]C.int{5, 6, 7, 8} }
 
 //go:noinline
 func sumPair() C.long {

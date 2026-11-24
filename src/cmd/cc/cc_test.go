@@ -702,6 +702,8 @@ variant's list, after 3 collections: 10 type 2 size 8
 variant's long: 12
 objects in a pool, after 3 collections: 9 1 2
 C frees what malloc and the like returned: 1
+a local moved to the heap at a call, summed from its end: 10
+a result that no buffer was given for, summed from its end: 26
 `
 	if string(b) != want {
 		t.Errorf("got:\n%s\nwant:\n%s", b, want)

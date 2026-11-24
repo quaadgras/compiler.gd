@@ -47,6 +47,7 @@ int count(void);
 enum color next_color(enum color c);
 char *shout(char *s);
 int backwards_sum(int n);
+long sum_back(int *end, int n);
 struct variant *make_variant(int n);
 long variant_sum(struct variant *v);
 void variant_set_long(struct variant *v, long i);

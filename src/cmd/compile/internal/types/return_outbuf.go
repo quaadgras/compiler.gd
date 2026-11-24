@@ -306,7 +306,7 @@ func StockifyCgoSig(t *Type) *Type {
 // runtime source.
 func RuntimeResultUnextended(name string) bool {
 	switch name {
-	case "newobject", "maybeInPlace",
+	case "newobject", "maybeInPlace", "maybeInPlaceC",
 		"mapaccess1", "mapaccess1_fast32", "mapaccess1_fast64", "mapaccess1_faststr", "mapaccess1_fat",
 		"mapaccess2", "mapaccess2_fast32", "mapaccess2_fast64", "mapaccess2_faststr", "mapaccess2_fat",
 		"mapassign", "mapassign_fast32", "mapassign_fast32ptr", "mapassign_fast64", "mapassign_fast64ptr", "mapassign_faststr",

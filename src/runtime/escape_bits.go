@@ -61,6 +61,29 @@ func materializeToHeap(src unsafe.Pointer, typ *abi.Type) unsafe.Pointer {
 	return dst
 }
 
+// materializeToHeapC is materializeToHeap in a package of C translated
+// by cmd/cc, whose objects on the heap have a byte after them
+// (cmd/compile's ir.CObjType): padded is the type that the copy is
+// allocated as, struct { v typ; _ byte }.
+//
+//go:nosplit
+func materializeToHeapC(src unsafe.Pointer, typ, padded *abi.Type) unsafe.Pointer {
+	ptr := uintptr(src)
+	stk := getg().stack
+	if ptr < stk.lo || ptr >= stk.hi {
+		return src
+	}
+	dst := mallocgc(padded.Size_, padded, true)
+	typedmemmove(typ, dst, src)
+	if typ.PtrBytes != 0 {
+		rebaseSelfPointers(dst, uintptr(src), typ)
+	}
+	if !storesOrdered {
+		publicationBarrier()
+	}
+	return dst
+}
+
 // rebaseSelfPointers makes the pointers in dst, a copy of the typ at
 // src that is taking its place, that point into the original point to
 // the same place in the copy.
@@ -130,6 +153,18 @@ func maybeInPlace(outBuf unsafe.Pointer, typ *abi.Type) unsafe.Pointer {
 		return outBuf
 	}
 	return mallocgc(typ.Size_, typ, true)
+}
+
+// maybeInPlaceC is maybeInPlace in a package of C translated by cmd/cc:
+// the object that is not in the caller's buffer is allocated as padded,
+// struct { v typ; _ byte }, which has a byte after it.
+//
+//go:nosplit
+func maybeInPlaceC(outBuf unsafe.Pointer, typ, padded *abi.Type) unsafe.Pointer {
+	if outBuf != nil {
+		return maybeInPlace(outBuf, typ)
+	}
+	return mallocgc(padded.Size_, padded, true)
 }
 
 // maybeEscapeArg returns src as-is when bit argIdx+1 of mask is clear
