@@ -1345,6 +1345,9 @@ func (p *parser) primary() expr {
 			if isTraitName(t.text) && p.is("(") {
 				return p.typeTrait(t.text, at)
 			}
+			if t.text == "typeid" && p.is("(") {
+				return p.typeidExpr(at)
+			}
 			if t.text == "operator" {
 				// An operator function, by its name: operator[](i).
 				name := p.operatorName()

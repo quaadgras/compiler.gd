@@ -165,7 +165,10 @@ func (p *parser) constructAt(dst expr, t *ctype, args []expr, at pos, mode int) 
 	if len(args) == 1 && args[0].ty().kind == kStruct && !sameType(args[0].ty().unqual(), t) && !isBaseOf(t, args[0].ty()) {
 		// From another class: by a constructor, or by its conversion
 		// function.
-		if p.resolve(set, nil, args, at, t.String(), true) == nil {
+		p.userConv++
+		direct := p.resolve(set, nil, args, at, t.String(), true)
+		p.userConv--
+		if direct == nil {
 			if c := p.convertClass(args[0], t, at); c != nil {
 				return p.constructAt(dst, t, []expr{c}, at, mode)
 			}
@@ -770,6 +773,19 @@ func (p *parser) overloaded(op string, xs []expr, at pos) expr {
 	if best.sym.deleted {
 		p.errorAt(at, "use of the deleted %s", name)
 	}
+	class := false
+	for _, x := range xs {
+		class = class || x.ty().kind == kStruct
+	}
+	if !class {
+		// Enumerations only: the built-in operator takes them as they
+		// are, and is better than a function that converts one.
+		for _, r := range best.ranks {
+			if r > rkQual {
+				return nil
+			}
+		}
+	}
 	if best.sym.t.fn.recv != nil {
 		x := xs[0]
 		if pr, ok := x.(*classPR); ok {
@@ -1116,4 +1132,55 @@ func (p *parser) destroyArray(ptr expr, t *ctype, at pos) stmt {
 		c:    &binary{node{tInt, at}, ">", iv, p.intc(0, tLong, at)},
 		body: &block{list: []stmt{&exprStmt{&incDec{node{tLong, at}, "--", false, iv}}, p.destroy(elem, at)}},
 	}
+}
+
+// typeidExpr parses typeid's operand, after "typeid": the type_info of
+// a type, or of an expression's static type (cmd/cc keeps no run-time
+// type information: the dynamic type of an object is not known).
+func (p *parser) typeidExpr(at pos) expr {
+	p.expect("(")
+	var t *ctype
+	if p.typeArgAhead() {
+		t = p.typeName()
+	} else {
+		e := p.expr()
+		if pr, ok := e.(*classPR); ok {
+			t = pr.t
+		} else {
+			t = e.ty()
+		}
+	}
+	p.expect(")")
+	if t.isRef() {
+		t = t.elem
+	}
+	t = t.unqual()
+	std := p.fileScope().vars["std"]
+	var ti *symbol
+	if std != nil && std.kind == symNamespace {
+		ti = std.ns.vars["type_info"]
+	}
+	if ti == nil || ti.kind != symTypedef || ti.t.kind != kStruct {
+		p.errorAt(at, "typeid needs <typeinfo>")
+	}
+	tt := ti.t.qualified(qConst)
+	if hasTParam(t) {
+		return &deref{node{tt, at}, &goVal{node{ptrTo(tt), at}, ""}}
+	}
+	name := "_ZTI" + rawType(t)
+	if p.typeinfos == nil {
+		p.typeinfos = map[string]*symbol{}
+	}
+	sym := p.typeinfos[name]
+	if sym == nil {
+		sym = &symbol{name: name, src: name, kind: symVar, t: ti.t, global: true, linkage: 'e', defined: true, comdat: true, p: at, addr: true}
+		p.typeinfos[name] = sym
+		p.u.syms = append(p.u.syms, sym)
+		raw := rawType(t)
+		str := &strLit{node{arrayOf(tChar.qualified(qConst), int64(len(raw)+1)), at}, raw}
+		st := p.saveFunc()
+		sym.ctor = p.constructAt(&varRef{node{sym.t, at}, sym}, ti.t, []expr{str}, at, 0)
+		p.restoreFunc(st)
+	}
+	return &varRef{node{tt, at}, sym}
 }

@@ -220,6 +220,9 @@ func lexRaw(file, s string, line int) (toks []token, err error) {
 					break
 				}
 			}
+			if p == "<:" && strings.HasPrefix(s[i:], "<::") && !strings.HasPrefix(s[i:], "<:::") && !strings.HasPrefix(s[i:], "<::>") {
+				p = "" // C++: "<::" is "<" and "::", as in X<::Y>
+			}
 			if p == "" {
 				if strings.IndexByte("+-*/%&|^~!<>=?:;,.()[]{}#", c) < 0 {
 					add(tkOther, s[i:i+1])

@@ -174,7 +174,7 @@ func (p *parser) convRank(a expr, pt *ctype) int {
 			return rkNone
 		}
 		lv := p.isLvalueCxx(a) && at.kind != kFunc
-		same := sameType(to.unqual(), at.unqual())
+		same := sameType(to.unqual(), at.unqual()) || similarArrays(to, at)
 		base := !same && isBaseOf(to, at)
 		if same || base {
 			r := rkExact
@@ -549,7 +549,8 @@ func (p *parser) cxxCallArgs(x expr, args []expr, at pos) expr {
 		return p.callFunc(sym, nil, args, at)
 	case *varRef:
 		if x.sym.kind == symFunc {
-			sym := p.resolve(funcSet(x.sym), nil, args, at, x.sym.src, false)
+			set := funcSet(x.sym)
+			sym := p.resolve(set, p.thisOrNil(set, at), args, at, x.sym.src, false)
 			if sym.t.fn.recv != nil {
 				// A member function named within its class: on *this.
 				p.direct = p.qualified[x]

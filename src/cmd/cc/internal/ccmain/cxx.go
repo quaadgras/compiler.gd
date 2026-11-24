@@ -513,7 +513,7 @@ func (p *parser) bindRef(t *ctype, e expr, at pos, what string) expr {
 		return p.convertAt(p.rvalue(e), t, at)
 	}
 	lv := p.isLvalueCxx(e) && et.kind != kFunc
-	same := sameType(to.unqual(), et.unqual()) || isBaseOf(to, et)
+	same := sameType(to.unqual(), et.unqual()) || isBaseOf(to, et) || similarArrays(to, et)
 	if same && (lv && t.ref == 1 || !lv && isLvalue(e)) {
 		if lv && to.q&et.q != et.q {
 			p.errorAt(at, "binding a %s to a reference to %s discards qualifiers", et, to)
@@ -875,7 +875,7 @@ func (p *parser) declaratorID() (name string, in *scope) {
 // in p.convType.
 func (p *parser) operatorName() string {
 	t := p.next()
-	if t.kind == tkPunct {
+	if t.kind == tkPunct && t.text != "::" {
 		switch t.text {
 		case "(":
 			p.expect(")")
@@ -1454,4 +1454,15 @@ func (p *parser) skipStatement() {
 func (p *parser) afterDeclarator() bool {
 	t := p.peekAt(-1)
 	return t.kind == tkIdent && !typeWords[t.text] && !cxxTypeWords[t.text] || t.kind == tkPunct && (t.text == ")" || t.text == "]")
+}
+
+// similarArrays reports whether a reference to the array type to may
+// bind to an array of type at: the same but for qualifiers that to's
+// elements add.
+func similarArrays(to, at *ctype) bool {
+	if to.kind != kArray || at.kind != kArray || to.n != at.n {
+		return false
+	}
+	te, ae := to.elem, at.elem
+	return te.q&ae.q == ae.q && (sameType(te.unqual(), ae.unqual()) || similarArrays(te, ae))
 }

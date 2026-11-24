@@ -70,12 +70,13 @@ type parser struct {
 	pattern    int        // parsing a template's pattern: its parameters are placeholders
 	packOn     bool       // parsing a pack expansion's pattern, for the element packI
 	packI      int
-	gtHalf     int         // the ">>" token whose first ">" has closed template brackets, or -1
-	lambda     *lambdaInfo // the lambda whose body is being parsed
-	explicitT  []targ      // the explicit template arguments of the call being resolved
-	tmplSuffix string      // the template arguments, mangled, of the function being instantiated
-	instTag    *ctype      // the class template instance whose definition is being parsed
-	pending    []*symbol   // used, and not yet defined: template instances' functions
+	gtHalf     int                // the ">>" token whose first ">" has closed template brackets, or -1
+	lambda     *lambdaInfo        // the lambda whose body is being parsed
+	typeinfos  map[string]*symbol // the type_info objects typeid made
+	explicitT  []targ             // the explicit template arguments of the call being resolved
+	tmplSuffix string             // the template arguments, mangled, of the function being instantiated
+	instTag    *ctype             // the class template instance whose definition is being parsed
+	pending    []*symbol          // used, and not yet defined: template instances' functions
 	draining   bool
 	tids       map[tidKey]tidVal
 	direct     bool          // the next call of a virtual function is not virtual: its name is qualified
