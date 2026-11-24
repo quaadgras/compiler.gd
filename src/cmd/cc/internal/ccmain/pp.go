@@ -1569,8 +1569,8 @@ const predefined = `
 #define __WINT_TYPE__ unsigned int
 #define __INTMAX_TYPE__ long
 #define __UINTMAX_TYPE__ unsigned long
-#define __INTPTR_TYPE__ __intcap
-#define __UINTPTR_TYPE__ unsigned __intcap
+#define __INTPTR_TYPE__ long
+#define __UINTPTR_TYPE__ unsigned long
 #define __CHAR16_TYPE__ unsigned short
 #define __CHAR32_TYPE__ unsigned int
 #define __INT_LEAST8_TYPE__ signed char

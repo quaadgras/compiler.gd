@@ -423,7 +423,7 @@ func (g *gen) stmt(s stmt) {
 		if s.x != nil {
 			// goto *x: to the label whose address x is.
 			if g.o.thin {
-				g.p("switch uintptr(%s) {", g.unsafePtr(g.rv(s.x), s.x.ty()))
+				g.p("switch c23.LabelOf(%s) {", g.unsafePtr(g.rv(s.x), s.x.ty()))
 			} else {
 				g.p("switch c23.Addr(%s) {", g.rv(s.x))
 			}

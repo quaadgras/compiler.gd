@@ -177,7 +177,7 @@ func (g *gen) load(l lval) string {
 		return g.bitLoad(l.addr, l.f)
 	}
 	if isAtomic(l) {
-		return atomicLoad(l.addr, l.t)
+		return g.fromOld(atomicLoad(l.addr, l.t), l.t)
 	}
 	if isAtomicAgg(l) {
 		// An _Atomic struct: copied whole, under its lock.
@@ -328,10 +328,10 @@ func (g *gen) storeL(l lval, v string, c expr) {
 	case l.f != nil:
 		g.bitStore(l.addr, l.f, v, c)
 	case isAtomicAgg(l):
-		g.p("c23.AtomicStoreAgg(%s, %s, %d)", l.addr, v, l.t.sizeof())
+		g.p("c23.AtomicStoreAgg(%s, %s, %d)", l.addr, g.toOld(v, l.t), l.t.sizeof())
 	case isAtomic(l):
 		if goType(l.t) == "c23.Ptr" {
-			g.p("c23.AtomicStoreP(%s, %s)", l.addr, v)
+			g.p("c23.AtomicStoreP(%s, %s)", l.addr, g.toOld(v, l.t))
 		} else {
 			if k, ok := c.(*intConst); ok {
 				v = constLit(l.t, k.v)
@@ -432,7 +432,7 @@ func (g *gen) effect(e expr) {
 		}
 		if e.t.kind != kVoid && e.t.kind != kStruct {
 			g.p("_ = %s", v)
-		} else if v != "" {
+		} else if v != "" && !(g.o.thin && e.t.kind == kStruct) {
 			g.p("%s", v)
 		}
 	case *cast:
@@ -1399,9 +1399,9 @@ func (g *gen) vaOp(e *vaOp) string {
 		g.effect(e.ap)
 	case "copy":
 		l := g.lv(e.ap)
-		g.storeL(l, fmt.Sprintf("c23.VaCopy(%s)", g.rv(e.src)), nil)
+		g.storeL(l, fmt.Sprintf("c23.VaCopy(%s)", g.orv(e.src)), nil)
 	case "arg":
-		ap := g.rv(e.ap)
+		ap := g.orv(e.ap)
 		if e.t.kind == kStruct {
 			return fmt.Sprintf("c23.VaArgPtr(%s)", ap)
 		}
@@ -1421,22 +1421,22 @@ func (g *gen) builtinCode(e *builtinCall) string {
 		return "c23.Trap()"
 	case "conj":
 		x := g.tmp(g.gt(e.t))
-		g.p("%s = %s", x, g.rv(e.args[0]))
+		g.p("%s = %s", x, g.orv(e.args[0]))
 		return fmt.Sprintf("complex(real(%s), -imag(%s))", x, x)
 	case "cxx_zero":
-		g.p("c23.Memset(%s, 0, %d)", g.rv(e.args[0]), e.args[1].(*intConst).v)
+		g.p("c23.Memset(%s, 0, %d)", g.orv(e.args[0]), e.args[1].(*intConst).v)
 		return ""
 	case "cxx_size":
-		return fmt.Sprintf("%s(c23.SizeOf1(%s))", goType(tULong), g.rv(e.args[0]))
+		return fmt.Sprintf("%s(c23.SizeOf1(%s))", goType(tULong), g.orv(e.args[0]))
 	case "cxx_copy":
-		g.p("c23.Memmove(%s, %s, %d)", g.rv(e.args[0]), g.rv(e.args[1]), e.args[2].(*intConst).v)
+		g.p("c23.Memmove(%s, %s, %d)", g.orv(e.args[0]), g.orv(e.args[1]), e.args[2].(*intConst).v)
 		return ""
 	case "creal":
-		return fmt.Sprintf("real(%s)", g.rv(e.args[0]))
+		return fmt.Sprintf("real(%s)", g.orv(e.args[0]))
 	case "cimag":
-		return fmt.Sprintf("imag(%s)", g.rv(e.args[0]))
+		return fmt.Sprintf("imag(%s)", g.orv(e.args[0]))
 	case "complex":
-		return fmt.Sprintf("complex(%s, %s)", g.rv(e.args[0]), g.rv(e.args[1]))
+		return fmt.Sprintf("complex(%s, %s)", g.orv(e.args[0]), g.orv(e.args[1]))
 	case "overflow":
 		op := e.args[0].(*intConst).v
 		a, b := e.args[1], e.args[2]
@@ -1447,24 +1447,24 @@ func (g *gen) builtinCode(e *builtinCall) string {
 		v, over := g.tmp("int64"), g.tmp("bool")
 		g.p("%s, %s = %s", v, over, code)
 		if !pred {
-			g.store(g.rv(e.args[3]), rt, convertCode(v, tLLong, rt), nil)
+			g.store(g.orv(e.args[3]), rt, convertCode(v, tLLong, rt), nil)
 		} else {
 			g.effect(e.args[3])
 		}
 		return fmt.Sprintf("c23.B2U8(%s)", over)
 	case "atomic_load":
 		if e.t.kind == kStruct {
-			return g.load(lval{addr: g.rv(e.args[0]), t: e.t.qualified(qAtomic)})
+			return g.load(lval{addr: g.orv(e.args[0]), t: e.t.qualified(qAtomic)})
 		}
-		return atomicLoad(g.rv(e.args[0]), e.t)
+		return atomicLoad(g.orv(e.args[0]), e.t)
 	case "atomic_store":
-		p, v := g.rv(e.args[0]), g.rv(e.args[1])
+		p, v := g.orv(e.args[0]), g.orv(e.args[1])
 		g.storeL(lval{addr: p, t: e.args[0].ty().elem.qualified(qAtomic)}, v, e.args[1])
 		return ""
 	case "atomic_fetch":
-		p := g.rv(e.args[0])
+		p := g.orv(e.args[0])
 		op := e.args[1].(*intConst).v
-		v := g.rv(e.args[2])
+		v := g.orv(e.args[2])
 		et := e.args[0].ty().elem
 		if et.kind == kStruct {
 			old := g.cellTmp(et.unqual())
@@ -1483,7 +1483,7 @@ func (g *gen) builtinCode(e *builtinCall) string {
 		}
 		return fmt.Sprintf("c23.AtomicFetch(%s, %d, %s(%s))", p, op, goType(et), v)
 	case "atomic_cmpxchg":
-		p, ex, d := g.rv(e.args[0]), g.rv(e.args[1]), g.rv(e.args[2])
+		p, ex, d := g.orv(e.args[0]), g.orv(e.args[1]), g.orv(e.args[2])
 		et := e.args[0].ty().elem
 		if et.kind == kStruct {
 			return fmt.Sprintf("c23.B2U8(c23.AtomicCmpXchgAgg(%s, %s, %s, %d))", p, ex, d, et.sizeof())
@@ -1495,14 +1495,14 @@ func (g *gen) builtinCode(e *builtinCall) string {
 	case "atomic_fence":
 		return "c23.Fence()"
 	case "alloca":
-		return fmt.Sprintf("c23.Malloc(%s)", libcConv(g.rv(e.args[0]), e.args[0].ty(), true))
+		return fmt.Sprintf("c23.Malloc(%s)", libcConv(g.orv(e.args[0]), e.args[0].ty(), true))
 	case "setjmp":
 		k := e.args[1].(*intConst).v
 		t := g.tmp("int32")
 		if len(e.args) == 3 {
-			g.p("%s = c23.Sigsetjmp(%s, jf, %d, %s)", t, g.rv(e.args[0]), k, g.rv(e.args[2]))
+			g.p("%s = c23.Sigsetjmp(%s, jf, %d, %s)", t, g.orv(e.args[0]), k, g.orv(e.args[2]))
 		} else {
-			g.p("%s = c23.Setjmp(%s, jf, %d)", t, g.rv(e.args[0]), k)
+			g.p("%s = c23.Setjmp(%s, jf, %d)", t, g.orv(e.args[0]), k)
 		}
 		// longjmp comes back here.
 		g.p("J%d:", k)
@@ -1511,10 +1511,10 @@ func (g *gen) builtinCode(e *builtinCall) string {
 		g.p("}")
 		return t
 	case "assert":
-		return fmt.Sprintf("c23.AssertC(%s, %s, %s, %s)", g.cond(e.args[0]), g.rv(e.args[1]), g.rv(e.args[2]), g.rv(e.args[3]))
+		return fmt.Sprintf("c23.AssertC(%s, %s, %s, %s)", g.cond(e.args[0]), g.orv(e.args[1]), g.orv(e.args[2]), g.orv(e.args[3]))
 	}
 	if strings.HasPrefix(e.name, "bits:") {
-		return fmt.Sprintf("c23.%s(%s)", e.name[5:], g.rv(e.args[0]))
+		return fmt.Sprintf("c23.%s(%s)", e.name[5:], g.orv(e.args[0]))
 	}
 	g.errorf(e.p, "internal error: builtin %s", e.name)
 	return ""

@@ -189,3 +189,25 @@ func FuncOf1[F any](p *Func) F {
 // points into, as the collector knows it: the object's size class, which
 // may be more than what was asked for.
 func SizeOf1(p unsafe.Pointer) uint64 { return uint64(sizeOf(p)) }
+
+// labels are what the addresses of labels (GNU's &&label) point to: one
+// byte for each label of a function, by its number.
+var labels [1 << 16]byte
+
+// LabelAddr is the address of the label numbered id.
+func LabelAddr(id int) unsafe.Pointer { return unsafe.Pointer(&labels[id]) }
+
+// LabelOf is the number of the label whose address is p: -1 if p is not
+// one's.
+func LabelOf(p unsafe.Pointer) int {
+	d := uintptr(p) - uintptr(unsafe.Pointer(&labels[0]))
+	if d >= uintptr(len(labels)) {
+		return -1
+	}
+	return int(d)
+}
+
+//go:linkname allowIntegers runtime.c23AllowIntegers
+func allowIntegers()
+
+func init() { allowIntegers() }

@@ -431,7 +431,9 @@ func (g *gen) mirror(t *ctype) string {
 		e := t.elem
 		switch {
 		case e.kind == kFunc:
-			return "*c23.Func"
+			// To a function's descriptor (c23.Func), or an integer C
+			// keeps in its place (SIG_IGN).
+			return "unsafe.Pointer"
 		case e.kind == kVoid || e.kind == kStruct && !e.rec.complete || e.kind == kArray && e.n < 0:
 			return "unsafe.Pointer"
 		}
@@ -448,7 +450,7 @@ func (g *gen) mirror(t *ctype) string {
 	case kNullptr:
 		return "unsafe.Pointer"
 	case kVaList:
-		return "*c23.VaList"
+		return "unsafe.Pointer"
 	case kLDouble:
 		return "c23.LDouble"
 	case kComplex:

@@ -60,3 +60,13 @@ var c23StackMove func(t unsafe.Pointer, lo, hi, delta uintptr)
 
 //go:linkname c23SetStackMove
 func c23SetStackMove(f func(t unsafe.Pointer, lo, hi, delta uintptr)) { c23StackMove = f }
+
+// c23AllowIntegers lets a pointer-typed word hold an integer that is no
+// address: C keeps integers in pointers ((void *)1, a union's int read as
+// its pointer), which the collector and the stack copier otherwise stop
+// the program for (debug.invalidptr). A program that has C in it runs
+// with that off; such a word is then skipped, as GODEBUG=invalidptr=0
+// has it.
+//
+//go:linkname c23AllowIntegers
+func c23AllowIntegers() { debug.invalidptr = 0 }
