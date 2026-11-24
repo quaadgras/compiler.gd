@@ -70,6 +70,32 @@ func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
 	}
 }
 
+// checkptrAlignmentC is checkptrAlignment for the conversions of a
+// package that is C translated by cmd/cc. C's pointer may point to the
+// end of its object, where nothing of its type fits: the end of an array
+// that a loop runs to, the pointer that the next element is placed at
+// less one. An object of C's on the heap has a byte after it, so that
+// pointer is one into the object still (cmd/compile's ir.CObjType); and
+// what was added to stayed in the object, which checkptrArithmetic
+// saw. So a pointer into an object of the heap whose type reaches past
+// the object's end is let be. C must not load or store through it, and
+// nothing here stops that it does: what it reaches is less than one
+// value of the type past the end.
+func checkptrAlignmentC(p unsafe.Pointer, elem *_type, n uintptr) {
+	if p != nil {
+		if s := spanOfHeap(uintptr(p)); s != nil && !s.isUserArenaChunk {
+			base := s.base() + s.objIndex(uintptr(p))*s.elemsize
+			if end := uintptr(p) + n*elem.Size_; end > base+s.elemsize && end >= uintptr(p) {
+				if elem.Pointers() && uintptr(p)&(uintptr(min(elem.Align_, goarch.PtrSize))-1) != 0 {
+					throw("checkptr: misaligned pointer conversion")
+				}
+				return
+			}
+		}
+	}
+	checkptrAlignment(p, elem, n)
+}
+
 // checkptrObjectType returns the type that the object at base of the span
 // s records, and where the values of that type begin, or nil if it has only
 // a bitmap, or no pointers.

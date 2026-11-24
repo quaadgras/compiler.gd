@@ -150,6 +150,8 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).
 		CheckPtrAlignment = typecheck.LookupRuntimeFunc(gd, "checkptrAlignment")
 	ir.Syms(gd).
+		CheckPtrAlignmentC = typecheck.LookupRuntimeFunc(gd, "checkptrAlignmentC")
+	ir.Syms(gd).
 		CheckPtrView = typecheck.LookupRuntimeFunc(gd, "checkptrView")
 	ir.Syms(gd).
 		Deferproc = typecheck.LookupRuntimeFunc(gd, "deferproc")
@@ -1208,6 +1210,11 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 			return
 		}
 		fn = ir.Syms(s.gd).CheckPtrView
+	}
+	if s.gd.CObjects && fn == ir.Syms(s.gd).CheckPtrAlignment {
+		// C's pointer may be to the end of its object, and no further
+		// (ir.CObjType): what it is converted to may not fit there.
+		fn = ir.Syms(s.gd).CheckPtrAlignmentC
 	}
 	if count == nil {
 		count = s.constInt(types.Types[types.TUINTPTR], 1)
