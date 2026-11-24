@@ -12,6 +12,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
+	"sync"
+	"sync/atomic"
 )
 
 // Translate translates the C source src, read from file, to the Go
@@ -39,13 +42,14 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	withMain := fs.Bool("main", false, "make C's main the program's main")
 	undef := fs.Bool("undef", false, "let a call of an undefined function panic when it runs, instead of being an error")
 	out := fs.String("o", "", "output file")
+	cacheDir := fs.String("cache", "", "keep translations in `dir`, and take from it the one of this command line if what it read has not changed")
 	var incDirs []string
 	fs.Func("I", "search `dir` for #include (repeatable)", func(s string) error {
 		incDirs = append(incDirs, s)
 		return nil
 	})
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: cc [-pkg name] [-main] [-I dir]... -o out.go file.c...")
+		fmt.Fprintln(stderr, "usage: cc [-pkg name] [-main] [-I dir]... [-cache dir] -o out.go file.c...")
 		fmt.Fprintln(stderr, "Each C file is a translation unit; the Go is one file.")
 		fs.PrintDefaults()
 	}
@@ -56,7 +60,29 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	gosrc, err := translateFiles(fs.Args(), *pkg, *withMain, incDirs, *undef)
+	var cache *ccCache
+	var in *inputs
+	if *cacheDir != "" {
+		var err error
+		if cache, err = cacheFor(*cacheDir, args); err != nil {
+			fmt.Fprintln(stderr, "cc:", err)
+			return 1
+		}
+		if gosrc, ok := cache.get(); ok {
+			if err := os.WriteFile(*out, gosrc, 0o666); err != nil {
+				fmt.Fprintln(stderr, "cc:", err)
+				return 1
+			}
+			return 0
+		}
+		in = newInputs()
+	}
+	gosrc, err := translateFiles(fs.Args(), *pkg, *withMain, incDirs, *undef, in)
+	if err == nil && cache != nil {
+		if err := cache.put(gosrc, in); err != nil {
+			fmt.Fprintln(stderr, "cc: cache:", err) // not kept: not an error of the translation
+		}
+	}
 	if gosrc != nil {
 		if werr := os.WriteFile(*out, gosrc, 0o666); werr != nil {
 			fmt.Fprintln(stderr, "cc:", werr)
@@ -73,26 +99,66 @@ func Run(args []string, stdout, stderr io.Writer) int {
 // Program translates the C files files, a whole program with main, to
 // the Go source of package pkg. incDirs are searched for #include.
 func Program(files []string, pkg string, incDirs []string) ([]byte, error) {
-	return translateFiles(files, pkg, true, incDirs, false)
+	return translateFiles(files, pkg, true, incDirs, false, nil)
 }
 
-func translateFiles(files []string, pkg string, withMain bool, incDirs []string, undef bool) ([]byte, error) {
-	var units []*unit
-	for _, f := range files {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			return nil, err
-		}
-		toks, err := lexUnitDirs([]source{{f, string(b)}}, incDirs)
-		if err != nil {
-			return nil, err
-		}
-		u, err := parse(f, toks)
-		if err != nil {
-			return nil, err
-		}
-		units = append(units, u)
+// translateFiles translates files, each a translation unit, to one Go
+// file. What it reads is recorded in in, if in is not nil.
+func translateFiles(files []string, pkg string, withMain bool, incDirs []string, undef bool, in *inputs) ([]byte, error) {
+	units, err := parseFiles(files, incDirs, in)
+	if err != nil {
+		return nil, err
 	}
 	out, _, err := generate(files[0], units, options{pkg: pkg, main: withMain, undef: undef})
 	return out, err
+}
+
+// parseFiles parses each of files, a translation unit: several at a
+// time, since nothing of one is another's until they are linked. The
+// error is that of the first file that has one.
+func parseFiles(files []string, incDirs []string, in *inputs) ([]*unit, error) {
+	units := make([]*unit, len(files))
+	errs := make([]error, len(files))
+	one := func(i int) {
+		f := files[i]
+		b, err := in.readFile(f)
+		if err != nil {
+			errs[i] = err
+			return
+		}
+		toks, err := lexUnitIn([]source{{f, string(b)}}, incDirs, in)
+		if err != nil {
+			errs[i] = err
+			return
+		}
+		units[i], errs[i] = parse(f, toks)
+	}
+	if n := min(runtime.GOMAXPROCS(0), len(files)); n > 1 {
+		var next atomic.Int64
+		var wg sync.WaitGroup
+		for w := 0; w < n; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for {
+					i := int(next.Add(1)) - 1
+					if i >= len(files) {
+						return
+					}
+					one(i)
+				}
+			}()
+		}
+		wg.Wait()
+	} else {
+		for i := range files {
+			one(i)
+		}
+	}
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return units, nil
 }

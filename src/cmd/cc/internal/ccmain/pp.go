@@ -45,6 +45,7 @@ type pp struct {
 	packs   []int64
 	inIf    bool // expanding a controlling expression
 	pushed  map[string][]*macro
+	read    *inputs // if not nil, records the files read and looked for (cache.go)
 }
 
 // A ppCtx is a list of tokens to read: a file, or a macro's expansion.
@@ -130,7 +131,12 @@ func lexUnit(srcs []source) (toks []token, err error) {
 }
 
 func lexUnitDirs(srcs []source, incDirs []string) ([]token, error) {
-	pt, err := preprocess(srcs, incDirs)
+	return lexUnitIn(srcs, incDirs, nil)
+}
+
+// lexUnitIn is lexUnitDirs, with the files read recorded in in.
+func lexUnitIn(srcs []source, incDirs []string, in *inputs) ([]token, error) {
+	pt, err := preprocessIn(srcs, incDirs, in)
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +173,11 @@ func lexUnitDirs(srcs []source, incDirs []string) ([]token, error) {
 
 // preprocess preprocesses srcs into preprocessing tokens.
 func preprocess(srcs []source, incDirs []string) (toks []token, err error) {
+	return preprocessIn(srcs, incDirs, nil)
+}
+
+// preprocessIn is preprocess, with the files it reads recorded in in.
+func preprocessIn(srcs []source, incDirs []string, in *inputs) (toks []token, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			pe, ok := r.(ppError)
@@ -176,7 +187,7 @@ func preprocess(srcs []source, incDirs []string) (toks []token, err error) {
 			err = fmt.Errorf("%s", pe.msg)
 		}
 	}()
-	p := &pp{macros: map[string]*macro{}, once: map[string]bool{}, incDirs: incDirs}
+	p := &pp{macros: map[string]*macro{}, once: map[string]bool{}, incDirs: incDirs, read: in}
 	p.builtins()
 	for i := len(srcs) - 1; i >= 0; i-- {
 		p.pushFile(srcs[i].name, srcs[i].text, token{file: srcs[i].name})
@@ -892,7 +903,7 @@ func (p *pp) find(name string, angle bool) (string, string, bool) {
 	}
 	for _, dir := range dirs {
 		path := filepath.Join(dir, name)
-		if b, err := os.ReadFile(path); err == nil {
+		if b, err := p.read.readFile(path); err == nil {
 			return path, string(b), true
 		}
 	}

@@ -152,7 +152,9 @@ with g++ and compares what they print (36 programs). Against Godot
 (4.7.1, with its own defines and include directories, and `__GNUC__`
 defined: Godot expects its compiler to be GCC, clang or MSVC), 176 of
 the 177 `.cpp` files of `core` translate, each alone, and the 176
-together, as one program of 1.9 million lines of Go. The other,
+together, as one program of 1.9 million lines of Go: in 30 seconds on 32
+threads (0.4 seconds from `cc -cache` when nothing it read has changed),
+which the Go compiler then builds in 3 minutes. The other,
 `core/math/geometry_2d.cpp`, includes clipper2, which uses `<vector>`,
 `<string>`, `<queue>` and `<iostream>`.
 

@@ -15,6 +15,22 @@ runs it in-process (`Run`, `Translate`, `Package`), and the logic is in
 go binary: `go tool cc` runs it in-process, with no binary in the tool
 directory.
 
+Each file of a command line is a translation unit. The units are parsed
+several at a time, since nothing of one is another's until they are
+linked; they are then linked and generated as one Go file, which is the
+same whatever the order they were parsed in.
+
+`cc -cache dir` keeps the translation of a command line in `dir`, with
+what it read: the files, by their contents, and the files it looked for
+and did not find (a header that appears in a directory searched before
+the one that has it makes another translation). The same command line,
+by the same cc, when all of that is as it was, gives the same Go without
+translating. The cache is of a whole command line, not of each unit: the
+units are linked as trees, so a unit has no Go of its own to keep, and a
+change to one file translates them all. (When `cmd/go` builds a package
+with cc, the translation is part of the package's build, which `cmd/go`
+caches.)
+
 ## cgo packages, with cgo off
 
 Go code uses C through cgo's `import "C"`, unchanged. When cgo is off
