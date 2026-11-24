@@ -248,6 +248,7 @@ type symbol struct {
 	noCopy    bool // a parameter of class type that is the caller's object, not a copy
 	nrvo      bool // a local that is the function's result: in the caller's memory
 	funcNamed bool // __func__, once the function names it: an object of the unit
+	inExpr    bool // declared inside an expression: the length of a variably modified type
 
 	extended []*symbol // the temporaries whose lifetime a reference's declaration extends
 	once     stmt      // a static local's initialization, the first time its declaration is reached

@@ -1084,8 +1084,8 @@ func (g *gen) condExpr(e *cond) string {
 		return ""
 	}
 	var x, y string
-	preX := g.capture(func() { x = g.rv(e.x) })
-	preY := g.capture(func() { y = g.rv(e.y) })
+	preX := g.capture(func() { x = g.armValue(e.x, e.t) })
+	preY := g.capture(func() { y = g.armValue(e.y, e.t) })
 	if preX == "" && preY == "" && isPure(x) && isPure(y) {
 		return fmt.Sprintf("c23.If(%s, %s, %s)", c, x, y)
 	}
@@ -1098,6 +1098,17 @@ func (g *gen) condExpr(e *cond) string {
 	g.p("%s = %s", t, y)
 	g.p("}")
 	return t
+}
+
+// armValue is the value of an operand of a conditional of type t. A
+// pointer's type may be another than t, the composite of the two: with
+// the length of an array that only the other operand's type has.
+func (g *gen) armValue(x expr, t *ctype) string {
+	v := g.rv(x)
+	if g.o.thin && t.isPtr() && x.ty().isPtr() {
+		v = g.retype(v, g.gt(x.ty()), g.gt(t))
+	}
+	return v
 }
 
 // elvis generates GNU's c ?: y, with c evaluated once.

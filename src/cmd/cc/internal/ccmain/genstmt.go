@@ -168,6 +168,11 @@ func (g *gen) funcLit(f *funcDecl) string {
 				continue
 			}
 			g.declareLocal(ps)
+			if overAligned(ps) {
+				g.p("%s = %s", g.localName(ps), allocAligned(ps))
+				g.p("%s = *%s", g.held(g.localName(ps), ps.t), pn)
+				continue
+			}
 			g.p("%s = *%s", g.localName(ps), pn)
 			continue
 		}
@@ -418,9 +423,12 @@ func (g *gen) stmt(s stmt) {
 	case *exprStmt:
 		g.effect(s.x)
 	case *declStmt:
+		save := g.declSyms
+		g.declSyms = s.syms
 		for _, sym := range s.syms {
 			g.localInit(sym)
 		}
+		g.declSyms = save
 	case *ifStmt:
 		if eff, v, ok := constCond(s.c); ok && !hasTarget(s) {
 			if eff != nil {

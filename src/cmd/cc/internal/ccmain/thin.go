@@ -7,6 +7,7 @@ package ccmain
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -179,9 +180,9 @@ func (g *gen) tlv1(e expr, forAddr bool) lval {
 			}
 			return lval{x: g.tglobal(s), t: s.t}
 		}
-		if s.t.isVLA() {
-			// The Go variable is the pointer to its array.
-			return lval{x: fmt.Sprintf("(*(*%s)(unsafe.Pointer(%s)))", g.mirror(s.t), g.localName(s)), t: s.t}
+		if s.t.isVLA() || overAligned(s) {
+			// The Go variable is the pointer to its object.
+			return lval{x: g.held(g.localName(s), s.t), t: s.t}
 		}
 		return lval{x: g.localName(s), t: s.t}
 	case *deref:
@@ -283,10 +284,28 @@ func (g *gen) tglobal(s *symbol) string {
 	if g.refs != nil {
 		g.refs[def] = true
 	}
-	if def.allocSize > def.t.sizeof() {
-		return fmt.Sprintf("(*(*%s)(unsafe.Pointer(%s)))", g.mirror(s.t), g.globalName(s))
+	if def.allocSize > def.t.sizeof() || overAligned(def) {
+		return g.held(g.globalName(s), s.t)
 	}
 	return g.globalName(s)
+}
+
+// held is the object of type t that the Go variable n is the pointer
+// to: one that no Go variable can be.
+func (g *gen) held(n string, t *ctype) string {
+	return fmt.Sprintf("(*(*%s)(unsafe.Pointer(%s)))", g.mirror(t), n)
+}
+
+// overAligned reports whether the object s is aligned more than Go
+// aligns a variable, as the program asked: it is allocated
+// (c23.MallocAligned), and its Go variable is the pointer to it.
+func overAligned(s *symbol) bool {
+	return s.kind == symVar && s.t.align > 8 || s.t.alignof() > 16
+}
+
+// allocAligned is the allocation of the over-aligned object s.
+func allocAligned(s *symbol) string {
+	return fmt.Sprintf("c23.MallocAligned(%d, %d)", s.t.alignof(), max(s.t.sizeof(), 1))
 }
 
 // unsafePtr is the pointer p, of C type t, as an unsafe.Pointer.
@@ -544,8 +563,8 @@ func (g *gen) tdeclareLocal(s *symbol) {
 
 // localType is the Go type of the variable of the local s.
 func (g *gen) localType(s *symbol) string {
-	if s.t.isVLA() {
-		return voidPtr // the pointer to its array
+	if s.t.isVLA() || overAligned(s) {
+		return voidPtr // the pointer to its object
 	}
 	return g.mirror(s.t)
 }
@@ -565,6 +584,12 @@ func (g *gen) declareHere(s *symbol) bool {
 	}
 	if n := len(g.frames); n > 0 && g.frames[n-1].kind == frSwitch {
 		return false // a later case, which Go gives a scope of its own, may name it
+	}
+	if s.inExpr || !slices.Contains(g.declSyms, s) {
+		// Not a declaration's, or one inside an expression (the length
+		// of a variably modified type), which may be in a Go block of
+		// its own.
+		return false
 	}
 	for i, p := range g.pending {
 		if p == s {
@@ -649,6 +674,9 @@ func (g *gen) tlocalInit(s *symbol) {
 	here := !s.global && !s.nrvo && g.declareHere(s)
 	if s.t.isVLA() {
 		alloc := fmt.Sprintf("c23.NewArrayT(%s, uintptr(%s))", g.typeDesc(g.mirror(baseElem(s.t))), g.vlaSize(s.t))
+		if a := s.t.alignof(); a > 8 {
+			alloc = fmt.Sprintf("c23.MallocAligned(%d, uintptr(%s))", a, g.vlaSize(s.t))
+		}
 		if here {
 			g.declare(n, voidPtr, alloc)
 		} else {
@@ -658,6 +686,22 @@ func (g *gen) tlocalInit(s *symbol) {
 	}
 	l := lval{x: n, t: s.t}
 	m := g.mirror(s.t)
+	if overAligned(s) {
+		// A new one each time the declaration is reached.
+		if here {
+			g.declare(n, voidPtr, allocAligned(s))
+		} else {
+			g.p("%s = %s", n, allocAligned(s))
+		}
+		l.x = g.held(n, s.t)
+		if s.init != nil {
+			g.tinitObject(l.x, s.t, s.init)
+		}
+		if s.ctor != nil {
+			g.effect(s.ctor)
+		}
+		return
+	}
 	switch {
 	case s.init != nil && s.init.scalar != nil:
 		v := g.rv(s.init.scalar)
@@ -721,9 +765,17 @@ func (g *gen) tcompound(e *compoundLit) string {
 		if s.tls {
 			return fmt.Sprintf("(*(*%s)(unsafe.Pointer(%s.Get())))", g.mirror(s.t), g.globalName(s))
 		}
-		return g.globalName(s)
+		return g.tglobal(s)
 	}
 	n := g.localName(s)
+	if overAligned(s) {
+		g.p("%s = %s", n, allocAligned(s))
+		n = g.held(n, s.t)
+		if s.init != nil {
+			g.tinitObject(n, s.t, s.init)
+		}
+		return n
+	}
 	if s.init != nil {
 		if s.init.scalar != nil {
 			g.tstore(lval{x: n, t: s.t}, g.rv(s.init.scalar), s.init.scalar)
@@ -839,13 +891,18 @@ func (g *gen) tglobalVar(s *symbol) {
 	if g.declared == nil {
 		g.declared = map[*symbol]bool{}
 	}
-	defer func() { g.declared[s] = true }()
 	x := name
 	inDecl := false
+	// Another's initializer may be in its declaration if it names this
+	// one, whose value its own declaration gives: not if init does.
+	defer func() { g.declared[s] = inDecl || s.init == nil && s.ctor == nil }()
 	if s.allocSize > s.t.sizeof() {
 		// With an initialized flexible array member: longer than its
 		// type. The Go variable is the pointer to it.
 		fmt.Fprintf(&g.vars, "var %s = c23.AllocRaw(%d)\n", name, s.allocSize)
+		x = g.tglobal(s)
+	} else if overAligned(s) {
+		fmt.Fprintf(&g.vars, "var %s = %s\n", name, allocAligned(s))
 		x = g.tglobal(s)
 	} else if lit, ok := g.staticInit(s); ok {
 		// Initialized where Go declares it.

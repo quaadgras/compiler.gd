@@ -1687,6 +1687,7 @@ func (p *parser) vlaLength(e expr, elem *ctype) expr {
 		return &intConst{node{tULong, e.at()}, 0}
 	}
 	sym := p.newLocal("vla", tULong, e.at())
+	sym.inExpr = true
 	sym.init = &initializer{scalar: p.convert(e, tULong)}
 	p.pendingVLA = append(p.pendingVLA, &declStmt{syms: []*symbol{sym}})
 	return &varRef{node{tULong, e.at()}, sym}

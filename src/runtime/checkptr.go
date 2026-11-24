@@ -410,7 +410,9 @@ func checkptrStraddles(ptr unsafe.Pointer, size uintptr) bool {
 }
 
 func checkptrArithmetic(p unsafe.Pointer, originals []unsafe.Pointer) {
-	if 0 < uintptr(p) && uintptr(p) < minLegalPointer {
+	// (A program with C in it keeps small integers in pointers, and
+	// adds to a null pointer: c23AllowIntegers.)
+	if 0 < uintptr(p) && uintptr(p) < minLegalPointer && debug.invalidptr != 0 {
 		throw("checkptr: pointer arithmetic computed bad pointer value")
 	}
 
