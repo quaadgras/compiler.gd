@@ -196,15 +196,22 @@ How a word comes to be one or the other:
 | `(T *)malloc(n)`, `calloc`, `realloc` to a `T *` | as an array of T: pointers where T has them |
 | stores a pointer | the word may hold one |
 | `memset` | the whole words it writes hold none |
-| `memcpy`, `memmove`, a struct assigned | as the words they are copied from |
+| `memcpy`, `memmove` | as the words they are copied from |
+| assigns a struct that has pointers | all of its words, as its type says |
 | stores an integer | unchanged (see below) |
 
 - **A store of a pointer** that the compiler makes in a package of C's,
   and in internal/c23, where it is not to a variable, is a call to
-  `runtime.c23StorePtr`, and a copy of a value with pointers one to
-  `runtime.typedmemmove`: they clear the bit before the store, and
-  again after it if something set it meanwhile. The runtime's own
-  stores of pointers do the same (copies of slices, the atomic ones).
+  `runtime.c23StorePtr`: it clears the bit before the store, and again
+  after it if something set it meanwhile. The runtime's atomic stores
+  do the same.
+- **A store of a struct or an array that has pointers** is one call to
+  `runtime.typedmemmove`, from a temporary if the value was in
+  registers. The value is known whole, so the bits of all of its words
+  are set at once to what its type says, a word of the bitmap at a
+  time: its integers are known to be integers from then on, which a
+  store for each of its pointers would not say. The runtime's copies
+  of slices and reflect's stores do the same.
 - **A bit is set** before the words are written, and what they held is
   the collector's to see first, as for any pointer that is written
   over while it marks.

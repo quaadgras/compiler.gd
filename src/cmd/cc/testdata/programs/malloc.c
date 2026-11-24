@@ -170,6 +170,31 @@ int main(void) {
 	live = slots[17];
 	printf("stale: %lu the same, and %s is %ld\n", (unsigned long)x, live->name, live->val);
 
+	// Whole structs stored where there were bytes, and bytes where
+	// there were structs.
+	char *bytes = malloc(256 * sizeof(node));
+	memset(bytes, 'x', 256 * sizeof(node));
+	node *nodes = (node *)bytes;
+	for (long i = 0; i < 256; i++) {
+		node v = {NULL, i, name_of(i)};
+		nodes[i] = v;
+		if (i > 0)
+			nodes[i].next = &nodes[i - 1];
+	}
+	churn(20000);
+	sum = list_sum(&nodes[255], &count);
+	printf("structs: %d nodes, sum %ld\n", count, sum);
+	for (long i = 0; i < 256; i += 2)
+		memset(&nodes[i], 'y', sizeof(node));
+	churn(5000);
+	sum = 0;
+	for (long i = 1; i < 256; i += 2) {
+		long v;
+		sscanf(nodes[i].name, "node-%ld", &v);
+		sum += v + bytes[(i - 1) * sizeof(node)];
+	}
+	printf("structs and bytes: %ld\n", sum);
+
 	// The end of an object is a pointer of its own.
 	int *a = malloc(1000 * sizeof *a);
 	int *end = a + 1000;

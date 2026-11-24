@@ -310,7 +310,7 @@ func TestCSpanBits(t *testing.T) {
 	// of a package that converted the pointer.
 	pair := cPair{n: 1, leaf: leaf}
 	reflect.NewAt(reflect.TypeFor[cPair](), unsafe.Add(scalar, 16)).Elem().Set(reflect.ValueOf(pair))
-	check("a value with pointers stored", scalar, "..pp..p.")
+	check("a value with pointers stored", scalar, "...p..p.")
 	pairs := make([]cPair, 1)
 	copy(unsafe.Slice((*cPair)(dst), 1), pairs)
 	check("a slice with pointers copied", dst, ".p..p..p")

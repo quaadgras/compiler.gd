@@ -506,9 +506,12 @@ func bulkBarrierC(s *mspan, dst, src, size uintptr, old bool) {
 //
 //   - a pointer is stored in a word of C's with the bit clear. A store of
 //     a pointer that the compiler makes in a package of C's goes through
-//     c23StorePtr, and the runtime's own stores of pointers (typedmemmove,
-//     the atomic ones) look as it does: the bit is cleared before the
-//     store, and again after it if it was set meanwhile;
+//     c23StorePtr, and the runtime's atomic stores of pointers look as it
+//     does: the bit is cleared before the store, and again after it if
+//     it was set meanwhile;
+//   - a value of a type with pointers is stored whole by typedmemmove,
+//     which the compiler calls for it in a package of C's: the bits of
+//     all of its words become what the type says, at once (cTyped);
 //   - a bit is set by what stores no pointers and knows it: memset, a
 //     copy of words that hold none, an allocation that says what its
 //     words are. The bit is set before the words are written, and what
@@ -632,9 +635,72 @@ func c23StorePtr(slot *unsafe.Pointer, val unsafe.Pointer) {
 	*slot = val
 }
 
-// cTypedPointers is for a copy of n values of typ to dst, before it and
-// after it: where typ has a pointer, a word of C's at dst may hold one.
-// It reports whether dst is C's.
+// cTyped is for a copy of n values of typ to dst, before it: if dst is
+// words of C's, they are what typ says from here on, possible pointers
+// where it has pointers and words that hold none elsewhere, whatever
+// they were. A value's bits are set as a whole, a uint32 of the bitmap
+// at a time, and not for each pointer of it. The collector sees what
+// the words held first, if it is marking.
+//
+// It reports whether dst is C's, and returns the span if it left it
+// locked: the caller unlocks it when the words are written, and then
+// calls cTypedPointers, for a word that something else set meanwhile.
+//
+//go:nosplit
+func cTyped(dst uintptr, typ *_type, n uintptr) (inC bool, locked *mspan) {
+	s := cSpanOf(dst)
+	if s == nil {
+		return false, nil
+	}
+	b := s.cBitsOf()
+	if b == nil {
+		return true, nil
+	}
+	if dst%goarch.PtrSize != 0 || typ.Size_%goarch.PtrSize != 0 {
+		// Not whole words: only the pointers are known.
+		cTypedPointers(dst, typ, n)
+		return true, nil
+	}
+	mask := getGCMask(typ)
+	ptrs := typ.PtrBytes / goarch.PtrSize
+	each := typ.Size_ / goarch.PtrSize
+	w0 := (dst - s.base()) / goarch.PtrSize
+	// (No further than the object's slot, whatever is copied.)
+	total := min(n*each, (s.objIndex(dst)+1)*s.elemsize/goarch.PtrSize-w0)
+	if total == 0 {
+		return true, nil
+	}
+	cShade(b, w0, dst, 0, total)
+	var want, ours uint32 // the bits of this uint32 that are set, and that are the value's
+	for i := uintptr(0); i < total; i++ {
+		bit := uint32(1) << ((w0 + i) % cBitsWord)
+		ours |= bit
+		if f := i % each; f >= ptrs || *addb(mask, f/8)>>(f%8)&1 == 0 {
+			want |= bit
+		}
+		if (w0+i)%cBitsWord == cBitsWord-1 || i == total-1 {
+			p := b.word((w0 + i) / cBitsWord)
+			if have := atomic.Load(p) & ours; have != want {
+				if locked == nil {
+					s.cLock()
+					locked = s
+				}
+				if set := want &^ have; set != 0 {
+					atomic.Or(p, set)
+				}
+				if clear := have &^ want; clear != 0 {
+					atomic.And(p, ^clear)
+				}
+			}
+			want, ours = 0, 0
+		}
+	}
+	return true, locked
+}
+
+// cTypedPointers is for a copy of n values of typ to dst, after it:
+// where typ has a pointer, a word of C's at dst may hold one. It
+// reports whether dst is C's.
 //
 //go:nosplit
 func cTypedPointers(dst uintptr, typ *_type, n uintptr) bool {
@@ -648,9 +714,10 @@ func cTypedPointers(dst uintptr, typ *_type, n uintptr) bool {
 	}
 	mask := getGCMask(typ)
 	words := typ.PtrBytes / goarch.PtrSize
+	limit := (s.objIndex(dst) + 1) * s.elemsize / goarch.PtrSize // of the object's slot
 	for i := uintptr(0); i < n; i++ {
 		w0 := (dst + i*typ.Size_ - s.base()) / goarch.PtrSize
-		for w := uintptr(0); w < words; w++ {
+		for w := uintptr(0); w < words && w0+w < limit; w++ {
 			if *addb(mask, w/8)>>(w%8)&1 != 0 && atomic.Load(b.word((w0+w)/cBitsWord))>>((w0+w)%cBitsWord)&1 != 0 {
 				s.cPointers(b, w0+w, 1)
 			}

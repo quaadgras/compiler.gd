@@ -7353,6 +7353,22 @@ func (s *state) rawStoreType(t *types.Type, left, right *ssa.Value, skip skipMas
 		return
 	}
 
+	if skip == 0 && (t.IsStruct() || t.IsArray()) && t.Size() > int64(s.config.PtrSize) && s.cStore(left) {
+		// The words may be C's (runtime/cspan.go), and the value is
+		// known whole: it is stored as one, from a temporary, by
+		// typedmemmove, which says once what all of its words are.
+		// A store for each pointer of it would say it of one word
+		// at a time, and nothing of the others.
+		tmp := typecheck.TempAt(s.gd, s.peekPos(), s.curfn, t)
+		tmp.SetAddrtaken(true)
+		s.vars[memVar] = s.newValue1A(ssa.OpVarDef, types.TypeMem, tmp, s.mem())
+		addr := s.addr(tmp)
+		s.vars[memVar] = s.newValue3A(ssa.OpStore, types.TypeMem, t, addr, right, s.mem())
+		s.rtcall(ir.Syms(s.gd).Typedmemmove, true, nil, s.reflectType(t), left, addr)
+		s.curfn.SetWBPos(s.gd, s.peekPos())
+		return
+	}
+
 	if types.StringWasm32() {
 		// No write barrier (GOWASM=gc), and word 0 of a string is
 		// written as a pointer before A writes it again: pointers
