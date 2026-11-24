@@ -187,7 +187,7 @@ func (g *gen) funcLit(f *funcDecl) string {
 	}
 	if !g.jmp {
 		fb.WriteString(text)
-		if hasRes && !endsInReturn(text) {
+		if hasRes && !endsInReturn(text) && (needsFlat(f) || !terminates(f.body)) {
 			fmt.Fprintf(&fb, "\treturn %s\n", g.zero(ft.ret))
 		}
 	} else {
@@ -311,6 +311,103 @@ func varUses(src string) (reads, writes map[string]int) {
 		}
 	}
 	return reads, writes
+}
+
+// terminates reports whether the Go of the statement s is one that Go
+// takes for the end of a function, with no return after it: a return,
+// an if whose branches both are, a switch with a default that nothing
+// breaks out of and whose clauses are (Go's terminating statements).
+func terminates(s stmt) bool {
+	switch s := s.(type) {
+	case *returnStmt:
+		return true
+	case *block:
+		list := live(s.list)
+		if len(list) == 0 {
+			return false
+		}
+		for _, x := range list {
+			switch x := x.(type) {
+			case *deferStmt:
+				return false // what runs when the block is left comes after
+			case *declStmt:
+				for _, sym := range x.syms {
+					if sym.dtor != nil || sym.cleanup != nil {
+						return false
+					}
+				}
+			}
+		}
+		return terminates(list[len(list)-1])
+	case *ifStmt:
+		if _, _, ok := constCond(s.c); ok {
+			return false // one branch only is generated: not looked into
+		}
+		return s.els != nil && terminates(s.then) && terminates(s.els)
+	case *switchStmt:
+		var clauses [][]stmt
+		dflt := false
+		var add func(st stmt)
+		add = func(st stmt) {
+			if c, ok := st.(*caseStmt); ok && c.sw == s {
+				clauses = append(clauses, nil)
+				dflt = dflt || c.dflt
+				add(c.body)
+				return
+			}
+			if len(clauses) > 0 && st != nil {
+				clauses[len(clauses)-1] = append(clauses[len(clauses)-1], st)
+			}
+		}
+		if b, ok := s.body.(*block); ok {
+			for _, st := range b.list {
+				add(st)
+			}
+		} else {
+			add(s.body)
+		}
+		if !dflt || breaksOut(s.body) {
+			return false
+		}
+		for i, body := range clauses {
+			last := i == len(clauses)-1
+			switch {
+			case len(body) > 0 && terminates(body[len(body)-1]):
+			case !last && !endsJump(body):
+				// It falls through to the next.
+			default:
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// breaksOut reports whether a break in s leaves the switch that s is the
+// body of.
+func breaksOut(s stmt) bool {
+	switch s := s.(type) {
+	case *breakStmt:
+		return true
+	case *block:
+		for _, x := range s.list {
+			if breaksOut(x) {
+				return true
+			}
+		}
+	case *ifStmt:
+		return breaksOut(s.then) || breaksOut(s.els)
+	case *caseStmt:
+		return breaksOut(s.body)
+	case *labelStmt:
+		return breaksOut(s.body)
+	case *exprStmt, *declStmt, *returnStmt, *continueStmt, *gotoStmt, *whileStmt, *doStmt, *forStmt, *switchStmt, nil:
+		return false
+	default:
+		return true // not known: as if it did
+	}
+	return false
 }
 
 // endsInReturn reports whether the last statement of body, a function's,
@@ -624,8 +721,6 @@ func (g *gen) capture(f func()) string {
 
 func (g *gen) switchStmt(s *switchStmt) {
 	x := g.rv(s.x)
-	t := g.tmp(g.gt(s.x.ty()))
-	g.p("%s = %s", t, x)
 	// The clauses: each case label starts one, with the statements up to
 	// the next.
 	type clause struct {
@@ -662,6 +757,69 @@ func (g *gen) switchStmt(s *switchStmt) {
 	for _, st := range list {
 		add(st)
 	}
+	// Go's switch on the value, each clause with the values of its
+	// labels: those of the labels in front of it that have no
+	// statements are its own too.
+	const maxRange = 16 // the most values that case lo ... hi is written out as
+	st := s.x.ty()
+	type group struct {
+		vals []string
+		dflt bool
+		body []stmt
+	}
+	var groups []*group
+	byValue := true
+	cur := &group{}
+	for i, cl := range clauses {
+		switch {
+		case cl.c.dflt:
+			cur.dflt = true
+		case uint64(cl.c.hi-cl.c.lo) >= maxRange:
+			byValue = false
+		default:
+			for v := cl.c.lo; ; v++ {
+				lit := constLit(st, v)
+				if m := constConv.FindStringSubmatch(lit); m != nil && m[1] == goType(st) {
+					lit = m[2] // a constant has the type of what it is compared with
+				}
+				cur.vals = append(cur.vals, lit)
+				if v == cl.c.hi {
+					break
+				}
+			}
+		}
+		if len(cl.body) == 0 && i < len(clauses)-1 {
+			continue
+		}
+		cur.body = cl.body
+		groups = append(groups, cur)
+		cur = &group{}
+	}
+	if byValue {
+		g.p("switch %s {", x)
+		g.pushFrame(frSwitch, nil)
+		defer g.popFrame()
+		for i, gr := range groups {
+			if gr.dflt {
+				// Every value that no other clause has, the ones its
+				// labels name among them.
+				g.p("default:")
+			} else {
+				g.p("case %s:", strings.Join(gr.vals, ", "))
+			}
+			for _, st := range gr.body {
+				g.stmt(st)
+			}
+			if i < len(groups)-1 && !endsJump(gr.body) {
+				g.p("fallthrough")
+			}
+		}
+		g.p("}")
+		return
+	}
+	// With a range of many values: a switch on conditions.
+	t := g.tmp(g.gt(st))
+	g.p("%s = %s", t, x)
 	g.p("switch {")
 	g.pushFrame(frSwitch, nil)
 	defer g.popFrame()

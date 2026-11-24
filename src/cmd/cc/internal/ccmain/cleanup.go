@@ -142,10 +142,8 @@ func (g *gen) blockStmts(b *block, gen func(stmt)) {
 					sym := sym
 					f.exits = append(f.exits, func() {
 						l := g.lv(&varRef{node{sym.t, sym.p}, sym})
-						addr := l.addr
-
 						// To the type of the function's parameter.
-						addr = taddr(l.x)
+						addr := taddr(l.x)
 						if ft := sym.cleanup.t.fn; ft != nil && len(ft.params) == 1 {
 							addr = g.retype(addr, "*"+g.mirror(sym.t), g.gt(ft.params[0]))
 						}
