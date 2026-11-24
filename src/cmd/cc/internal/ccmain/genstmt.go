@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/scanner"
 	gotoken "go/token"
+	"regexp"
 	"strings"
 )
 
@@ -22,7 +23,7 @@ func (g *gen) funcSig(ft *funcType, names []string) string {
 // tmp declares a temporary of Go type t at the top of the function.
 func (g *gen) tmp(t string) string {
 	g.tmpN++
-	n := fmt.Sprintf("t%d", g.tmpN)
+	n := fmt.Sprintf("__%d", g.tmpN)
 	if g.fn == nil {
 		// File scope (an initializer): declared where it is.
 		g.p("var %s %s", n, t)
@@ -37,24 +38,69 @@ func (g *gen) tmp(t string) string {
 func (g *gen) cellTmp(t *ctype) string {
 	g.tmpN++
 	if g.fn == nil {
-		n := fmt.Sprintf("t%d", g.tmpN)
+		n := fmt.Sprintf("__%d", g.tmpN)
 		g.p("%s := c23.New[%s]()", n, g.mirror(t))
 		g.p("_ = %s", n)
 		return n
 	}
-	fmt.Fprintf(&g.cells, "var o%d c23.Obj[%s]\nt%d := c23.LocalT(&o%d, %s)\n_ = t%d\n", g.tmpN, g.mirror(t), g.tmpN, g.tmpN, g.typeDesc(g.mirror(t)), g.tmpN)
-	return fmt.Sprintf("t%d", g.tmpN)
+	fmt.Fprintf(&g.cells, "var __o%d c23.Obj[%s]\n__%d := c23.LocalT(&__o%d, %s)\n_ = __%d\n", g.tmpN, g.mirror(t), g.tmpN, g.tmpN, g.typeDesc(g.mirror(t)), g.tmpN)
+	return fmt.Sprintf("__%d", g.tmpN)
 }
 
+// localName is the Go name of the local s: C's name for it, unless Go
+// or the generated code has another use for that name, or another local
+// of the function has it already. What the translation adds has names
+// that C's cannot be: they begin with two underscores.
 func (g *gen) localName(s *symbol) string {
 	if n, ok := g.names[s]; ok {
 		return n
 	}
-	g.tmpN++
-	n := fmt.Sprintf("v%d_%s", g.tmpN, goIdent(strings.ReplaceAll(s.name, ".", "_")))
+	var n string
+	if strings.Contains(s.name, ".") || s.name == "" {
+		// One the parser made: tmp.3, vla.7.
+		n = "__" + goIdent(strings.ReplaceAll(s.name, ".", ""))
+		if s.name == "" {
+			n = "__arg"
+		}
+	} else {
+		n = goIdent(s.name)
+	}
+	if g.localNames == nil {
+		g.localNames = map[string]bool{}
+	}
+	if base := n; goReserved[n] || generatedName.MatchString(n) || g.localNames[n] {
+		for i := 2; ; i++ {
+			if n = fmt.Sprintf("%s_%d", base, i); !g.localNames[n] {
+				break
+			}
+		}
+	}
+	g.localNames[n] = true
 	g.names[s] = n
 	return n
 }
+
+// goReserved are the names that a local cannot have in the generated Go:
+// Go's keywords, what Go declares, whose meaning the generated code
+// counts on (int, nil, len), and the names it gives its own.
+var goReserved = func() map[string]bool {
+	m := map[string]bool{}
+	for _, n := range strings.Fields(`
+		break case chan const continue default defer else fallthrough for func go goto if import
+		interface map package range return select struct switch type var
+		any bool byte comparable complex64 complex128 error float32 float64 int int8 int16 int32 int64
+		rune string uint uint8 uint16 uint32 uint64 uintptr true false iota nil
+		append cap clear close complex copy delete imag len make max min new panic print println real recover
+		c23 unsafe math bits atomic init main sret va`) {
+		m[n] = true
+	}
+	return m
+}()
+
+// generatedName matches the names the generated Go gives what is not
+// local: functions (c_f, c0_f), objects (g_x), types, the descriptors of
+// functions, string literals and the library's packages.
+var generatedName = regexp.MustCompile(`^(_C23)?(c[0-9]*_|g[0-9]*_|struct_|union_|enum_|fd_|s_[0-9]|c23_|[LJF][0-9_])`)
 
 // declareLocal declares a local at the top of the function.
 func (g *gen) declareLocal(s *symbol) {
@@ -65,6 +111,7 @@ func (g *gen) declareLocal(s *symbol) {
 
 func (g *gen) function(f *funcDecl) {
 	g.tmpN = 0
+	g.localNames = nil
 	lit := g.funcLit(f)
 	fmt.Fprintf(&g.funcs, "func %s%s\n\n", g.names[f.sym], strings.TrimPrefix(lit, "func"))
 	g.fn = nil
@@ -92,7 +139,7 @@ func (g *gen) funcLit(f *funcDecl) string {
 			continue
 		}
 		g.tmpN++
-		pn := fmt.Sprintf("p%d", g.tmpN)
+		pn := fmt.Sprintf("__p%d", g.tmpN)
 		names = append(names, pn)
 		if ps.noCopy {
 			g.names[ps] = "(*" + pn + ")" // C++: the caller's object
@@ -146,22 +193,22 @@ func (g *gen) funcLit(f *funcDecl) string {
 	} else {
 		// setjmp: the body runs again from a setjmp's site when longjmp
 		// unwinds to it (c23.Longjmp).
-		fb.WriteString("jf := c23.NewJmpFrame()\ndefer jf.Done()\nvar jsite, jval int32\n_ = jval\nfor {\n")
+		fb.WriteString("__jf := c23.NewJmpFrame()\ndefer __jf.Done()\nvar __jsite, __jval int32\n_ = __jval\nfor {\n")
 		if hasRes {
-			fmt.Fprintf(&fb, "r, ok := func() (r %s, ok bool) {\n", g.gt(ft.ret))
+			fmt.Fprintf(&fb, "__r, __ok := func() (__r %s, __ok bool) {\n", g.gt(ft.ret))
 		} else {
-			fb.WriteString("ok := func() (ok bool) {\n")
+			fb.WriteString("__ok := func() (__ok bool) {\n")
 		}
-		fb.WriteString("defer func() {\nif x := recover(); x != nil {\ns, v, mine := jf.Catch(x)\nif !mine {\npanic(x)\n}\njsite, jval = s, v\n}\n}()\nswitch jsite {\n")
+		fb.WriteString("defer func() {\nif x := recover(); x != nil {\ns, v, mine := __jf.Catch(x)\nif !mine {\npanic(x)\n}\n__jsite, __jval = s, v\n}\n}()\nswitch __jsite {\n")
 		for k := 1; k <= f.setjmps; k++ {
 			fmt.Fprintf(&fb, "case %d:\ngoto J%d\n", k, k)
 		}
 		fb.WriteString("}\n")
 		fb.WriteString(text)
 		if hasRes {
-			fmt.Fprintf(&fb, "return %s, true\n}()\nif ok {\nreturn r\n}\n}\n", g.zero(ft.ret))
+			fmt.Fprintf(&fb, "return %s, true\n}()\nif __ok {\nreturn __r\n}\n}\n", g.zero(ft.ret))
 		} else {
-			fb.WriteString("return true\n}()\nif ok {\nreturn\n}\n}\n")
+			fb.WriteString("return true\n}()\nif __ok {\nreturn\n}\n}\n")
 		}
 	}
 	fb.WriteString("}")
@@ -388,7 +435,7 @@ func (g *gen) stmt(s stmt) {
 			return
 		}
 		g.tmpN++
-		f := fmt.Sprintf("f%d", g.tmpN)
+		f := fmt.Sprintf("__f%d", g.tmpN)
 		g.p("for %s := true; ; %s = false {", f, f)
 		g.p("if !%s {", f)
 		g.out.WriteString(pre)
@@ -418,7 +465,7 @@ func (g *gen) stmt(s stmt) {
 			}
 		default:
 			g.tmpN++
-			f := fmt.Sprintf("f%d", g.tmpN)
+			f := fmt.Sprintf("__f%d", g.tmpN)
 			g.p("for %s := true; ; %s = false {", f, f)
 			if post != "" {
 				g.p("if !%s {", f)

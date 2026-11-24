@@ -1290,14 +1290,14 @@ func (g *gen) builtinCode(e *builtinCall) string {
 		k := e.args[1].(*intConst).v
 		t := g.tmp("int32")
 		if len(e.args) == 3 {
-			g.p("%s = c23.Sigsetjmp(%s, jf, %d, %s)", t, g.orv(e.args[0]), k, g.orv(e.args[2]))
+			g.p("%s = c23.Sigsetjmp(%s, __jf, %d, %s)", t, g.orv(e.args[0]), k, g.orv(e.args[2]))
 		} else {
-			g.p("%s = c23.Setjmp(%s, jf, %d)", t, g.orv(e.args[0]), k)
+			g.p("%s = c23.Setjmp(%s, __jf, %d)", t, g.orv(e.args[0]), k)
 		}
 		// longjmp comes back here.
 		g.p("J%d:", k)
-		g.p("if jsite == %d {", k)
-		g.p("%s, jsite = jval, 0", t)
+		g.p("if __jsite == %d {", k)
+		g.p("%s, __jsite = __jval, 0", t)
 		g.p("}")
 		return t
 	case "assert":

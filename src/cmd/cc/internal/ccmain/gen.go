@@ -94,10 +94,11 @@ type gen struct {
 	// which are declared where C declares them if nothing can jump
 	// over that (inPlace), and at the function's top otherwise; and
 	// the names of those declared in place (inBody).
-	pending  []*symbol
-	inPlace  bool
-	inBody   map[string]bool
-	declSyms []*symbol // of the declaration that is being generated
+	pending    []*symbol
+	inPlace    bool
+	inBody     map[string]bool
+	declSyms   []*symbol       // of the declaration that is being generated
+	localNames map[string]bool // the Go names of the function\'s locals (localName)
 }
 
 func (g *gen) errorf(at pos, format string, args ...any) {
