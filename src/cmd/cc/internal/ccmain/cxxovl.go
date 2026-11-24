@@ -85,7 +85,10 @@ func (p *parser) cxxDeclareFunc(name string, t *ctype, s specs, at pos) *symbol 
 	if s.storage == sStatic && sc.kind == skNamespace || inAnon(sc) {
 		sym.linkage = 'i'
 	}
-	if last != nil {
+	if sc.kind == skTemplate {
+		// A function template's instance: not found by name, which
+		// finds the template.
+	} else if last != nil {
 		last.next = sym
 	} else {
 		sc.vars[key] = sym
@@ -131,13 +134,13 @@ func funcSet(sym *symbol) []*symbol {
 
 // Ranks of implicit conversions: less is better.
 const (
-	rkExact = iota
-	rkQual  // a qualification added
-	rkPromo
-	rkConv
-	rkUser
-	rkEllipsis
-	rkNone = -1
+	rkExact    = 0
+	rkQual     = 1 // a qualification added
+	rkPromo    = 10
+	rkConv     = 20
+	rkUser     = 30
+	rkEllipsis = 40
+	rkNone     = -1
 )
 
 // valueType is the type of e as a value: arrays and functions as
@@ -205,8 +208,13 @@ func (p *parser) convRank(a expr, pt *ctype) int {
 		if pt.ref == 1 && to.q&qConst == 0 {
 			return rkNone
 		}
-		// A temporary of the referred type.
-		return p.convRank(a, to.unqual())
+		// A temporary of the referred type: an rvalue, which T && binds
+		// better than const T &.
+		r := p.convRank(a, to.unqual())
+		if r != rkNone && pt.ref == 1 {
+			r++
+		}
+		return r
 	}
 	vt := valueType(a)
 	pt = pt.unqual()
@@ -597,7 +605,7 @@ func hasTemplate(set []*symbol) bool {
 // thisOrNil is *this, if the functions of set may be member functions
 // called on it.
 func (p *parser) thisOrNil(set []*symbol, at pos) expr {
-	if p.this == nil {
+	if p.this == nil || p.lambda != nil && p.lambda.classThis == nil {
 		return nil
 	}
 	for _, s := range set {

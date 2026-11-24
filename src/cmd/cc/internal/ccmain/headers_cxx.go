@@ -554,4 +554,384 @@ using std::isnormal;
 using std::signbit;
 #endif
 `
+
+	sysHeaders["functional"] = `#ifndef __CC_FUNCTIONAL
+#define __CC_FUNCTIONAL
+#include <type_traits>
+#include <utility>
+namespace std {
+template <class> class function;
+template <class R, class... A>
+class function<R(A...)> {
+	struct __base {
+		virtual ~__base() {}
+		virtual R __call(A... a) = 0;
+		virtual __base *__clone() const = 0;
+	};
+	template <class F>
+	struct __impl : __base {
+		F __f;
+		__impl(const F &f) : __f(f) {}
+		R __call(A... a) override { return __f(a...); }
+		__base *__clone() const override { return new __impl(__f); }
+	};
+	__base *__p;
+
+public:
+	typedef R result_type;
+	function() noexcept : __p(nullptr) {}
+	function(nullptr_t) noexcept : __p(nullptr) {}
+	function(const function &o) : __p(o.__p ? o.__p->__clone() : nullptr) {}
+	function(function &&o) noexcept : __p(o.__p) { o.__p = nullptr; }
+	template <class F, class = enable_if_t<!is_same_v<decay_t<F>, function>>>
+	function(F f) : __p(new __impl<F>(f)) {}
+	~function() { delete __p; }
+	function &operator=(const function &o) {
+		if (this != &o) {
+			__base *n = o.__p ? o.__p->__clone() : nullptr;
+			delete __p;
+			__p = n;
+		}
+		return *this;
+	}
+	function &operator=(function &&o) noexcept {
+		if (this != &o) {
+			delete __p;
+			__p = o.__p;
+			o.__p = nullptr;
+		}
+		return *this;
+	}
+	function &operator=(nullptr_t) noexcept {
+		delete __p;
+		__p = nullptr;
+		return *this;
+	}
+	explicit operator bool() const noexcept { return __p != nullptr; }
+	R operator()(A... a) const { return __p->__call(a...); }
+};
+template <class R, class... A> bool operator==(const function<R(A...)> &f, nullptr_t) noexcept { return !f; }
+template <class R, class... A> bool operator!=(const function<R(A...)> &f, nullptr_t) noexcept { return bool(f); }
+template <class T = void> struct less { constexpr bool operator()(const T &a, const T &b) const { return a < b; } };
+template <class T = void> struct greater { constexpr bool operator()(const T &a, const T &b) const { return a > b; } };
+template <class T = void> struct equal_to { constexpr bool operator()(const T &a, const T &b) const { return a == b; } };
+}
+#endif
+`
+	sysHeaders["mutex"] = `#ifndef __CC_MUTEX
+#define __CC_MUTEX
+#include <pthread.h>
+#include <utility>
+namespace std {
+class mutex {
+	pthread_mutex_t __m;
+
+public:
+	typedef pthread_mutex_t *native_handle_type;
+	mutex() noexcept { pthread_mutex_init(&__m, nullptr); }
+	~mutex() { pthread_mutex_destroy(&__m); }
+	mutex(const mutex &) = delete;
+	mutex &operator=(const mutex &) = delete;
+	void lock() { pthread_mutex_lock(&__m); }
+	bool try_lock() { return pthread_mutex_trylock(&__m) == 0; }
+	void unlock() { pthread_mutex_unlock(&__m); }
+	native_handle_type native_handle() { return &__m; }
+};
+class recursive_mutex {
+	pthread_mutex_t __m;
+
+public:
+	typedef pthread_mutex_t *native_handle_type;
+	recursive_mutex() {
+		pthread_mutexattr_t a;
+		pthread_mutexattr_init(&a);
+		pthread_mutexattr_settype(&a, PTHREAD_MUTEX_RECURSIVE);
+		pthread_mutex_init(&__m, &a);
+		pthread_mutexattr_destroy(&a);
+	}
+	~recursive_mutex() { pthread_mutex_destroy(&__m); }
+	recursive_mutex(const recursive_mutex &) = delete;
+	recursive_mutex &operator=(const recursive_mutex &) = delete;
+	void lock() { pthread_mutex_lock(&__m); }
+	bool try_lock() { return pthread_mutex_trylock(&__m) == 0; }
+	void unlock() { pthread_mutex_unlock(&__m); }
+	native_handle_type native_handle() { return &__m; }
+};
+struct defer_lock_t { explicit defer_lock_t() = default; };
+struct try_to_lock_t { explicit try_to_lock_t() = default; };
+struct adopt_lock_t { explicit adopt_lock_t() = default; };
+inline constexpr defer_lock_t defer_lock{};
+inline constexpr try_to_lock_t try_to_lock{};
+inline constexpr adopt_lock_t adopt_lock{};
+template <class M>
+class lock_guard {
+	M &__m;
+
+public:
+	typedef M mutex_type;
+	explicit lock_guard(M &m) : __m(m) { __m.lock(); }
+	lock_guard(M &m, adopt_lock_t) : __m(m) {}
+	~lock_guard() { __m.unlock(); }
+	lock_guard(const lock_guard &) = delete;
+	lock_guard &operator=(const lock_guard &) = delete;
+};
+template <class M>
+class unique_lock {
+	M *__m;
+	bool __owns;
+
+public:
+	typedef M mutex_type;
+	unique_lock() noexcept : __m(nullptr), __owns(false) {}
+	explicit unique_lock(M &m) : __m(&m), __owns(true) { m.lock(); }
+	unique_lock(M &m, defer_lock_t) noexcept : __m(&m), __owns(false) {}
+	unique_lock(M &m, try_to_lock_t) : __m(&m), __owns(m.try_lock()) {}
+	unique_lock(M &m, adopt_lock_t) : __m(&m), __owns(true) {}
+	unique_lock(const unique_lock &) = delete;
+	unique_lock &operator=(const unique_lock &) = delete;
+	unique_lock(unique_lock &&o) noexcept : __m(o.__m), __owns(o.__owns) {
+		o.__m = nullptr;
+		o.__owns = false;
+	}
+	unique_lock &operator=(unique_lock &&o) noexcept {
+		if (__owns)
+			__m->unlock();
+		__m = o.__m;
+		__owns = o.__owns;
+		o.__m = nullptr;
+		o.__owns = false;
+		return *this;
+	}
+	~unique_lock() {
+		if (__owns)
+			__m->unlock();
+	}
+	void lock() {
+		__m->lock();
+		__owns = true;
+	}
+	bool try_lock() { return __owns = __m->try_lock(); }
+	void unlock() {
+		__m->unlock();
+		__owns = false;
+	}
+	M *release() noexcept {
+		M *m = __m;
+		__m = nullptr;
+		__owns = false;
+		return m;
+	}
+	bool owns_lock() const noexcept { return __owns; }
+	explicit operator bool() const noexcept { return __owns; }
+	M *mutex() const noexcept { return __m; }
+};
+template <class M>
+class scoped_lock {
+	M &__m;
+
+public:
+	explicit scoped_lock(M &m) : __m(m) { __m.lock(); }
+	~scoped_lock() { __m.unlock(); }
+	scoped_lock(const scoped_lock &) = delete;
+};
+struct once_flag {
+	pthread_once_t __o = PTHREAD_ONCE_INIT;
+	bool __done = false;
+	pthread_mutex_t __m = PTHREAD_MUTEX_INITIALIZER;
+};
+template <class F, class... A>
+void call_once(once_flag &flag, F &&f, A &&...a) {
+	pthread_mutex_lock(&flag.__m);
+	if (!flag.__done) {
+		f(static_cast<A &&>(a)...);
+		flag.__done = true;
+	}
+	pthread_mutex_unlock(&flag.__m);
+}
+}
+#endif
+`
+	sysHeaders["condition_variable"] = `#ifndef __CC_CONDITION_VARIABLE
+#define __CC_CONDITION_VARIABLE
+#include <mutex>
+namespace std {
+enum class cv_status { no_timeout, timeout };
+class condition_variable {
+	pthread_cond_t __c;
+
+public:
+	condition_variable() { pthread_cond_init(&__c, nullptr); }
+	~condition_variable() { pthread_cond_destroy(&__c); }
+	condition_variable(const condition_variable &) = delete;
+	condition_variable &operator=(const condition_variable &) = delete;
+	void notify_one() noexcept { pthread_cond_signal(&__c); }
+	void notify_all() noexcept { pthread_cond_broadcast(&__c); }
+	void wait(unique_lock<mutex> &lock) { pthread_cond_wait(&__c, lock.mutex()->native_handle()); }
+	template <class P>
+	void wait(unique_lock<mutex> &lock, P pred) {
+		while (!pred())
+			wait(lock);
+	}
+};
+class condition_variable_any {
+	pthread_cond_t __c;
+	pthread_mutex_t __m;
+
+public:
+	condition_variable_any() {
+		pthread_cond_init(&__c, nullptr);
+		pthread_mutex_init(&__m, nullptr);
+	}
+	~condition_variable_any() {
+		pthread_cond_destroy(&__c);
+		pthread_mutex_destroy(&__m);
+	}
+	void notify_one() noexcept {
+		pthread_mutex_lock(&__m);
+		pthread_cond_signal(&__c);
+		pthread_mutex_unlock(&__m);
+	}
+	void notify_all() noexcept {
+		pthread_mutex_lock(&__m);
+		pthread_cond_broadcast(&__c);
+		pthread_mutex_unlock(&__m);
+	}
+	template <class L>
+	void wait(L &lock) {
+		pthread_mutex_lock(&__m);
+		lock.unlock();
+		pthread_cond_wait(&__c, &__m);
+		pthread_mutex_unlock(&__m);
+		lock.lock();
+	}
+	template <class L, class P>
+	void wait(L &lock, P pred) {
+		while (!pred())
+			wait(lock);
+	}
+};
+}
+#endif
+`
+	sysHeaders["shared_mutex"] = `#ifndef __CC_SHARED_MUTEX
+#define __CC_SHARED_MUTEX
+#include <mutex>
+namespace std {
+class shared_mutex {
+	pthread_rwlock_t __l;
+
+public:
+	shared_mutex() { pthread_rwlock_init(&__l, nullptr); }
+	~shared_mutex() { pthread_rwlock_destroy(&__l); }
+	shared_mutex(const shared_mutex &) = delete;
+	shared_mutex &operator=(const shared_mutex &) = delete;
+	void lock() { pthread_rwlock_wrlock(&__l); }
+	bool try_lock() { return pthread_rwlock_trywrlock(&__l) == 0; }
+	void unlock() { pthread_rwlock_unlock(&__l); }
+	void lock_shared() { pthread_rwlock_rdlock(&__l); }
+	bool try_lock_shared() { return pthread_rwlock_tryrdlock(&__l) == 0; }
+	void unlock_shared() { pthread_rwlock_unlock(&__l); }
+};
+typedef shared_mutex shared_timed_mutex;
+template <class M>
+class shared_lock {
+	M *__m;
+	bool __owns;
+
+public:
+	shared_lock() noexcept : __m(nullptr), __owns(false) {}
+	explicit shared_lock(M &m) : __m(&m), __owns(true) { m.lock_shared(); }
+	shared_lock(M &m, defer_lock_t) noexcept : __m(&m), __owns(false) {}
+	shared_lock(const shared_lock &) = delete;
+	~shared_lock() {
+		if (__owns)
+			__m->unlock_shared();
+	}
+	void lock() {
+		__m->lock_shared();
+		__owns = true;
+	}
+	void unlock() {
+		__m->unlock_shared();
+		__owns = false;
+	}
+	bool owns_lock() const noexcept { return __owns; }
+};
+}
+#endif
+`
+	sysHeaders["thread"] = `#ifndef __CC_THREAD
+#define __CC_THREAD
+#include <pthread.h>
+#include <sched.h>
+#include <unistd.h>
+#include <utility>
+namespace std {
+class thread {
+	pthread_t __t;
+	bool __joinable;
+	template <class L>
+	static void *__run(void *p) {
+		L *l = static_cast<L *>(p);
+		(*l)();
+		delete l;
+		return nullptr;
+	}
+	template <class L>
+	void __start(L l) {
+		L *p = new L(l);
+		pthread_create(&__t, nullptr, &__run<L>, p);
+		__joinable = true;
+	}
+
+public:
+	class id {
+		pthread_t __id;
+		bool __set;
+
+	public:
+		id() noexcept : __id(), __set(false) {}
+		explicit id(pthread_t t) : __id(t), __set(true) {}
+		bool operator==(const id &o) const noexcept { return __set == o.__set && (!__set || pthread_equal(__id, o.__id)); }
+		bool operator!=(const id &o) const noexcept { return !(*this == o); }
+	};
+	typedef pthread_t native_handle_type;
+	thread() noexcept : __t(), __joinable(false) {}
+	template <class F, class... A>
+	explicit thread(F f, A... a) : __t(), __joinable(false) {
+		__start([=]() { f(a...); });
+	}
+	thread(const thread &) = delete;
+	thread &operator=(const thread &) = delete;
+	thread(thread &&o) noexcept : __t(o.__t), __joinable(o.__joinable) { o.__joinable = false; }
+	thread &operator=(thread &&o) noexcept {
+		__t = o.__t;
+		__joinable = o.__joinable;
+		o.__joinable = false;
+		return *this;
+	}
+	~thread() {}
+	bool joinable() const noexcept { return __joinable; }
+	void join() {
+		pthread_join(__t, nullptr);
+		__joinable = false;
+	}
+	void detach() {
+		pthread_detach(__t);
+		__joinable = false;
+	}
+	id get_id() const noexcept { return __joinable ? id(__t) : id(); }
+	native_handle_type native_handle() { return __t; }
+	static unsigned hardware_concurrency() noexcept {
+		long n = sysconf(_SC_NPROCESSORS_ONLN);
+		return n > 0 ? unsigned(n) : 1;
+	}
+};
+namespace this_thread {
+inline void yield() noexcept { sched_yield(); }
+inline thread::id get_id() noexcept { return thread::id(pthread_self()); }
+}
+}
+#endif
+`
 }

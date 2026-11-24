@@ -1788,9 +1788,20 @@ func (p *parser) typeArgAhead() bool {
 	case p.isAt(n, "::") && p.pattern > 0 && !p.is("typename"):
 		return false // a member of a type that depends on a parameter: a value
 	case p.isAt(n, "("):
-		return p.isAt(n+1, ")") || p.isAt(n+1, "*") || p.isAt(n+1, "&") || p.isAt(n+1, "&&") || p.isAt(n+1, "...") || p.isTypeStart(n+1)
+		return p.isAt(n+1, ")") || p.isAt(n+1, "*") || p.isAt(n+1, "&") || p.isAt(n+1, "&&") || p.isAt(n+1, "...") || p.isTypeStart(n+1) || p.typePackAt(n+1)
 	}
 	return true
+}
+
+// typePackAt reports whether the token at offset i names a pack of
+// types.
+func (p *parser) typePackAt(i int) bool {
+	t := p.peekAt(i)
+	if t.kind != tkIdent {
+		return false
+	}
+	s := p.lookup(t.text)
+	return s != nil && s.kind == symPack && !s.isParamPack
 }
 
 // debugSFINAE prints the errors that are not reported because they are

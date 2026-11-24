@@ -264,6 +264,8 @@ type symbol struct {
 	lateSc      *scope    // the scope late is parsed in, if not its own
 	synth       func()    // makes its (implicit) definition, when it is used
 	queued      bool
+	owner       *funcDecl // a local's or parameter's function
+	capInit     expr      // a lambda's initialized capture: what initializes it
 }
 
 type funcDecl struct {

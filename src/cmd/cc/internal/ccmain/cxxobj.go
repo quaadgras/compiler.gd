@@ -530,6 +530,7 @@ func convFuncs(t *ctype) []*symbol {
 // towards the type t that is not its class: nil if it has none that
 // can be.
 func (p *parser) convertClass(e expr, t *ctype, at pos) expr {
+	p.complete(e.ty())
 	best, bestRank := (*symbol)(nil), rkNone
 	oq := e.ty().q
 	target := t
@@ -691,6 +692,9 @@ func (p *parser) overloaded(op string, xs []expr, at pos) expr {
 	if !any {
 		return nil
 	}
+	for _, x := range xs {
+		p.complete(x.ty())
+	}
 	name := "operator" + op
 	members, others := p.operatorSets(name, xs)
 	var cands []candidate
@@ -742,6 +746,7 @@ func (p *parser) overloaded(op string, xs []expr, at pos) expr {
 // classAssign is the assignment x op y, where x is of class type.
 func (p *parser) classAssign(op string, x, y expr, at pos) expr {
 	t := x.ty()
+	p.complete(t)
 	ci := classOf(t)
 	if pr, ok := x.(*classPR); ok {
 		x = p.materializePR(pr)

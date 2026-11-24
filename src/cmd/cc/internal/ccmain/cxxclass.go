@@ -338,10 +338,12 @@ type funcState struct {
 	temps                 []*tempObj
 	extend                *[]*symbol
 	staticInit, transTime int
+	lambda                *lambdaInfo
 }
 
 func (p *parser) saveFunc() funcState {
-	s := funcState{p.fn, p.this, p.sc, p.breakOK, p.continueOK, p.sw, p.stmtExprs, p.condDepth, p.pendingVLA, p.temps, p.extend, p.staticInit, p.translationTime}
+	s := funcState{p.fn, p.this, p.sc, p.breakOK, p.continueOK, p.sw, p.stmtExprs, p.condDepth, p.pendingVLA, p.temps, p.extend, p.staticInit, p.translationTime, p.lambda}
+	p.lambda = nil
 	p.fn, p.this, p.breakOK, p.continueOK, p.sw, p.stmtExprs, p.condDepth, p.pendingVLA, p.temps, p.extend = nil, nil, 0, 0, nil, 0, 0, nil, nil, nil
 	p.staticInit, p.translationTime = 0, 0
 	return s
@@ -350,6 +352,7 @@ func (p *parser) saveFunc() funcState {
 func (p *parser) restoreFunc(s funcState) {
 	p.fn, p.this, p.sc, p.breakOK, p.continueOK, p.sw, p.stmtExprs, p.condDepth, p.pendingVLA, p.temps, p.extend = s.fn, s.this, s.sc, s.breakOK, s.continueOK, s.sw, s.stmtExprs, s.condDepth, s.pendingVLA, s.temps, s.extend
 	p.staticInit, p.translationTime = s.staticInit, s.transTime
+	p.lambda = s.lambda
 }
 
 // Class definitions.
@@ -842,6 +845,9 @@ func (p *parser) completeClass(t *ctype) {
 			if lf.sym.sc.kind != skClass {
 				lf.sym.lateSc = sc // a friend: in the class's scope
 			}
+			if lf.sym.used {
+				p.use(lf.sym) // used before its body was kept (a nested class's)
+			}
 		}
 		for _, v := range ci.vfuncs {
 			p.use(v) // the table has its address
@@ -1240,6 +1246,14 @@ func (p *parser) specialMember(s specs, at pos) {
 }
 
 func (p *parser) thisObject(at pos) expr {
+	if lam := p.lambda; lam != nil {
+		// In a lambda: the this it captured.
+		if lam.classThis == nil {
+			p.errorAt(at, "invalid use of a member in a lambda outside a non-static member function")
+		}
+		ptr := p.rvalue(p.captured(lam.classThis, at))
+		return &deref{node{ptr.ty().elem, at}, ptr}
+	}
 	if p.this == nil {
 		p.errorAt(at, "invalid use of a member outside a non-static member function")
 	}
@@ -1342,6 +1356,7 @@ func (p *parser) cxxMember(x expr, arrow bool, at pos) expr {
 // memberCall is the call of x's member function name with args: nil if
 // x's class has none.
 func (p *parser) memberCall(x expr, name string, args []expr, at pos) expr {
+	p.complete(x.ty())
 	ci := classOf(x.ty())
 	if ci == nil {
 		return nil

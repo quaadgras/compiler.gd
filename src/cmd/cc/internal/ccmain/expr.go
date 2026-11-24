@@ -1278,6 +1278,9 @@ func (p *parser) primary() expr {
 			p.pos--
 			return p.cxxName(at)
 		}
+		if t.text == "[" && p.cxx && !p.is("[") {
+			return p.lambdaExpr(at)
+		}
 		if t.text == "(" {
 			for p.is("__extension__") && !p.isTypeStart(1) {
 				p.next()
@@ -1329,6 +1332,9 @@ func (p *parser) primary() expr {
 		if p.cxx {
 			switch t.text {
 			case "this":
+				if p.lambda != nil {
+					return p.addressOf(p.thisObject(at), at)
+				}
 				if p.this == nil {
 					p.errorAt(at, "invalid use of this outside a non-static member function")
 				}

@@ -70,11 +70,12 @@ type parser struct {
 	pattern    int        // parsing a template's pattern: its parameters are placeholders
 	packOn     bool       // parsing a pack expansion's pattern, for the element packI
 	packI      int
-	gtHalf     int       // the ">>" token whose first ">" has closed template brackets, or -1
-	explicitT  []targ    // the explicit template arguments of the call being resolved
-	tmplSuffix string    // the template arguments, mangled, of the function being instantiated
-	instTag    *ctype    // the class template instance whose definition is being parsed
-	pending    []*symbol // used, and not yet defined: template instances' functions
+	gtHalf     int         // the ">>" token whose first ">" has closed template brackets, or -1
+	lambda     *lambdaInfo // the lambda whose body is being parsed
+	explicitT  []targ      // the explicit template arguments of the call being resolved
+	tmplSuffix string      // the template arguments, mangled, of the function being instantiated
+	instTag    *ctype      // the class template instance whose definition is being parsed
+	pending    []*symbol   // used, and not yet defined: template instances' functions
 	draining   bool
 	tids       map[tidKey]tidVal
 	direct     bool          // the next call of a virtual function is not virtual: its name is qualified
@@ -1374,6 +1375,9 @@ func (p *parser) nestedDeclarator() bool {
 	if t.kind == tkPunct {
 		return t.text == "*" || t.text == "(" || t.text == "^" || t.text == "[" || p.cxx && (t.text == "&" || t.text == "&&")
 	}
+	if p.cxx && p.typePackAt(k) {
+		return false // a pack of parameter types
+	}
 	return !p.isTypeStart(k)
 }
 
@@ -1548,7 +1552,7 @@ func (p *parser) evalVLA(e expr) {
 // newLocal makes an unnamed local of the current function.
 func (p *parser) newLocal(what string, t *ctype, at pos) *symbol {
 	p.symN++
-	sym := &symbol{name: fmt.Sprintf("%s.%d", what, p.symN), kind: symVar, t: t, p: at}
+	sym := &symbol{name: fmt.Sprintf("%s.%d", what, p.symN), kind: symVar, t: t, p: at, owner: p.fn}
 	p.fn.locals = append(p.fn.locals, sym)
 	return sym
 }
@@ -1976,6 +1980,7 @@ func (p *parser) declarator2C(name string, t *ctype, s specs, a attrs, at pos) *
 		} else if global {
 			p.u.statics = append(p.u.statics, sym)
 		} else {
+			sym.owner = p.fn
 			p.fn.locals = append(p.fn.locals, sym)
 		}
 	}
@@ -2212,6 +2217,7 @@ func (p *parser) defineFunc(sym *symbol, ft *funcType, name string, at pos, inli
 		if p.cxx && nontrivialABI(pt) {
 			ps.noCopy, ps.addr = true, true
 		}
+		ps.owner = f
 		f.params = append(f.params, ps)
 	}
 	if ft.recv != nil {

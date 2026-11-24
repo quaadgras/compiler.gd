@@ -817,7 +817,11 @@ func (p *parser) autoType(t *ctype, e expr, at pos) *ctype {
 		}
 		return replaceAuto(t, d.unqual().qualified(d.q&^t.elem.q))
 	}
-	d = p.rvalue(e).ty().unqual()
+	if pr, ok := e.(*classPR); ok {
+		d = pr.t.unqual() // its type only: it is not made here
+	} else {
+		d = valueType(e)
+	}
 	if t.kind == kPtr && d.kind == kPtr {
 		// auto *p = q: auto is what q points to.
 		return replaceAuto(t, d.elem.unqual().qualified(d.elem.q&^t.elem.q))
@@ -1108,7 +1112,20 @@ func (p *parser) cxxName(at pos) expr {
 		p.pos += n
 		a := &adlRef{node{tVoid, at}, name, funcSet(sym), p.templateArgs(), in != nil}
 		if !p.is("(") {
-			p.errorAt(at, "a function template's name with arguments is only called here")
+			// Not called: the instance its arguments name.
+			for _, s := range a.set {
+				if s.tmpl == nil {
+					continue
+				}
+				if targs, ok := p.deduce(s.tmpl, a.targs, nil, at); ok {
+					if inst := p.instFunc(s.tmpl, targs, at); inst != nil {
+						inst.used = true
+						p.use(inst)
+						return &varRef{node{inst.t, at}, inst}
+					}
+				}
+			}
+			p.errorAt(at, "no instance of the function template %q for these arguments", name)
 		}
 		return a
 	}
@@ -1162,6 +1179,9 @@ func (p *parser) cxxName(at pos) expr {
 		return &adlRef{node{tVoid, at}, name, funcSet(sym), nil, in != nil}
 	}
 	p.use(sym)
+	if p.lambda != nil && sym.kind == symVar && !sym.global && sym.owner != p.fn && (sym.owner != nil || sym.capInit != nil) {
+		return p.captured(sym, at) // an enclosing function's local
+	}
 	v := &varRef{node{sym.t, at}, sym}
 	if in != nil && sym.kind == symFunc {
 		if p.qualified == nil {

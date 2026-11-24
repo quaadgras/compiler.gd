@@ -402,10 +402,27 @@ func (p *parser) statement() stmt {
 			p.next()
 			rt := p.fn.sym.t.fn.ret
 			if p.accept(";") {
+				if rt.isAuto {
+					p.fn.sym.t.fn.ret = tVoid
+				}
 				return &returnStmt{}
 			}
 			mark := len(p.temps)
-			x := p.expr()
+			var x expr
+			if p.cxx && p.is("{") {
+				x = p.braceList()
+			} else {
+				x = p.expr()
+			}
+			if rt.isAuto {
+				// A deduced return type: this expression's.
+				if pr, ok := x.(*classPR); ok {
+					rt = pr.t.unqual()
+				} else {
+					rt = valueType(x)
+				}
+				p.fn.sym.t.fn.ret = rt
+			}
 			p.expect(";")
 			if rt.kind == kVoid {
 				x = p.fullExpr(mark, p.rvalueVoid(x))
