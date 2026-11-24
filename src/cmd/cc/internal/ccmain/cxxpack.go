@@ -85,20 +85,29 @@ scan:
 				}
 				depth--
 			case "<":
-				if angle && depth == 0 {
+				// A template's bracket: always in template arguments,
+				// elsewhere after a template's name.
+				if depth == 0 && (angle || p.templateNameAt(j-1)) {
 					adepth++
 				}
 			case ">":
-				if angle && depth == 0 {
+				if depth == 0 {
 					if adepth == 0 {
-						break scan
+						if angle {
+							break scan
+						}
+						continue
 					}
 					adepth--
 				}
 			case ">>":
-				if angle && depth == 0 {
+				if depth == 0 {
 					if adepth < 2 {
-						break scan
+						if angle {
+							break scan
+						}
+						adepth = 0
+						continue
 					}
 					adepth -= 2
 				}
@@ -345,4 +354,21 @@ func (p *parser) packInBraces() bool {
 			}
 		}
 	}
+}
+
+// templateNameAt reports whether the token at index j (not an offset)
+// names a template: a "<" after it is a bracket.
+func (p *parser) templateNameAt(j int) bool {
+	if j < 0 {
+		return false
+	}
+	t := p.toks[j]
+	if t.kind != tkIdent {
+		return false
+	}
+	s := p.lookup(t.text)
+	if s == nil {
+		return false
+	}
+	return s.kind == symTemplate || s.instOf != nil || s.kind == symFunc && hasTemplate(funcSet(s))
 }

@@ -974,8 +974,16 @@ func (p *parser) directInitAhead() bool {
 			for p.isAt(m, "*") || p.isAt(m, "&") || p.isAt(m, "&&") {
 				m++
 			}
-			if p.isAt(m, ")") || p.isTypeStart(m) {
-				return false // T(), T(U): a function type
+			if p.isAt(m, ")") && m == k+1 {
+				// T(): a parameter of function type, if a parameter's
+				// end follows; else a temporary.
+				return !p.isAt(m+1, ",") && !p.isAt(m+1, ")")
+			}
+			if p.isAt(m, ")") {
+				return false // T(*), T(&): a parameter's type
+			}
+			if p.isTypeStart(m) {
+				return false // T(U): a function type
 			}
 			if t := p.peekAt(m); t.kind == tkIdent && p.isAt(m+1, ")") && p.lookup(t.text) == nil {
 				return false
@@ -1344,6 +1352,22 @@ func (p *parser) castAhead() bool {
 	if p.isAt(n, "(") {
 		if _, m := p.memPtrAhead(n + 1); m > 0 {
 			return true // (T (C::*)(...))
+		}
+		if p.isAt(n+1, ")") && p.isAt(n+2, ")") {
+			// (T()): a cast to a function type, unless nothing that it
+			// could convert follows.
+			t := p.peekAt(n + 3)
+			if t.kind == tkEOF {
+				return false
+			}
+			if t.kind == tkPunct {
+				switch t.text {
+				case "(", "+", "-", "*", "&", "!", "~", "++", "--", "[", "::":
+				default:
+					return false
+				}
+			}
+			return true
 		}
 		return p.isAt(n+1, "*") || p.isAt(n+1, "&") || p.isAt(n+1, "^") || p.isAt(n+1, ")") || p.isTypeStart(n+1)
 	}

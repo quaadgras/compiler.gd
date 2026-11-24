@@ -78,6 +78,7 @@ type parser struct {
 	pmfNulls      map[*record]*symbol
 	noPM          int       // parsing the right operand of .* or ->*
 	castingMemPtr bool      // converting a pointer to member in a cast
+	instDepth     int       // class template instances being defined, one in another
 	explicitT     []targ    // the explicit template arguments of the call being resolved
 	tmplSuffix    string    // the template arguments, mangled, of the function being instantiated
 	instTag       *ctype    // the class template instance whose definition is being parsed

@@ -559,6 +559,17 @@ func (p *parser) staticMember(name string, t *ctype, s specs, at pos) {
 	if !p.is("=") && !p.is("{") {
 		return
 	}
+	if t.kind == kStruct {
+		// An object of a class: constructed when the program starts.
+		p.complete(t)
+		p.staticInit++
+		done := p.classInit(sym, s, at)
+		p.staticInit--
+		if done {
+			sym.defined, sym.storage, sym.comdat = true, sAuto, true
+			return
+		}
+	}
 	p.accept("=")
 	p.staticInit++
 	p.translationTime++

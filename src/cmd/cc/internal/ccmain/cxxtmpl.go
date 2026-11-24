@@ -38,6 +38,7 @@ type targ struct {
 	pack   []targ
 	dep    bool // a value that depends on a template parameter (in a pattern)
 	param  int  // dep: the parameter it is, or -1
+	packV  bool // dep: a pack of values, expanded
 }
 
 type template struct {
@@ -898,6 +899,9 @@ func (p *parser) templateArgs() []targ {
 			if a.t != nil && a.t.kind == kTParam {
 				a.t = &ctype{kind: kTParam, n: a.t.n, isPackT: true}
 			}
+			if a.isVal && a.dep {
+				a.packV = true
+			}
 		}
 		args = append(args, a)
 		if !p.accept(",") {
@@ -942,7 +946,19 @@ func (p *parser) fullArgs(tm *template, given []targ, at pos) []targ {
 		case tp.pack:
 			var pack []targ
 			if i < len(given) {
-				pack = append(pack, given[i:]...)
+				pack = append(pack, flatArgs(given[i:])...)
+			}
+			if tp.kind == 'v' {
+				// Values of the parameter's type, whatever type each
+				// argument's expression had.
+				if vt := p.valueParamType(tm, i, args); vt != nil {
+					for k := range pack {
+						if pack[k].isVal && !pack[k].dep {
+							pack[k].vt = vt
+							pack[k].v = wrap(vt, pack[k].v)
+						}
+					}
+				}
 			}
 			args = append(args, targ{isPack: true, pack: pack})
 			return args
@@ -1063,6 +1079,11 @@ func (p *parser) complete(t *ctype) {
 	if in.busy || in.done {
 		return
 	}
+	if p.instDepth > 400 {
+		p.errorf("template instantiation depth exceeds 400 (instantiating %s)", in.t.rec.mtag)
+	}
+	p.instDepth++
+	defer func() { p.instDepth-- }()
 	in.busy = true
 	tm, args := p.selectSpec(in.tmpl, in.args)
 	if tm.hasBody {
@@ -1182,6 +1203,14 @@ func (p *parser) unifyArgs(pat, args []targ, bound []targ, set []bool) bool {
 			// A pack: the rest.
 			k := int(pa.t.n)
 			if k < len(bound) {
+				bound[k] = targ{isPack: true, pack: append([]targ(nil), args[min(i, len(args)):]...)}
+				set[k] = true
+			}
+			return true
+		}
+		if pa.isVal && pa.dep && pa.packV {
+			// A pack of values: the rest.
+			if k := pa.param; k >= 0 && k < len(bound) {
 				bound[k] = targ{isPack: true, pack: append([]targ(nil), args[min(i, len(args)):]...)}
 				set[k] = true
 			}
@@ -1620,10 +1649,28 @@ func (p *parser) instFunc(tm *template, args []targ, at pos) *symbol {
 // call with args: nil if there is none.
 func (p *parser) instantiateFor(sym *symbol, args []expr, at pos) *symbol {
 	targs, ok := p.deduce(sym.tmpl, p.explicitT, args, at)
+	if debugSFINAE {
+		pat := p.funcPattern(sym.tmpl)
+		var ps []string
+		if pat != nil {
+			for _, pt := range pat.params {
+				ps = append(ps, pt.String())
+			}
+		}
+		println("deduce", sym.src, "ok:", ok, "pattern:", strings.Join(ps, ", "), "args:", argsKey(targs))
+	}
 	if !ok {
 		return nil
 	}
-	return p.instFunc(sym.tmpl, targs, at)
+	inst := p.instFunc(sym.tmpl, targs, at)
+	if debugSFINAE {
+		if inst == nil {
+			println("  no instance")
+		} else {
+			println("  instance:", inst.name, inst.t.String(), len(inst.t.fn.params), len(inst.t.fn.packs))
+		}
+	}
+	return inst
 }
 
 // use notes that the function or variable sym is used: if it is a

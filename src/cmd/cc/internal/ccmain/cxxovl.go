@@ -242,7 +242,7 @@ func (p *parser) convRank(a expr, pt *ctype) int {
 			return rkQual
 		}
 		if pt.elem.kind == kVoid && vt.elem.kind != kFunc && pt.elem.q&vt.elem.q == vt.elem.q {
-			return rkConv
+			return rkConv + 2 // after a conversion to a base
 		}
 		if isBaseOf(pt.elem, vt.elem) && pt.elem.q&vt.elem.q == vt.elem.q {
 			return rkConv
@@ -265,6 +265,9 @@ func (p *parser) convRank(a expr, pt *ctype) int {
 		if vt.isArith() || vt.isPtr() || vt.kind == kNullptr {
 			if vt.enum != nil && vt.enum.scoped {
 				return rkNone
+			}
+			if vt.isPtr() || vt.kind == kNullptr {
+				return rkConv + 3 // a pointer to bool: after its other conversions
 			}
 			return rkConv
 		}
