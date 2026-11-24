@@ -540,7 +540,11 @@ func (p *parser) bindRef(t *ctype, e expr, at pos, what string) expr {
 	}
 	// A temporary of the referred type, initialized from e.
 	var tmp expr
-	if to.kind == kStruct {
+	if _, isPR := e.(*classPR); to.kind == kStruct && same && !isPR {
+		// A value of the class already (a call's, a conditional's): it
+		// is the temporary.
+		tmp = p.materialize(p.baseObject(e, to, at), to)
+	} else if to.kind == kStruct {
 		tmp = p.classTemp(to, e, at, what)
 	} else {
 		tmp = p.materialize(p.initConvert(e, to.unqual(), at, what), to)
@@ -557,6 +561,16 @@ func (p *parser) initConvert(e expr, t *ctype, at pos, what string) expr {
 		} else {
 			return p.fromList(l, t, at)
 		}
+	}
+	if _, ok := e.(*memFnRef); ok || memPtrOf(t) != nil && !t.isRef() {
+		if c := p.toMemPtr(e, t, at); c != nil {
+			e = c
+			if isPMF(t) {
+				return p.rvalue(e)
+			}
+		}
+	} else if memPtrOf(e.ty()) != nil && t.kind == kBool {
+		return p.memPtrTruth(e, at)
 	}
 	if t.isRef() {
 		return p.bindRef(t, e, at, what)
@@ -579,6 +593,9 @@ func sameType(a, b *ctype) bool {
 	if a.kind != b.kind || a.q != b.q || a.enum != b.enum || a.ref != b.ref {
 		return false
 	}
+	if a.mp != nil || b.mp != nil {
+		return a.mp != nil && b.mp != nil && sameType(a.mp.cls, b.mp.cls) && sameType(a.mp.t, b.mp.t)
+	}
 	switch a.kind {
 	case kBitInt, kUBitInt:
 		return a.n == b.n
@@ -589,7 +606,7 @@ func sameType(a, b *ctype) bool {
 	case kStruct:
 		return a.rec == b.rec
 	case kFunc:
-		return sameType(a.fn.ret, b.fn.ret) && sameParams(a.fn, b.fn)
+		return a.fn.thisQ == b.fn.thisQ && sameType(a.fn.ret, b.fn.ret) && sameParams(a.fn, b.fn)
 	}
 	return true
 }
@@ -708,6 +725,11 @@ func (p *parser) castTo(e expr, t *ctype, at pos, how string) expr {
 	}
 	if t.kind == kVoid {
 		return &cast{node{tVoid, at}, p.rvalueVoid(e)}
+	}
+	if _, ok := e.(*memFnRef); ok || memPtrOf(t) != nil || memPtrOf(e.ty()) != nil && (t.kind == kBool || isPMF(e.ty())) {
+		if c := p.toMemPtr(e, t, at); c != nil {
+			return c
+		}
 	}
 	if t.kind == kStruct {
 		if sameType(t.unqual(), e.ty().unqual()) {
@@ -1158,7 +1180,19 @@ func (p *parser) cxxName(at pos) expr {
 			return &depConst{intConst{node{sym.t, at}, 0}, sym.depParam}
 		}
 		return p.intc(sym.val, sym.t, at)
-	case symTemplate, symPack:
+	case symTemplate:
+		if sym.tmpl.kind == 'c' && (p.is("(") || p.is("{")) {
+			// A class template's name, with no arguments: they are
+			// deduced from a constructor's.
+			end := ")"
+			if p.next().text == "{" {
+				end = "}"
+			}
+			args := p.exprList(end)
+			return p.construct(p.ctad(sym.tmpl, args, at), args, at, true)
+		}
+		p.errorAt(at, "unexpected template name %q", name)
+	case symPack:
 		p.errorAt(at, "unexpected template name %q", name)
 	case symTypedef:
 		if p.is("(") || p.is("{") {
@@ -1250,6 +1284,9 @@ func (p *parser) declAhead() bool {
 		return false
 	case p.isAt(n, "("):
 		// T(x); and T(*p)... declare; T(1), T(a, b), T(x).f() do not.
+		if _, m := p.memPtrAhead(n + 1); m > 0 {
+			return true // T (C::*name)...
+		}
 		k := n + 1
 		for p.isAt(k, "*") || p.isAt(k, "&") || p.isAt(k, "(") {
 			k++
@@ -1308,6 +1345,9 @@ func (p *parser) cxxUnary(t token, at pos) (expr, bool) {
 	}
 	if t.kind != tkPunct {
 		return nil, false
+	}
+	if t.text == "&" {
+		return p.memberAddress(at)
 	}
 	switch t.text {
 	case "+", "-", "~", "!", "*", "++", "--":

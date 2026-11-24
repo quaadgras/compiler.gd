@@ -141,6 +141,9 @@ func (p *parser) constructAt(dst expr, t *ctype, args []expr, at pos, mode int) 
 		}
 	}
 	set := ctors(t)
+	if isPMF(t) && len(args) == 1 {
+		return &assign{node{t, at}, "=", dst, p.rvalue(p.toMemPtr(args[0], t, at)), t}
+	}
 	if set == nil {
 		// A struct that is being defined, or that has no class to it.
 		switch {
@@ -380,6 +383,20 @@ func (p *parser) nrvo(f *funcDecl) {
 // initializes it otherwise than C. It reports whether it did.
 func (p *parser) classInit(sym *symbol, s specs, at pos) bool {
 	t := sym.t
+	if isPMF(t) && (p.is("=") && !p.isAt(1, "{") || p.is("(")) {
+		// A pointer to member function: from &C::f, another, or nullptr.
+		paren := p.next().text == "("
+		e := p.initExpr()
+		if paren {
+			p.expect(")")
+		}
+		sym.init = &initializer{items: []initItem{{t: t, x: p.rvalue(p.toMemPtr(e, t, at))}}}
+		sym.defined = true
+		if sym.storage == sExtern {
+			sym.storage = sAuto
+		}
+		return true
+	}
 	ci := classOf(t)
 	if ci == nil || !ci.complete {
 		return false
@@ -803,6 +820,9 @@ func (p *parser) overloaded(op string, xs []expr, at pos) expr {
 func (p *parser) classAssign(op string, x, y expr, at pos) expr {
 	t := x.ty()
 	p.complete(t)
+	if isPMF(t) && op == "=" {
+		return &assign{node{t.unqual(), at}, "=", x, p.rvalue(p.toMemPtr(y, t, at)), t}
+	}
 	ci := classOf(t)
 	if pr, ok := x.(*classPR); ok {
 		x = p.materializePR(pr)
@@ -850,6 +870,9 @@ func (p *parser) classAssign(op string, x, y expr, at pos) expr {
 
 // boolOf is e, of class type, converted to bool where a condition is.
 func (p *parser) boolOf(e expr, at pos) expr {
+	if isPMF(e.ty()) {
+		return p.rvalue(p.memPtrTruth(e, at))
+	}
 	c := p.convertClass(e, tBool, at)
 	if c == nil {
 		p.errorAt(at, "used %s where a scalar is required", e.ty())

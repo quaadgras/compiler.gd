@@ -1124,6 +1124,10 @@ func (p *parser) postfix(x expr) expr {
 	for {
 		at := p.here()
 		switch {
+		case p.cxx && (p.is(".") || p.is("->")) && p.isAt(1, "*"):
+			arrow := p.next().text == "->"
+			p.next()
+			x = p.memberPointerAccess(x, arrow, at)
 		case p.cxx && (p.is(".") || p.is("->")):
 			x = p.cxxMember(x, p.next().text == "->", at)
 		case p.cxx && (p.is("++") || p.is("--")) && overloadable(x.ty()):
@@ -1493,6 +1497,9 @@ func (p *parser) generic(at pos) expr {
 // rvalue is e's value: lvalue conversion, and arrays and functions
 // decayed to pointers.
 func (p *parser) rvalue(e expr) expr {
+	if m, ok := e.(*memFnRef); ok {
+		e = p.pmfConst(m.set[0], m.p)
+	}
 	if _, ok := e.(*initList); ok {
 		p.errorAt(e.at(), "a braced list is not an expression here")
 	}

@@ -174,6 +174,15 @@ func (m *mangler) typ(t *ctype, raw bool) {
 		}
 		return
 	}
+	if mp := memPtrOf(t); mp != nil && t.kind != kMemPtr {
+		m.b.WriteString("M")
+		m.typ(mp.cls, raw)
+		if mp.t.kind == kFunc && mp.t.fn.thisQ&qConst != 0 {
+			m.b.WriteString("K")
+		}
+		m.typ(mp.t, raw)
+		return
+	}
 	if t.enum != nil && t.enum.tag != "" {
 		m.named(t.enum.sc, sourceName(t.enum.tag), raw)
 		return
@@ -183,7 +192,7 @@ func (m *mangler) typ(t *ctype, raw bool) {
 	case kTParam:
 		m.b.WriteString("T" + itoa(t.n) + "_")
 		return
-	case kDependent:
+	case kDependent, kMemPtr:
 		m.b.WriteString("u9dependent")
 		return
 	case kBitInt:

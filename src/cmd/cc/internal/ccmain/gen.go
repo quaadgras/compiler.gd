@@ -266,7 +266,7 @@ func (g *gen) unit() {
 	// Compound literals at file scope first: initializers use them.
 	var lits, rest []*symbol
 	for _, s := range g.u.statics {
-		if strings.HasPrefix(s.name, "complit.") {
+		if strings.HasPrefix(s.name, "complit.") || strings.HasPrefix(s.name, "pmf.") {
 			lits = append(lits, s)
 		} else {
 			rest = append(rest, s)

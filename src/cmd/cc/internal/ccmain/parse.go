@@ -73,10 +73,13 @@ type parser struct {
 	gtHalf     int                // the ">>" token whose first ">" has closed template brackets, or -1
 	lambda     *lambdaInfo        // the lambda whose body is being parsed
 	typeinfos  map[string]*symbol // the type_info objects typeid made
-	explicitT  []targ             // the explicit template arguments of the call being resolved
-	tmplSuffix string             // the template arguments, mangled, of the function being instantiated
-	instTag    *ctype             // the class template instance whose definition is being parsed
-	pending    []*symbol          // used, and not yet defined: template instances' functions
+	pmfTypes   map[string]*ctype
+	pmfConsts  map[*symbol]*symbol
+	pmfNulls   map[*record]*symbol
+	explicitT  []targ    // the explicit template arguments of the call being resolved
+	tmplSuffix string    // the template arguments, mangled, of the function being instantiated
+	instTag    *ctype    // the class template instance whose definition is being parsed
+	pending    []*symbol // used, and not yet defined: template instances' functions
 	draining   bool
 	tids       map[tidKey]tidVal
 	direct     bool          // the next call of a virtual function is not virtual: its name is qualified
@@ -1258,7 +1261,23 @@ func (p *parser) specQualType() *ctype {
 func (p *parser) declarator(base *ctype) (string, *ctype, attrs) {
 	a := p.attributes()
 	t := base
-	for p.is("*") || p.is("^") || p.cxx && (p.is("&") || p.is("&&")) {
+	for {
+		if p.cxx {
+			if cls, n := p.memPtrAhead(0); n > 0 {
+				// C::*: a pointer to member.
+				p.pos += n
+				t = p.memPtrTo(cls, t)
+				for p.is("const") || p.is("volatile") {
+					if p.next().text == "const" {
+						t = t.qualified(qConst)
+					}
+				}
+				continue
+			}
+		}
+		if !(p.is("*") || p.is("^") || p.cxx && (p.is("&") || p.is("&&"))) {
+			break
+		}
 		if op := p.next().text; op[0] == '&' {
 			t = refTo(t, uint8(len(op)))
 			a.merge(p.attributes())
@@ -1398,6 +1417,11 @@ func (p *parser) nestedDeclarator() bool {
 	}
 	if p.cxx && p.typePackAt(k) {
 		return false // a pack of parameter types
+	}
+	if p.cxx {
+		if _, n := p.memPtrAhead(k); n > 0 {
+			return true // (C::*name)
+		}
 	}
 	return !p.isTypeStart(k)
 }

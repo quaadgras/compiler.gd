@@ -158,6 +158,9 @@ func (p *parser) cxxBinary(at pos, op string, x, y expr) expr {
 		y = p.rvalueVoid(y)
 		return &binary{node{y.ty().unqual(), at}, ",", p.rvalueVoid(x), y}
 	}
+	if e := p.memPtrCompare(op, x, y, at); e != nil {
+		return e
+	}
 	if overloadable(x.ty()) || overloadable(y.ty()) {
 		if e := p.overloaded(op, []expr{x, y}, at); e != nil {
 			return e

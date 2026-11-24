@@ -61,11 +61,13 @@ type template struct {
 	patArgs []targ // them, with the parameters as placeholders
 
 	// A function template.
-	pat     *funcType // its type, with the parameters as placeholders
-	patDone bool
-	nameAt  int    // the token of its name
-	static  bool   // a static member function
-	convPat *ctype // a conversion function template's type, with the parameters as placeholders
+	pat       *funcType // its type, with the parameters as placeholders
+	patDone   bool
+	nameAt    int         // the token of its name
+	static    bool        // a static member function
+	convPat   *ctype      // a conversion function template's type, with the parameters as placeholders
+	ctorPats  []*funcType // a class template's constructors' types, as patterns
+	ctorsDone bool
 }
 
 // A tinst is an instance of a template.
@@ -93,7 +95,7 @@ func hasTParam(t *ctype) bool {
 		return false
 	}
 	switch t.kind {
-	case kTParam, kDependent:
+	case kTParam, kDependent, kMemPtr:
 		return true
 	case kArray:
 		return t.depN > 0 || hasTParam(t.elem)
@@ -1023,35 +1025,7 @@ func (p *parser) templateID(tm *template, j int, at pos) (*symbol, int) {
 		}
 		return &symbol{name: tm.name, src: tm.name, kind: symTypedef, t: t}, end
 	}
-	args := p.fullArgs(tm, given, at)
-	key := argsKey(args)
-	in := tm.insts[key]
-	if in == nil {
-		in = &tinst{tmpl: tm, args: args}
-		tm.insts[key] = in
-		switch tm.kind {
-		case 'c':
-			in.t = &ctype{kind: kStruct, rec: &record{tag: tm.name, id: p.nextRecord(), sc: tm.sc, inst: in}}
-			in.t.rec.mtag = sourceName(tm.name) + "I" + key + "E"
-		case 'a':
-			sc := p.bindParams(tm, args)
-			p.replay(tm.start, sc, func() { p.usingDecl() })
-			if s := sc.vars[tm.name]; s != nil {
-				in.t = s.t
-			}
-		case 'v':
-			sc := p.bindParams(tm, args)
-			p.replay(tm.start, sc, func() { p.topLevel() })
-			in.sym = sc.vars[tm.name]
-			if in.sym != nil && in.sym.kind == symVar {
-				in.sym.name = mangleVar(tm.sc, tm.name+"I"+key+"E")
-				if len(scopeNames(tm.sc)) == 0 {
-					in.sym.name = "_Z" + sourceName(tm.name) + "I" + key + "E"
-				}
-				in.sym.comdat = true
-			}
-		}
-	}
+	in := p.instance(tm, p.fullArgs(tm, given, at))
 	switch tm.kind {
 	case 'c', 'a':
 		if in.t == nil {
@@ -1259,6 +1233,9 @@ func (p *parser) unify(pt, at *ctype, bound []targ, set []bool) bool {
 			return false
 		}
 		return p.unifyArgs(pt.dep.args, flatArgs(in.args), bound, set)
+	case kMemPtr:
+		amp := memPtrOf(at)
+		return amp != nil && p.unify(pt.mp.cls, amp.cls, bound, set) && p.unify(pt.elem, amp.t, bound, set)
 	case kPtr:
 		return at.kind == kPtr && at.ref == pt.ref && at.q&pt.q == pt.q && p.unify(pt.elem, at.elem, bound, set)
 	case kArray:
@@ -1273,7 +1250,7 @@ func (p *parser) unify(pt, at *ctype, bound []targ, set []bool) bool {
 		}
 		return p.unify(pt.elem, at.elem, bound, set)
 	case kFunc:
-		if at.kind != kFunc || len(at.fn.params) != len(pt.fn.params) && !hasPackParam(pt.fn) {
+		if at.kind != kFunc || len(at.fn.params) != len(pt.fn.params) && !hasPackParam(pt.fn) || at.fn.thisQ != pt.fn.thisQ {
 			return false
 		}
 		if !p.unify(pt.fn.ret, at.fn.ret, bound, set) {
@@ -1819,3 +1796,121 @@ var debugSFINAE = os.Getenv("CCDEBUG") == "sfinae"
 
 // debugPanic makes a parse error a panic, with its stack: CCDEBUG=panic.
 var debugPanic = os.Getenv("CCDEBUG") == "panic"
+
+// instance is the instance of the class, alias or variable template tm
+// with the arguments args, which are complete: made if it is new.
+func (p *parser) instance(tm *template, args []targ) *tinst {
+	key := argsKey(args)
+	in := tm.insts[key]
+	if in != nil {
+		return in
+	}
+	in = &tinst{tmpl: tm, args: args}
+	tm.insts[key] = in
+	switch tm.kind {
+	case 'c':
+		in.t = &ctype{kind: kStruct, rec: &record{tag: tm.name, id: p.nextRecord(), sc: tm.sc, inst: in}}
+		in.t.rec.mtag = sourceName(tm.name) + "I" + key + "E"
+	case 'a':
+		sc := p.bindParams(tm, args)
+		p.replay(tm.start, sc, func() { p.usingDecl() })
+		if s := sc.vars[tm.name]; s != nil {
+			in.t = s.t
+		}
+	case 'v':
+		sc := p.bindParams(tm, args)
+		p.replay(tm.start, sc, func() { p.topLevel() })
+		in.sym = sc.vars[tm.name]
+		if in.sym != nil && in.sym.kind == symVar {
+			in.sym.name = mangleVar(tm.sc, tm.name+"I"+key+"E")
+			if len(scopeNames(tm.sc)) == 0 {
+				in.sym.name = "_Z" + sourceName(tm.name) + "I" + key + "E"
+			}
+			in.sym.comdat = true
+		}
+	}
+	return in
+}
+
+// ctad deduces the arguments of the class template tm from the
+// arguments args of a constructor's call, T(args) without template
+// arguments: the instance's type.
+func (p *parser) ctad(tm *template, args []expr, at pos) *ctype {
+	if !tm.ctorsDone {
+		tm.ctorsDone = true
+		// The constructors, found in the class's tokens: each
+		// parameter list is a pattern.
+		i := tm.start
+		for !(p.toks[i].kind == tkPunct && (p.toks[i].text == "{" || p.toks[i].text == ";")) {
+			i++
+		}
+		if p.toks[i].text == "{" {
+			sc := p.bindParams(tm, placeholders(tm))
+			self := &ctype{kind: kDependent, dep: &depType{tmpl: tm, args: placeholders(tm)}}
+			sc.vars[tm.name] = &symbol{name: tm.name, src: tm.name, kind: symTypedef, t: self, sc: sc}
+			depth := 0
+			for i++; depth >= 0 && p.toks[i].kind != tkEOF; i++ {
+				t := p.toks[i]
+				if t.kind == tkPunct {
+					switch t.text {
+					case "{", "(", "[":
+						depth++
+					case "}", ")", "]":
+						depth--
+					}
+					continue
+				}
+				if depth != 0 || t.kind != tkIdent || t.text != tm.name || p.toks[i+1].text != "(" || p.toks[i-1].text == "~" || p.toks[i-1].text == "::" {
+					continue
+				}
+				start := i
+				p.try(func() {
+					p.replay(start, sc, func() {
+						p.pattern = 1
+						p.next()
+						t := p.suffixes(tVoid, &attrs{})
+						if t.kind == kFunc {
+							tm.ctorPats = append(tm.ctorPats, t.fn)
+						}
+					})
+				})
+			}
+		}
+	}
+	for _, pat := range tm.ctorPats {
+		if len(args) > len(pat.params) {
+			continue
+		}
+		bound, set := make([]targ, len(tm.params)), make([]bool, len(tm.params))
+		ok := true
+		for i, a := range args {
+			if !p.deduceArg(pat.params[i], a, bound, set) {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			continue
+		}
+		n := countSet(set)
+		full := true
+		for i := n; i < len(tm.params); i++ {
+			if tm.params[i].dflt == 0 && !tm.params[i].pack {
+				full = false
+			}
+		}
+		if !full {
+			continue
+		}
+		var t *ctype
+		if !p.try(func() { t = p.instance(tm, p.fullArgs(tm, bound[:n], at)).t }) || t == nil {
+			continue
+		}
+		p.complete(t)
+		if t.rec.complete && p.resolve(ctors(t), nil, args, at, "", true) != nil {
+			return t
+		}
+	}
+	p.errorAt(at, "the arguments of the class template %s cannot be deduced", tm.name)
+	return nil
+}

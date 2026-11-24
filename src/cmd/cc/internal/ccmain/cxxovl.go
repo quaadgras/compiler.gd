@@ -162,6 +162,15 @@ func (p *parser) convRank(a expr, pt *ctype) int {
 	if l, ok := a.(*initList); ok {
 		return p.listRank(l, pt)
 	}
+	if !pt.isRef() || pt.elem.q&qConst != 0 {
+		to := pt
+		if to.isRef() {
+			to = to.elem
+		}
+		if r, ok := p.memPtrRank(a, to); ok {
+			return r
+		}
+	}
 	at := a.ty()
 	p.completeFor(at)
 	p.completeFor(pt)
@@ -558,6 +567,8 @@ func (p *parser) cxxCallArgs(x expr, args []expr, at pos) expr {
 			}
 			return p.callFunc(sym, nil, args, at)
 		}
+	case *pmfCall:
+		return p.callPMF(x, args, at)
 	case *methodRef:
 		p.explicitT = x.targs
 		sym := p.resolve(x.set, x.obj, args, at, x.set[0].src, false)

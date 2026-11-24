@@ -50,6 +50,7 @@ const (
 	// C++, in a template's pattern only (cxxtmpl.go).
 	kTParam    // a template parameter: n is its index
 	kDependent // a type that depends on template parameters: dep
+	kMemPtr    // a pointer to a member of type elem of the class mp.cls
 )
 
 type qual uint8
@@ -80,6 +81,7 @@ type ctype struct {
 	isAuto  bool     // the placeholder auto, until its initializer says
 	isPackT bool     // kTParam: a parameter pack
 	depN    int      // kArray, in a pattern: its length is the value parameter depN-1
+	mp      *memPtr  // a pointer to data member (an integer: the offset); kMemPtr
 	dep     *depType // kDependent
 }
 
@@ -100,6 +102,7 @@ type record struct {
 	cls  *classInfo // C++: a class's members that are not fields (cxxclass.go)
 	mtag string     // C++: its name as mangled, if it is a template's instance
 	inst *tinst     // C++: the template's instance it is
+	mp   *memPtr    // C++: the pointer to member function it is (cxxmemptr.go)
 }
 
 type field struct {
@@ -700,7 +703,7 @@ func (t *ctype) String() string {
 	switch t.kind {
 	case kTParam:
 		return q + "<template parameter " + itoa(t.n) + ">"
-	case kDependent:
+	case kDependent, kMemPtr:
 		return q + "<dependent type>"
 	}
 	return q + kindNames[t.kind]
