@@ -11,7 +11,7 @@ import "unsafe"
 // They are aliases, so that C's long long and Go's int64 are one type to
 // Go, as cmd/cc's Go takes them to be. The types whose size is the data
 // model's (long, and size_t and the others that follow it) are with the
-// model (Long, in tag.go and its siblings).
+// model (Long, in types_64.go and its siblings).
 type (
 	Bool      = uint8 // _Bool, and C++'s bool: 0 or 1
 	Char      = int8  // char is signed in cmd/cc's C
