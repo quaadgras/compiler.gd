@@ -44,6 +44,8 @@ So the order is:
    by a test.
 5. Exceptions and RTTI, when something needs them.
 
+Steps 1 to 3 are largely done, and step 4 has begun (Status, below).
+
 ## The lowering
 
 - **A class is a record.** Its data members are fields; its member
@@ -146,53 +148,76 @@ compiled: the mangled names are the Itanium ABI's, the calls are Go's.
 ## Status
 
 `go test cmd/cc -run Cxx` compiles `testdata/cxx/*.cc` with cmd/cc and
-with g++ and compares what they print.
+with g++ and compares what they print (13 programs). Against Godot
+(4.7.1, with its own defines and include directories), 31 of the 47
+`.cpp` files of `core/math`, `core/os`, `core/error` and
+`core/templates` translate, each alone: `core/os/memory.cpp`, the
+vectors, `basis.cpp`, `quaternion.cpp`, `a_star.cpp`, `color.cpp` among
+them. None has been run: a file's functions call others' that are not
+there until the files are translated together.
 
-There (step 1 of the order above):
+What is there, by step of the order above:
 
-- references (`&`, `&&`, binding to temporaries, lifetime extension),
-  overloaded functions and default arguments, namespaces (nested,
-  inline, unnamed), using declarations, directives and aliases,
-  `extern "C"`, scoped enumerations, the named casts and `T(x)`, `auto`
-  with declarators, argument-dependent lookup for calls and operators;
-- classes: data members with default member initializers, member
-  functions defined in or out of the class, `static` members, `mutable`,
-  constructors with member initializers and delegation, destructors,
-  conversion functions, `explicit`, `= default` and `= delete`, friends,
-  the implicit default and copy constructors, copy assignment and
-  destructor (member by member where a member needs it, the bytes
-  otherwise);
-- objects: temporaries destroyed at the end of their full expression
-  (conditionally made ones too), classes passed and returned in the
-  caller's memory, copy elision and the named return value
-  optimization, overloaded operators (members and not), `new`,
-  `new[]`, placement `new`, `delete`, and allocation functions of the
-  program's own.
+1. **C with classes**: references (binding to temporaries, lifetime
+   extension), overloaded functions and default arguments, namespaces,
+   using declarations, directives and aliases, `extern "C"`, scoped
+   enumerations, the named casts and `T(x)`, `auto`, argument-dependent
+   lookup; classes with default member initializers, static members,
+   `mutable`, constructors with member initializers and delegation,
+   destructors, conversion functions, `explicit`, `= default` and
+   `= delete`, friends, the implicit special members; temporaries
+   destroyed at the end of their full expression, classes passed and
+   returned in the caller's memory, copy elision and the named return
+   value optimization, overloaded operators, `new`, `delete` and
+   allocation functions of the program's own; braced lists as
+   initializers, arguments and results, with `std::initializer_list`;
+   range-based `for`; lambdas (captures by value and reference, `this`,
+   initialized captures, nested, converted to function pointers).
+2. **Inheritance and virtual functions**: bases as leading fields with
+   no name, empty bases that take no room, conversions to a base and
+   back; tables of virtual functions as C arrays of function pointers,
+   virtual and deleting destructors, pure virtual functions; static
+   locals initialized the first time they are reached; `bool` as the
+   type of comparisons; `new T[n]{...}` and `delete[]`; pointers to
+   members (a data member's is its offset, a member function's two
+   words, a virtual one's through a function that makes the virtual
+   call); `typeid` of a static type.
+3. **Templates**: class, function, alias and variable templates, full
+   and partial specializations, members defined outside their class,
+   member templates, value parameters, parameter packs with expansions
+   and fold expressions, deduction (forwarding references, arrays'
+   lengths, classes derived from a template's instance, pointers to
+   members), class template argument deduction from constructors,
+   SFINAE, `if constexpr`, the type traits as built-ins. Instances are
+   made when needed: a class when it must be complete, a function's
+   body (any inline function's, a template's or not) when it is used.
+4. **The library**: `<type_traits>`, `<utility>`, `<initializer_list>`,
+   `<new>`, `<atomic>`, `<limits>`, `<functional>`, `<mutex>`,
+   `<condition_variable>`, `<shared_mutex>`, `<thread>`, `<typeinfo>`,
+   `<cmath>` with its overloads, and the other `<c...>` headers.
 
-And of step 2:
+Not there yet:
 
-- base classes: a base's subobject is a leading field with no name, so
-  its members are found as C finds an anonymous member's; an empty base
-  takes no room; conversions to a base and back move the pointer (a null
-  pointer stays null); constructors initialize bases, then the table
-  pointer, then members, and destructors undo it in reverse;
-- virtual functions: the table is a C array of function pointers
-  (`_ZTV...`), an object's first word points to its class's, set by
-  each constructor and destructor for its own class as C++ has it; a
-  call through a pointer or reference loads the function from the table,
-  a call on an object whose class is known or with a qualified name is
-  direct; a virtual destructor has a second entry that also frees the
-  object, which `delete` calls; pure virtual functions are null entries;
-- static locals that are constructed or initialized with what is not
-  constant, the first time their declaration is reached (with a flag:
-  not yet safe against two threads reaching it at once);
-- comparisons, `!`, `&&` and `||` are `bool`;
-- `new T[n]{...}` and `delete[]` of objects with destructors: the count
-  is the size the pointer's capability has.
+- **constexpr evaluation**: a constexpr function's call is not a
+  constant to cmd/cc. A constexpr object initialized with one is
+  initialized when the program starts, and a `static_assert` that needs
+  one is not checked. Template arguments and array lengths that need one
+  are errors.
+- a second base class with virtual functions, virtual base classes,
+  `dynamic_cast`, run-time type information;
+- exceptions (Godot is built without them);
+- implicit move constructors and move assignment (the copy is used),
+  destructors of objects of static duration at exit, thread-safe
+  initialization of static locals;
+- generic lambdas, structured bindings, user-defined literals,
+  deduction guides, member templates of class templates defined outside
+  both, partial ordering of function templates (of two that match, the
+  first is chosen);
+- the containers and algorithms of the standard library (`<vector>`,
+  `<string>`, `<algorithm>`): Godot's own code does not use them, some
+  of its third-party libraries do;
+- access checking, which is not planned.
 
-Not there yet: a second base class with virtual functions (its table
-needs functions that adjust `this`), virtual base classes, pointers to
-members, braces for aggregates whose members have copy constructors,
-move construction by implicit members (they copy), destructors of
-objects of static duration at exit, `dynamic_cast` and `typeid`, and
-access checking, which is not planned. Then steps 3 to 5.
+`CCDEBUG=sfinae` prints the errors that are not reported because they
+are substitution failures; `CCDEBUG=panic` makes a parse error a panic,
+with the parser's stack.
