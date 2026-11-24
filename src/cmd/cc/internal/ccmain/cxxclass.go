@@ -788,7 +788,7 @@ func (p *parser) completeClass(t *ctype) {
 	}
 	// A class template's instance defines its members when they are
 	// used, the implicit ones too.
-	lazy := r.inst != nil
+	lazy := true
 	var todo []*symbol
 	later := func(sym *symbol, f func()) {
 		if !sym.trivial && !sym.defined {
@@ -1130,7 +1130,7 @@ func (p *parser) ctorBody(sym *symbol, at pos) *block {
 	}
 	inits := map[*field]memInit{}
 	baseInits := map[*baseClass]memInit{}
-	var pre []stmt
+	var pre, anon []stmt
 	delegated := false
 	if p.accept(":") {
 		for {
@@ -1171,10 +1171,37 @@ func (p *parser) ctorBody(sym *symbol, at pos) *block {
 				delegated = true
 			} else {
 				path := r.lookupField(name)
-				if len(path) != 1 {
+				switch {
+				case len(path) == 1:
+					inits[path[0]] = in
+				case len(path) > 1:
+					// A member of an anonymous struct or union.
+					dst := p.memberOf(p.thisObject(mat), name, mat)
+					mark := len(p.temps)
+					var e expr
+					switch {
+					case in.braceAt != 0:
+						save := p.pos
+						p.pos = in.braceAt + 1
+						if p.is("}") {
+							e = p.zeroObject(dst, mat)
+						} else {
+							e = p.initScalar(dst, p.initExpr(), mat)
+						}
+						p.pos = save
+					case dst.ty().kind == kStruct:
+						e = p.constructAt(dst, dst.ty(), in.args, mat, mValue)
+					case len(in.args) == 0:
+						e = p.zeroObject(dst, mat)
+					case len(in.args) == 1:
+						e = p.initScalar(dst, in.args[0], mat)
+					default:
+						p.errorAt(mat, "too many initializers for the member %q", name)
+					}
+					anon = append(anon, &exprStmt{p.fullExpr(mark, e)})
+				default:
 					p.errorAt(mat, "%s has no member %q to initialize", ct, name)
 				}
-				inits[path[0]] = in
 			}
 			if !p.accept(",") {
 				break
@@ -1184,6 +1211,7 @@ func (p *parser) ctorBody(sym *symbol, at pos) *block {
 	if !delegated {
 		pre = append(pre, p.initMembers(ct, inits, baseInits, at)...)
 	}
+	pre = append(pre, anon...)
 	body := p.funcBody()
 	if len(pre) == 0 {
 		return body

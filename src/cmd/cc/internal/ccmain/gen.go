@@ -297,6 +297,9 @@ func (g *gen) globalVar(s *symbol) {
 		fmt.Fprintf(&g.vars, "var %s = %s()\n", g.names[s], g.libcFunc(v))
 		return
 	}
+	if s.t.kind == kArray && s.t.n < 0 && s.storage == sExtern && !s.defined {
+		return // declared, never defined: an error only if used
+	}
 	if s.t.kind == kArray && s.t.n < 0 {
 		g.errorf(s.p, "array %q has no length", s.name)
 	}

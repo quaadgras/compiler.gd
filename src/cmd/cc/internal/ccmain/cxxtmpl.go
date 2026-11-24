@@ -484,6 +484,36 @@ func (p *parser) templateDecl() {
 		j++
 	}
 	classKey := p.isAt(j, "class") || p.isAt(j, "struct") || p.isAt(j, "union")
+	// Attributes after the class key.
+	for classKey {
+		switch {
+		case p.isAt(j+1, "[") && p.isAt(j+2, "["):
+			k := j + 3
+			for !(p.isAt(k, "]") && p.isAt(k+1, "]")) && p.peekAt(k).kind != tkEOF {
+				k++
+			}
+			j = k + 1
+			continue
+		case p.isAt(j+1, "__attribute__") || p.isAt(j+1, "alignas"):
+			depth, k := 0, j+2
+			for {
+				if p.isAt(k, "(") {
+					depth++
+				} else if p.isAt(k, ")") {
+					depth--
+					if depth == 0 {
+						break
+					}
+				} else if p.peekAt(k).kind == tkEOF {
+					break
+				}
+				k++
+			}
+			j = k
+			continue
+		}
+		break
+	}
 	if classKey && p.peekAt(j+1).kind == tkIdent {
 		name := p.peekAt(j + 1).text
 		k := j + 2

@@ -2034,9 +2034,11 @@ func (p *parser) declarator2C(name string, t *ctype, s specs, a attrs, at pos) *
 	} else if s.storage != sExtern {
 		sym.defined = true
 	}
-	if s.constx && p.cxx && sym.init == nil && baseElem(sym.t).kind == kStruct {
-		// A constexpr object that a constructor makes: not a constant
-		// that cmd/cc knows.
+	if s.constx && p.cxx && (sym.init == nil && baseElem(sym.t).kind == kStruct || sym.init != nil && !p.constInit(sym.init)) {
+		// A constexpr object that a constructor or a constexpr
+		// function's call makes: not a constant that cmd/cc knows. It is
+		// initialized when the program starts.
+		sym.constx = false
 	} else if s.constx {
 		p.constexprValue(sym, at)
 	} else if p.cxx && !sym.constx && sym.t.q&qConst != 0 && sym.t.isArith() && sym.init != nil && sym.init.scalar != nil && p.constInit(sym.init) {
@@ -2156,6 +2158,20 @@ func (p *parser) funcDef(name string, t *ctype, s specs, a attrs, at pos) {
 	sym := p.declareFunc(name, t, s, at)
 	if sym.defined {
 		p.errorAt(at, "redefinition of %q", name)
+	}
+	if p.cxx && (s.inline || s.constx || sym.comdat) && sym.src != "main" && p.fn == nil {
+		// An inline function is defined if it is used: its body is
+		// kept until then.
+		sym.comdat = true
+		sym.late = &lateFunc{sym, ft, name, p.pos, at}
+		if p.declIn != nil {
+			sym.lateSc = p.declIn
+		}
+		p.skipFuncBody()
+		if sym.used {
+			p.use(sym)
+		}
+		return
 	}
 	if p.cxx {
 		st := p.saveFunc()

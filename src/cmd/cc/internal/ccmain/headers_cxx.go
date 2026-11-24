@@ -266,4 +266,189 @@ template <class E> constexpr const E *end(initializer_list<E> il) noexcept { ret
 }
 #endif
 `
+
+	sysHeaders["atomic"] = `#ifndef __CC_ATOMIC
+#define __CC_ATOMIC
+#include <stddef.h>
+#include <stdint.h>
+namespace std {
+enum memory_order {
+	memory_order_relaxed,
+	memory_order_consume,
+	memory_order_acquire,
+	memory_order_release,
+	memory_order_acq_rel,
+	memory_order_seq_cst
+};
+template <class T>
+struct atomic {
+	T __v;
+	atomic() noexcept = default;
+	constexpr atomic(T v) noexcept : __v(v) {}
+	atomic(const atomic &) = delete;
+	atomic &operator=(const atomic &) = delete;
+	static constexpr bool is_always_lock_free = true;
+	bool is_lock_free() const noexcept { return true; }
+	T load(memory_order = memory_order_seq_cst) const noexcept { return __cc_atomic_load(const_cast<T *>(&__v)); }
+	void store(T v, memory_order = memory_order_seq_cst) noexcept { __cc_atomic_store(&__v, v); }
+	T exchange(T v, memory_order = memory_order_seq_cst) noexcept { return __cc_atomic_fetch(&__v, '=', v); }
+	bool compare_exchange_strong(T &e, T d, memory_order = memory_order_seq_cst, memory_order = memory_order_seq_cst) noexcept { return __cc_atomic_cmpxchg(&__v, &e, d); }
+	bool compare_exchange_weak(T &e, T d, memory_order = memory_order_seq_cst, memory_order = memory_order_seq_cst) noexcept { return __cc_atomic_cmpxchg(&__v, &e, d); }
+	T fetch_add(T v, memory_order = memory_order_seq_cst) noexcept { return __cc_atomic_fetch(&__v, '+', v); }
+	T fetch_sub(T v, memory_order = memory_order_seq_cst) noexcept { return __cc_atomic_fetch(&__v, '-', v); }
+	T fetch_and(T v, memory_order = memory_order_seq_cst) noexcept { return __cc_atomic_fetch(&__v, '&', v); }
+	T fetch_or(T v, memory_order = memory_order_seq_cst) noexcept { return __cc_atomic_fetch(&__v, '|', v); }
+	T fetch_xor(T v, memory_order = memory_order_seq_cst) noexcept { return __cc_atomic_fetch(&__v, '^', v); }
+	operator T() const noexcept { return load(); }
+	T operator=(T v) noexcept {
+		store(v);
+		return v;
+	}
+	T operator++() noexcept { return fetch_add(1) + 1; }
+	T operator++(int) noexcept { return fetch_add(1); }
+	T operator--() noexcept { return fetch_sub(1) - 1; }
+	T operator--(int) noexcept { return fetch_sub(1); }
+	T operator+=(T v) noexcept { return fetch_add(v) + v; }
+	T operator-=(T v) noexcept { return fetch_sub(v) - v; }
+	T operator&=(T v) noexcept { return fetch_and(v) & v; }
+	T operator|=(T v) noexcept { return fetch_or(v) | v; }
+	T operator^=(T v) noexcept { return fetch_xor(v) ^ v; }
+};
+template <class T>
+struct atomic<T *> {
+	T *__v;
+	atomic() noexcept = default;
+	constexpr atomic(T *v) noexcept : __v(v) {}
+	atomic(const atomic &) = delete;
+	atomic &operator=(const atomic &) = delete;
+	static constexpr bool is_always_lock_free = true;
+	bool is_lock_free() const noexcept { return true; }
+	T *load(memory_order = memory_order_seq_cst) const noexcept { return __cc_atomic_load(const_cast<T **>(&__v)); }
+	void store(T *v, memory_order = memory_order_seq_cst) noexcept { __cc_atomic_store(&__v, v); }
+	T *exchange(T *v, memory_order = memory_order_seq_cst) noexcept { return __cc_atomic_fetch(&__v, '=', v); }
+	bool compare_exchange_strong(T *&e, T *d, memory_order = memory_order_seq_cst, memory_order = memory_order_seq_cst) noexcept { return __cc_atomic_cmpxchg(&__v, &e, d); }
+	bool compare_exchange_weak(T *&e, T *d, memory_order = memory_order_seq_cst, memory_order = memory_order_seq_cst) noexcept { return __cc_atomic_cmpxchg(&__v, &e, d); }
+	T *fetch_add(ptrdiff_t v, memory_order = memory_order_seq_cst) noexcept { return __cc_atomic_fetch(&__v, '+', v); }
+	T *fetch_sub(ptrdiff_t v, memory_order = memory_order_seq_cst) noexcept { return __cc_atomic_fetch(&__v, '-', v); }
+	operator T *() const noexcept { return load(); }
+	T *operator=(T *v) noexcept {
+		store(v);
+		return v;
+	}
+};
+struct atomic_flag {
+	bool __v = false;
+	atomic_flag() noexcept = default;
+	atomic_flag(const atomic_flag &) = delete;
+	bool test_and_set(memory_order = memory_order_seq_cst) noexcept { return __cc_atomic_fetch(&__v, '=', true); }
+	void clear(memory_order = memory_order_seq_cst) noexcept { __cc_atomic_store(&__v, false); }
+	bool test(memory_order = memory_order_seq_cst) const noexcept { return __cc_atomic_load(const_cast<bool *>(&__v)); }
+};
+inline void atomic_thread_fence(memory_order) noexcept { __cc_atomic_fence(); }
+inline void atomic_signal_fence(memory_order) noexcept { __cc_atomic_fence(); }
+typedef atomic<bool> atomic_bool;
+typedef atomic<char> atomic_char;
+typedef atomic<signed char> atomic_schar;
+typedef atomic<unsigned char> atomic_uchar;
+typedef atomic<short> atomic_short;
+typedef atomic<unsigned short> atomic_ushort;
+typedef atomic<int> atomic_int;
+typedef atomic<unsigned> atomic_uint;
+typedef atomic<long> atomic_long;
+typedef atomic<unsigned long> atomic_ulong;
+typedef atomic<long long> atomic_llong;
+typedef atomic<unsigned long long> atomic_ullong;
+typedef atomic<int8_t> atomic_int8_t;
+typedef atomic<uint8_t> atomic_uint8_t;
+typedef atomic<int16_t> atomic_int16_t;
+typedef atomic<uint16_t> atomic_uint16_t;
+typedef atomic<int32_t> atomic_int32_t;
+typedef atomic<uint32_t> atomic_uint32_t;
+typedef atomic<int64_t> atomic_int64_t;
+typedef atomic<uint64_t> atomic_uint64_t;
+typedef atomic<size_t> atomic_size_t;
+typedef atomic<intptr_t> atomic_intptr_t;
+typedef atomic<uintptr_t> atomic_uintptr_t;
+}
+#define ATOMIC_FLAG_INIT {}
+#endif
+`
+	sysHeaders["limits"] = `#ifndef __CC_LIMITS
+#define __CC_LIMITS
+#include <limits.h>
+#include <float.h>
+#include <math.h>
+namespace std {
+enum float_round_style { round_indeterminate = -1, round_toward_zero, round_to_nearest, round_toward_infinity, round_toward_neg_infinity };
+template <class T>
+struct numeric_limits {
+	static constexpr bool is_specialized = false;
+	static constexpr bool is_signed = false, is_integer = false, is_exact = false;
+	static constexpr bool has_infinity = false, has_quiet_NaN = false, has_signaling_NaN = false;
+	static constexpr bool is_iec559 = false, is_bounded = false, is_modulo = false;
+	static constexpr int digits = 0, digits10 = 0, max_digits10 = 0, radix = 0;
+	static constexpr T min() noexcept { return T(); }
+	static constexpr T max() noexcept { return T(); }
+	static constexpr T lowest() noexcept { return T(); }
+	static constexpr T epsilon() noexcept { return T(); }
+	static constexpr T infinity() noexcept { return T(); }
+	static constexpr T quiet_NaN() noexcept { return T(); }
+};
+#define __CC_LIMITS_INT(T, MIN, MAX, SIGNED) \
+	template <> struct numeric_limits<T> { \
+		static constexpr bool is_specialized = true; \
+		static constexpr bool is_signed = SIGNED, is_integer = true, is_exact = true; \
+		static constexpr bool has_infinity = false, has_quiet_NaN = false, has_signaling_NaN = false; \
+		static constexpr bool is_iec559 = false, is_bounded = true, is_modulo = !SIGNED; \
+		static constexpr int digits = int(sizeof(T) * 8 - SIGNED), digits10 = int((sizeof(T) * 8 - SIGNED) * 301 / 1000), max_digits10 = 0, radix = 2; \
+		static constexpr T min() noexcept { return MIN; } \
+		static constexpr T max() noexcept { return MAX; } \
+		static constexpr T lowest() noexcept { return MIN; } \
+		static constexpr T epsilon() noexcept { return 0; } \
+		static constexpr T infinity() noexcept { return 0; } \
+		static constexpr T quiet_NaN() noexcept { return 0; } \
+		static constexpr T signaling_NaN() noexcept { return 0; } \
+		static constexpr T denorm_min() noexcept { return 0; } \
+		static constexpr T round_error() noexcept { return 0; } \
+	};
+__CC_LIMITS_INT(bool, false, true, 0)
+__CC_LIMITS_INT(char, CHAR_MIN, CHAR_MAX, 1)
+__CC_LIMITS_INT(signed char, SCHAR_MIN, SCHAR_MAX, 1)
+__CC_LIMITS_INT(unsigned char, 0, UCHAR_MAX, 0)
+__CC_LIMITS_INT(short, SHRT_MIN, SHRT_MAX, 1)
+__CC_LIMITS_INT(unsigned short, 0, USHRT_MAX, 0)
+__CC_LIMITS_INT(int, INT_MIN, INT_MAX, 1)
+__CC_LIMITS_INT(unsigned int, 0, UINT_MAX, 0)
+__CC_LIMITS_INT(long, LONG_MIN, LONG_MAX, 1)
+__CC_LIMITS_INT(unsigned long, 0, ULONG_MAX, 0)
+__CC_LIMITS_INT(long long, LLONG_MIN, LLONG_MAX, 1)
+__CC_LIMITS_INT(unsigned long long, 0, ULLONG_MAX, 0)
+#undef __CC_LIMITS_INT
+#define __CC_LIMITS_FLT(T, P, DIG, MANT, DIG10) \
+	template <> struct numeric_limits<T> { \
+		static constexpr bool is_specialized = true; \
+		static constexpr bool is_signed = true, is_integer = false, is_exact = false; \
+		static constexpr bool has_infinity = true, has_quiet_NaN = true, has_signaling_NaN = true; \
+		static constexpr bool is_iec559 = true, is_bounded = true, is_modulo = false; \
+		static constexpr int digits = MANT, digits10 = DIG, max_digits10 = DIG10, radix = 2; \
+		static constexpr int min_exponent = P##_MIN_EXP, max_exponent = P##_MAX_EXP; \
+		static constexpr int min_exponent10 = P##_MIN_10_EXP, max_exponent10 = P##_MAX_10_EXP; \
+		static constexpr float_round_style round_style = round_to_nearest; \
+		static constexpr T min() noexcept { return P##_MIN; } \
+		static constexpr T max() noexcept { return P##_MAX; } \
+		static constexpr T lowest() noexcept { return -P##_MAX; } \
+		static constexpr T epsilon() noexcept { return P##_EPSILON; } \
+		static constexpr T infinity() noexcept { return T(INFINITY); } \
+		static constexpr T quiet_NaN() noexcept { return T(NAN); } \
+		static constexpr T signaling_NaN() noexcept { return T(NAN); } \
+		static constexpr T denorm_min() noexcept { return P##_TRUE_MIN; } \
+		static constexpr T round_error() noexcept { return T(0.5); } \
+	};
+__CC_LIMITS_FLT(float, FLT, FLT_DIG, FLT_MANT_DIG, 9)
+__CC_LIMITS_FLT(double, DBL, DBL_DIG, DBL_MANT_DIG, 17)
+__CC_LIMITS_FLT(long double, LDBL, LDBL_DIG, LDBL_MANT_DIG, 17)
+#undef __CC_LIMITS_FLT
+}
+#endif
+`
 }
