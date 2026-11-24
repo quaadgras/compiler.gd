@@ -70,6 +70,7 @@ func (g *gen) lv(e expr) lval {
 			}
 			base = l.addr
 			if l.direct != "" && e.f.bits < 0 {
+				g.mirror(e.x.ty()) // its record's fields are named
 				if r := e.x.ty().rec; !r.bytes && r.goName != "" {
 					for i, f := range r.fields {
 						if f == e.f {

@@ -2071,6 +2071,9 @@ func (p *parser) declarator2C(name string, t *ctype, s specs, a attrs, at pos) *
 			}
 		} else if p.cxx && t.enum != nil && t.enum.tag == "" && t.q == 0 {
 			t.enum.tag = name
+		} else if !p.cxx && t.kind == kStruct && t.rec.tag == "" && t.rec.tdName == "" && t.q == 0 {
+			// C: still a type with no tag, but named by this in the Go.
+			t.rec.tdName = name
 		}
 		sym := &symbol{name: name, kind: symTypedef, t: t, p: at}
 		p.declare(sym, at)
@@ -2427,8 +2430,7 @@ func (p *parser) defineFunc(sym *symbol, ft *funcType, name string, at pos, inli
 	fs.init = &initializer{items: []initItem{{t: fs.t, x: &strLit{node{arrayOf(tChar, int64(len(name)+1)), at}, name}}}}
 	fs.defined = true
 	p.sc.vars["__func__"] = fs
-	p.sc.vars["__FUNCTION__"] = fs
-	p.u.statics = append(p.u.statics, fs)
+	p.sc.vars["__FUNCTION__"] = fs // an object of the unit once it is named (primary)
 	f.locals = append(f.locals, ft.vlas...)
 	if ft.ctor || ft.dtor {
 		f.body = p.ctorBody(sym, at)

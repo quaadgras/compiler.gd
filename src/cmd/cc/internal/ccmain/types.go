@@ -99,7 +99,9 @@ type record struct {
 	flex     bool  // a flexible array member last
 	id       int   // unique in the translation unit
 	goName   string
-	bytes    bool // its mirror is bytes (gen.go's record)
+	tdName   string // C: the first typedef that names it, if it has no tag (its Go name)
+
+	bytes bool // its mirror is bytes (gen.go's record)
 
 	sc   *scope     // C++: the scope it is declared in
 	cls  *classInfo // C++: a class's members that are not fields (cxxclass.go)

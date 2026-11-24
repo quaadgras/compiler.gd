@@ -1363,6 +1363,11 @@ func (p *parser) primary() expr {
 			return p.generic(at)
 		case "__func__", "__FUNCTION__", "__PRETTY_FUNCTION__":
 			if s := p.lookup("__func__"); s != nil {
+				if !s.funcNamed {
+					// The function's name is an object only if it is used.
+					s.funcNamed = true
+					p.u.statics = append(p.u.statics, s)
+				}
 				return &varRef{node{s.t, at}, s}
 			}
 			// GCC: "" outside a function.

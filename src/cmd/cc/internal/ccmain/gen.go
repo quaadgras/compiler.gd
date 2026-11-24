@@ -124,11 +124,6 @@ func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, er
 	pg.link()
 	for i, u := range units {
 		g := &gen{pkgGen: pg, u: u, unitN: i}
-		for _, t := range u.records {
-			if t.rec.complete {
-				g.record(t)
-			}
-		}
 		g.unit()
 	}
 	var b strings.Builder
@@ -534,6 +529,8 @@ func (g *gen) record(t *ctype) string {
 	keyTag, typeKey := r.tag, (*ctype).String
 	if r.sc != nil {
 		keyTag, typeKey = rawType(t.unqual()), rawType
+	} else if keyTag == "" {
+		keyTag = r.tdName // div_t and ldiv_t are not one mirror
 	}
 	fmt.Fprintf(&key, "%s|%d|%d|%v|", keyTag, r.size, r.align, bytes)
 	if !bytes {
@@ -550,9 +547,12 @@ func (g *gen) record(t *ctype) string {
 	if r.union {
 		kw = "union"
 	}
-	tag := r.tag
+	tag, what := r.tag, kw+" "+r.tag
+	if tag == "" && r.tdName != "" {
+		tag, what = r.tdName, r.tdName
+	}
 	if tag == "" {
-		tag = "anon"
+		tag, what = "anon", "unnamed "+kw
 	}
 	name := fmt.Sprintf("%s%s_%s", g.o.prefix, kw, goIdent(tag))
 	if g.mirrorTaken(name) {
@@ -570,10 +570,10 @@ func (g *gen) record(t *ctype) string {
 		// As cgo does for unions, Go sees the bytes. The tag tells
 		// internal/c23 that they may hold pointers C stores, whose
 		// capabilities it keeps aside.
-		fmt.Fprintf(&b, "// %s is C's %s %s, as Go sees it: its bytes.\ntype %s struct {\n%s\tb [%d]byte `c23:\"union\"`\n}\n\n",
-			name, kw, r.tag, name, unionAlign(r.align), r.size)
+		fmt.Fprintf(&b, "// %s is C's %s, as Go sees it: its bytes.\ntype %s struct {\n%s\tb [%d]byte `c23:\"union\"`\n}\n\n",
+			name, what, name, unionAlign(r.align), r.size)
 	} else {
-		fmt.Fprintf(&b, "// %s is C's %s %s, as Go sees it.\ntype %s struct {\n", name, kw, r.tag, name)
+		fmt.Fprintf(&b, "// %s is C's %s, as Go sees it.\ntype %s struct {\n", name, what, name)
 		for _, f := range fields {
 			fmt.Fprintf(&b, "\t%s\n", f)
 		}

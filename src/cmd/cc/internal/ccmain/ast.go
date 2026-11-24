@@ -239,14 +239,15 @@ type symbol struct {
 	ctor    expr    // a class object's construction, after its (C) initializer
 	dtor    stmt    // its destruction, when its block is left
 
-	explicit bool // a constructor or conversion function declared explicit
-	implicit bool // a member function the class declares implicitly, or = default
-	deleted  bool // = delete
-	trivial  bool // an implicit member that does nothing, or copies bytes: never called
-	virtual  bool // a virtual member function
-	pure     bool // = 0
-	noCopy   bool // a parameter of class type that is the caller's object, not a copy
-	nrvo     bool // a local that is the function's result: in the caller's memory
+	explicit  bool // a constructor or conversion function declared explicit
+	implicit  bool // a member function the class declares implicitly, or = default
+	deleted   bool // = delete
+	trivial   bool // an implicit member that does nothing, or copies bytes: never called
+	virtual   bool // a virtual member function
+	pure      bool // = 0
+	noCopy    bool // a parameter of class type that is the caller's object, not a copy
+	nrvo      bool // a local that is the function's result: in the caller's memory
+	funcNamed bool // __func__, once the function names it: an object of the unit
 
 	extended []*symbol // the temporaries whose lifetime a reference's declaration extends
 	once     stmt      // a static local's initialization, the first time its declaration is reached
