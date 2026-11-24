@@ -451,4 +451,107 @@ __CC_LIMITS_FLT(long double, LDBL, LDBL_DIG, LDBL_MANT_DIG, 17)
 }
 #endif
 `
+
+	sysHeaders["cstdlib"] = `#ifndef __CC_CSTDLIB
+#define __CC_CSTDLIB
+#include <stdlib.h>
+namespace std {
+#ifndef __CC_ABS_INT
+#define __CC_ABS_INT
+using ::abs;
+inline long abs(long __x) { return ::labs(__x); }
+inline long long abs(long long __x) { return ::llabs(__x); }
+#endif
+}
+#endif
+`
+	sysHeaders["cmath"] = `#ifndef __CC_CMATH
+#define __CC_CMATH
+#include <math.h>
+#include <stdlib.h>
+#include <type_traits>
+namespace std {
+#ifndef __CC_ABS_INT
+#define __CC_ABS_INT
+using ::abs;
+inline long abs(long __x) { return ::labs(__x); }
+inline long long abs(long long __x) { return ::llabs(__x); }
+#endif
+inline float abs(float __x) { return ::fabsf(__x); }
+inline double abs(double __x) { return ::fabs(__x); }
+inline long double abs(long double __x) { return ::fabsl(__x); }
+
+#define __CC_MATH1(fn) \
+	using ::fn; \
+	inline float fn(float __x) { return ::fn##f(__x); } \
+	inline long double fn(long double __x) { return ::fn##l(__x); } \
+	template <class __T, enable_if_t<is_integral_v<__T>, int> = 0> inline double fn(__T __x) { return ::fn(double(__x)); }
+#define __CC_MATH2(fn) \
+	using ::fn; \
+	inline float fn(float __x, float __y) { return ::fn##f(__x, __y); } \
+	inline long double fn(long double __x, long double __y) { return ::fn##l(__x, __y); } \
+	template <class __A, class __B, enable_if_t<is_arithmetic_v<__A> && is_arithmetic_v<__B>, int> = 0> \
+	inline double fn(__A __x, __B __y) { return ::fn(double(__x), double(__y)); }
+__CC_MATH1(sqrt) __CC_MATH1(cbrt) __CC_MATH1(sin) __CC_MATH1(cos) __CC_MATH1(tan) __CC_MATH1(asin) __CC_MATH1(acos)
+__CC_MATH1(atan) __CC_MATH1(sinh) __CC_MATH1(cosh) __CC_MATH1(tanh) __CC_MATH1(asinh) __CC_MATH1(acosh) __CC_MATH1(atanh)
+__CC_MATH1(exp) __CC_MATH1(exp2) __CC_MATH1(expm1) __CC_MATH1(log) __CC_MATH1(log2) __CC_MATH1(log10) __CC_MATH1(log1p)
+__CC_MATH1(floor) __CC_MATH1(ceil) __CC_MATH1(round) __CC_MATH1(trunc) __CC_MATH1(rint) __CC_MATH1(nearbyint)
+__CC_MATH1(fabs) __CC_MATH1(erf) __CC_MATH1(erfc) __CC_MATH1(tgamma) __CC_MATH1(lgamma) __CC_MATH1(logb)
+__CC_MATH2(pow) __CC_MATH2(atan2) __CC_MATH2(fmod) __CC_MATH2(hypot) __CC_MATH2(copysign) __CC_MATH2(fmin)
+__CC_MATH2(fmax) __CC_MATH2(fdim) __CC_MATH2(remainder) __CC_MATH2(nextafter)
+#undef __CC_MATH1
+#undef __CC_MATH2
+using ::ldexp;
+inline float ldexp(float __x, int __e) { return ::ldexpf(__x, __e); }
+inline long double ldexp(long double __x, int __e) { return ::ldexpl(__x, __e); }
+using ::scalbn;
+inline float scalbn(float __x, int __e) { return ::scalbnf(__x, __e); }
+using ::frexp;
+inline float frexp(float __x, int *__e) { return ::frexpf(__x, __e); }
+inline long double frexp(long double __x, int *__e) { return ::frexpl(__x, __e); }
+using ::modf;
+inline float modf(float __x, float *__i) { return ::modff(__x, __i); }
+inline long double modf(long double __x, long double *__i) { return ::modfl(__x, __i); }
+using ::ilogb;
+inline int ilogb(float __x) { return ::ilogbf(__x); }
+using ::lround;
+inline long lround(float __x) { return ::lroundf(__x); }
+using ::llround;
+inline long long llround(float __x) { return ::llroundf(__x); }
+using ::lrint;
+inline long lrint(float __x) { return ::lrintf(__x); }
+using ::fma;
+inline float fma(float __x, float __y, float __z) { return ::fmaf(__x, __y, __z); }
+
+#undef fpclassify
+#undef isnan
+#undef isinf
+#undef isfinite
+#undef isnormal
+#undef signbit
+inline int fpclassify(float __x) { return ::__cc_fpclassifyf(__x); }
+inline int fpclassify(double __x) { return ::__cc_fpclassify(__x); }
+inline int fpclassify(long double __x) { return ::__cc_fpclassify(double(__x)); }
+#define __CC_CLASSIFY(fn, cond) \
+	inline bool fn(float __x) { int __c = ::__cc_fpclassifyf(__x); return cond; } \
+	inline bool fn(double __x) { int __c = ::__cc_fpclassify(__x); return cond; } \
+	inline bool fn(long double __x) { int __c = ::__cc_fpclassify(double(__x)); return cond; } \
+	template <class __T, enable_if_t<is_integral_v<__T>, int> = 0> inline bool fn(__T __x) { int __c = ::__cc_fpclassify(double(__x)); return cond; }
+__CC_CLASSIFY(isnan, __c == FP_NAN)
+__CC_CLASSIFY(isinf, __c == FP_INFINITE)
+__CC_CLASSIFY(isfinite, __c >= FP_ZERO)
+__CC_CLASSIFY(isnormal, __c == FP_NORMAL)
+#undef __CC_CLASSIFY
+inline bool signbit(float __x) { return ::__cc_signbit(double(__x)) != 0; }
+inline bool signbit(double __x) { return ::__cc_signbit(__x) != 0; }
+inline bool signbit(long double __x) { return ::__cc_signbit(double(__x)) != 0; }
+}
+using std::fpclassify;
+using std::isfinite;
+using std::isinf;
+using std::isnan;
+using std::isnormal;
+using std::signbit;
+#endif
+`
 }

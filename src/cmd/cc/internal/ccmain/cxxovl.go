@@ -156,6 +156,9 @@ func valueType(e expr) *ctype {
 // convRank ranks the implicit conversion of the argument a to a
 // parameter of type pt: rkNone if there is none.
 func (p *parser) convRank(a expr, pt *ctype) int {
+	if l, ok := a.(*initList); ok {
+		return p.listRank(l, pt)
+	}
 	at := a.ty()
 	p.completeFor(at)
 	p.completeFor(pt)

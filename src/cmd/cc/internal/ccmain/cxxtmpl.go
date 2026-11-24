@@ -63,7 +63,8 @@ type template struct {
 	// A function template.
 	pat     *funcType // its type, with the parameters as placeholders
 	patDone bool
-	nameAt  int // the token of its name
+	nameAt  int  // the token of its name
+	static  bool // a static member function
 }
 
 // A tinst is an instance of a template.
@@ -481,6 +482,7 @@ func (p *parser) templateDecl() {
 	friend := false
 	for p.isAt(j, "inline") || p.isAt(j, "static") || p.isAt(j, "constexpr") || p.isAt(j, "friend") || p.isAt(j, "extern") {
 		friend = friend || p.isAt(j, "friend")
+		tm.static = tm.static || p.isAt(j, "static")
 		j++
 	}
 	classKey := p.isAt(j, "class") || p.isAt(j, "struct") || p.isAt(j, "union")
@@ -623,6 +625,11 @@ func (p *parser) templateDecl() {
 			}
 			for o := in.vars[key]; o != nil; o = o.next {
 				if o.tmpl != nil && len(o.tmpl.params) == len(params) && !o.tmpl.hasBody {
+					for i := range params {
+						if params[i].dflt == 0 {
+							params[i].dflt = o.tmpl.params[i].dflt // the declaration's default
+						}
+					}
 					o.tmpl.params, o.tmpl.start, o.tmpl.hasBody, o.tmpl.nameAt = params, tm.start, true, tm.nameAt
 					o.tmpl.patDone, o.tmpl.pat = false, nil
 					return
@@ -1223,9 +1230,6 @@ func (p *parser) unify(pt, at *ctype, bound []targ, set []bool) bool {
 		if k >= len(bound) {
 			return false
 		}
-		if at.q&pt.q != pt.q {
-			return false
-		}
 		d := at
 		if pt.q != 0 {
 			c := *at
@@ -1467,6 +1471,9 @@ func (p *parser) deduceArg(pt *ctype, a expr, bound []targ, set []bool) bool {
 	if !hasTParam(pt) {
 		return true
 	}
+	if _, ok := a.(*initList); ok {
+		return true // nothing is deduced from a braced list
+	}
 	at := a.ty()
 	if pt.isRef() {
 		inner := pt.elem
@@ -1574,6 +1581,9 @@ func (p *parser) instFunc(tm *template, args []targ, at pos) *symbol {
 			if t.kind != kFunc {
 				p.errorAt(dat, "expected a function template's declaration")
 			}
+			if tm.static {
+				s.storage = sStatic
+			}
 			if ct != nil && !s.friend {
 				t = p.memberType(ct, name, t, s)
 			}
@@ -1616,7 +1626,7 @@ func (p *parser) use(sym *symbol) {
 	if sym == nil || sym.defined || sym.queued {
 		return
 	}
-	if sym.late == nil && sym.synth == nil && !p.instMember(sym) {
+	if sym.late == nil && sym.synth == nil && !p.instMember(sym) && !(sym.kind == symFunc && sym.inst != nil) {
 		return
 	}
 	sym.queued = true
@@ -1666,6 +1676,41 @@ func (p *parser) drain(final bool) {
 			f := sym.synth
 			sym.synth = nil
 			f()
+		case sym.kind == symFunc && sym.inst != nil && sym.inst.tmpl.kind == 'f':
+			// A function template's instance that was made of the
+			// template's declaration: its body is the definition's,
+			// once that is seen.
+			tm := sym.inst.tmpl
+			if !tm.hasBody {
+				sym.queued = false
+				if !final {
+					wait = append(wait, sym)
+				}
+				continue
+			}
+			sc := p.bindParams(tm, sym.inst.args)
+			p.try(func() {
+				p.replay(tm.start, sc, func() {
+					p.cls = p.enclosingClass(tm.sc)
+					s := p.declSpecs()
+					base := tVoid
+					if !s.noType {
+						base = p.baseOr(s)
+					}
+					name, t, _ := p.declarator(base)
+					if t.kind != kFunc || !p.is("{") && !p.is(":") {
+						return
+					}
+					ft := *sym.t.fn
+					ft.names, ft.psyms = t.fn.names, t.fn.psyms
+					if sym.t.fn.recv != nil {
+						ft.names = append([]string{"this"}, t.fn.names...)
+						ft.psyms = nil
+					}
+					p.sc = sc
+					p.defineFunc(sym, &ft, name, pos{p.peek().file, p.peek().line}, true)
+				})
+			})
 		default:
 			// A class template's member defined outside the class: the
 			// definitions of that name, with the instance's arguments.

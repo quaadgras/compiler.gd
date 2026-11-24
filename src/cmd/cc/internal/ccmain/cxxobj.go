@@ -136,6 +136,9 @@ func (p *parser) constructAt(dst expr, t *ctype, args []expr, at pos, mode int) 
 		if pr, ok := args[0].(*classPR); ok && sameType(pr.t.unqual(), t) {
 			return pr.build(dst) // constructed in place
 		}
+		if l, ok := args[0].(*initList); ok && mode&mImplicit != 0 {
+			return p.listInit(dst, t, l, at) // T x = {...}, return {...}, f({...})
+		}
 	}
 	set := ctors(t)
 	if set == nil {
@@ -168,7 +171,17 @@ func (p *parser) constructAt(dst expr, t *ctype, args []expr, at pos, mode int) 
 			}
 		}
 	}
+	// A copy initialization from another type is a user-defined
+	// conversion: its constructor's argument is not converted by
+	// another.
+	converting := mode&mImplicit != 0 && len(args) == 1 && !sameType(args[0].ty().unqual(), t) && !isBaseOf(t, args[0].ty())
+	if converting {
+		p.userConv++
+	}
 	ctor := p.resolve(set, nil, args, at, t.String(), false)
+	if converting {
+		p.userConv--
+	}
 	if ctor.deleted {
 		p.errorAt(at, "use of a deleted constructor of %s", t)
 	}
@@ -393,16 +406,7 @@ func (p *parser) classInit(sym *symbol, s specs, at pos) bool {
 			return false
 		}
 		p.accept("=")
-		p.next()
-		var args []expr
-		for !p.is("}") {
-			args = append(args, p.assignment())
-			if !p.accept(",") {
-				break
-			}
-		}
-		p.expect("}")
-		sym.ctor = p.constructAt(ref, t, args, at, mValue)
+		sym.ctor = p.listInit(ref, t, p.braceList(), at)
 	case p.is("="):
 		p.next()
 		p.classInitFrom(sym, p.initExpr(), at)

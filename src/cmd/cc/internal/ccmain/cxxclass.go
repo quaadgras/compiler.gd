@@ -395,8 +395,13 @@ func (p *parser) classMember(ct *ctype, fields *[]*field) {
 		p.templateDecl()
 		return
 	}
-	if p.is("friend") && (p.isAt(1, "class") || p.isAt(1, "struct")) && p.isAt(3, ";") {
-		p.pos += 4 // friend class X;
+	if p.is("friend") && (p.isAt(1, "class") || p.isAt(1, "struct") || p.isAt(1, "union")) {
+		// friend class X; friend class X<T>;: access is not checked.
+		for !p.accept(";") {
+			if p.next().kind == tkEOF {
+				p.errorf("unterminated friend declaration")
+			}
+		}
 		return
 	}
 	s := p.declSpecs()

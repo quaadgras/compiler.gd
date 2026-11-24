@@ -23,6 +23,9 @@ func (p *parser) expr() expr {
 
 // rvalueVoid is e evaluated for its effects: any type, void included.
 func (p *parser) rvalueVoid(e expr) expr {
+	if _, ok := e.(*initList); ok {
+		p.errorAt(e.at(), "a braced list is not an expression here")
+	}
 	if pr, ok := e.(*classPR); ok {
 		e = p.materializePR(pr)
 	}
@@ -41,6 +44,9 @@ func isAssignOp(s string) bool {
 }
 
 func (p *parser) assignment() expr {
+	if p.cxx && p.is("{") {
+		return p.braceList()
+	}
 	x := p.conditional()
 	t := p.peek()
 	if t.kind != tkPunct || !isAssignOp(t.text) {
@@ -50,6 +56,9 @@ func (p *parser) assignment() expr {
 	p.next()
 	if p.cxx {
 		y := p.assignment()
+		if l, ok := y.(*initList); ok && x.ty().kind != kStruct {
+			y = p.fromList(l, x.ty(), at)
+		}
 		if x.ty().kind == kStruct {
 			return p.classAssign(t.text, x, y, at)
 		}
@@ -1463,6 +1472,9 @@ func (p *parser) generic(at pos) expr {
 // rvalue is e's value: lvalue conversion, and arrays and functions
 // decayed to pointers.
 func (p *parser) rvalue(e expr) expr {
+	if _, ok := e.(*initList); ok {
+		p.errorAt(e.at(), "a braced list is not an expression here")
+	}
 	if pr, ok := e.(*classPR); ok {
 		e = p.materializePR(pr)
 	}

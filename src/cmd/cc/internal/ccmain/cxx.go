@@ -501,6 +501,12 @@ func (p *parser) materialize(e expr, t *ctype) expr {
 // bindRef is the pointer a reference of type t is initialized with to
 // bind it to e.
 func (p *parser) bindRef(t *ctype, e expr, at pos, what string) expr {
+	if l, ok := e.(*initList); ok {
+		e = p.fromList(l, t.elem, at)
+		if _, isPR := e.(*classPR); !isPR {
+			e = p.materialize(e, t.elem)
+		}
+	}
 	to := t.elem
 	et := e.ty()
 	if to.kind == kFunc {
@@ -545,6 +551,13 @@ func (p *parser) bindRef(t *ctype, e expr, at pos, what string) expr {
 // initConvert is e converted to initialize an object, parameter or
 // result of type t, which is not a class: a reference is bound.
 func (p *parser) initConvert(e expr, t *ctype, at pos, what string) expr {
+	if l, ok := e.(*initList); ok {
+		if t.isRef() {
+			e = p.fromList(l, t.elem, at)
+		} else {
+			return p.fromList(l, t, at)
+		}
+	}
 	if t.isRef() {
 		return p.bindRef(t, e, at, what)
 	}
@@ -732,19 +745,18 @@ func (p *parser) functionalCast(t *ctype, at pos) expr {
 		// An aggregate's: a compound literal.
 		return p.compoundLiteral(t, at)
 	}
+	if brace && t.kind == kStruct {
+		// T{...} of a class with constructors.
+		l := p.braceList()
+		p.requireComplete(t, at)
+		return &classPR{node{t.unqual(), at}, func(dst expr) expr { return p.listInit(dst, t, l, at) }}
+	}
 	p.next()
-	var args []expr
 	end := ")"
 	if brace {
 		end = "}"
 	}
-	for !p.is(end) {
-		args = append(args, p.assignment())
-		if !p.accept(",") {
-			break
-		}
-	}
-	p.expect(end)
+	args := p.exprList(end)
 	if t.kind == kStruct {
 		return p.construct(t, args, at, true)
 	}
