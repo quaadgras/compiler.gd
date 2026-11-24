@@ -16,3 +16,15 @@ const Tag = 1 << 31
 
 // splitModel: GOWASM=gc,split (tag_split.go).
 const splitModel = false
+
+// The types of C whose size is the data model's: here long has 32 bits
+// (ILP32).
+type (
+	Long    = int32
+	ULong   = uint32
+	Size    = uint32 // size_t
+	SSize   = int32  // ssize_t
+	Ptrdiff = int32  // ptrdiff_t
+	Intptr  = int32  // intptr_t
+	Uintptr = uint32 // uintptr_t
+)

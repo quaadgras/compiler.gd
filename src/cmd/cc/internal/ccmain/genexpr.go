@@ -25,9 +25,15 @@ type lval struct {
 	// The Go expression of the value, if the object is known statically:
 	// Go's own typed access, safe without c23's checks.
 	direct string
+	// In the 1:1 translation (thin.go) an lvalue is this, an addressable
+	// Go expression, and addr its address, a Go pointer.
+	x string
 }
 
 func (g *gen) lv(e expr) lval {
+	if g.o.thin {
+		return g.tlv(e, false)
+	}
 	switch e := e.(type) {
 	case *varRef:
 		s := e.sym
@@ -114,6 +120,9 @@ func (g *gen) globalName(s *symbol) string {
 // compound initializes a compound literal where it is evaluated: its
 // object's c23.Ptr.
 func (g *gen) compound(e *compoundLit) string {
+	if g.o.thin {
+		return taddr(g.tcompound(e))
+	}
 	s := e.sym
 	if s.global {
 		if s.tls {
@@ -133,6 +142,10 @@ func (g *gen) compound(e *compoundLit) string {
 
 // bind makes l's address a temporary, so that it is evaluated once.
 func (g *gen) bind(l *lval) {
+	if l.x != "" {
+		g.tbind(l)
+		return
+	}
 	if l.goVar != "" || isSimple(l.addr) {
 		return
 	}
@@ -151,6 +164,9 @@ func isSimple(s string) bool {
 }
 
 func (g *gen) load(l lval) string {
+	if l.x != "" {
+		return g.tload(l)
+	}
 	if l.goVar != "" {
 		return l.goVar
 	}
@@ -300,6 +316,8 @@ func (g *gen) store(addr string, t *ctype, v string, c expr) {
 
 func (g *gen) storeL(l lval, v string, c expr) {
 	switch {
+	case l.x != "":
+		g.tstore(l, v, c)
 	case l.goVar != "":
 		g.p("%s = %s", l.goVar, v)
 	case l.direct != "" && directScalar(l.t) && l.f == nil:
@@ -505,6 +523,9 @@ func (g *gen) cond(e expr) string {
 	}
 	v := g.rv(e)
 	t := e.ty()
+	if g.o.thin && (t.isPtr() || t.kind == kNullptr) {
+		return fmt.Sprintf("(%s != nil)", v)
+	}
 	if t.isPtr() || t.kind == kNullptr || t.kind == kVaList || t.isCap() {
 		return fmt.Sprintf("(c23.Addr(%s) != 0)", v)
 	}
@@ -515,6 +536,9 @@ func (g *gen) cond(e expr) string {
 }
 
 func (g *gen) compare(e *binary) string {
+	if g.o.thin && (e.x.ty().isPtr() || e.x.ty().kind == kNullptr || e.y.ty().isPtr() || e.y.ty().kind == kNullptr) {
+		return g.tcompare(e)
+	}
 	x, y := g.rv(e.x), g.rv(e.y)
 	if is128(e.x.ty()) {
 		return fmt.Sprintf("(%s.Cmp(%s) %s 0)", x, y, e.op)
@@ -546,6 +570,11 @@ func (g *gen) addrCode(e expr, v string) string {
 
 // rv returns e's value.
 func (g *gen) rv(e expr) string {
+	if g.o.thin {
+		if v, ok := g.trv(e); ok {
+			return v
+		}
+	}
 	switch e := e.(type) {
 	case *intConst:
 		return constLit(e.t, e.v)
@@ -652,6 +681,9 @@ func (g *gen) binary(e *binary) string {
 		p := g.rv(e.x)
 		if e.y.ty().isPtr() {
 			q := g.rv(e.y)
+			if g.o.thin {
+				return g.tptrSub(p, q, xt, e.t)
+			}
 			return fmt.Sprintf("%s(c23.Sub(%s, %s) / %d)", goType(e.t), p, q, max(g.elemSize(xt), 1))
 		}
 		return g.ptrAdd(p, xt, e.y, e.op == "-")
@@ -722,6 +754,9 @@ func (g *gen) elemSize(t *ctype) int64 {
 
 // ptrAdd is p plus or minus i elements.
 func (g *gen) ptrAdd(p string, pt *ctype, i expr, neg bool) string {
+	if g.o.thin {
+		return g.tptrAdd(p, pt, i, neg)
+	}
 	if pt.elem.isVLA() {
 		size := g.vlaSize(pt.elem)
 		sign := ""
@@ -858,6 +893,10 @@ func (g *gen) assign(e *assign, value bool) string {
 		l := g.lv(e.x)
 		g.bind(&l)
 		src := g.rv(e.y)
+		if g.o.thin {
+			g.tstore(l, src, nil)
+			return l.addr
+		}
 		g.p("%s", moveCode(l.addr, src, t))
 		return l.addr
 	}
@@ -866,7 +905,7 @@ func (g *gen) assign(e *assign, value bool) string {
 		// x op= y: atomically.
 		g.bind(&l)
 		op := e.op[:len(e.op)-1]
-		y := g.tmp(goType(e.y.ty()))
+		y := g.tmp(g.gt(e.y.ty()))
 		g.p("%s = %s", y, g.rv(e.y))
 		_, new := g.atomicUpdate(l, func(cur string) string {
 			if t.isPtr() {
@@ -928,8 +967,8 @@ func (g *gen) assign(e *assign, value bool) string {
 		g.storeL(l, v, c)
 		return l.goVar
 	}
-	tv := g.tmp(goType(t))
-	if c, ok := e.y.(*intConst); ok && e.op == "=" {
+	tv := g.tmp(g.gt(t))
+	if c, ok := e.y.(*intConst); ok && e.op == "=" && !(g.o.thin && (t.isPtr() || t.kind == kNullptr)) {
 		v = constLit(t, c.v)
 	}
 	g.p("%s = %s", tv, v)
@@ -984,11 +1023,15 @@ func (g *gen) incDec(e *incDec, value bool) string {
 		g.p("%s%s", l.goVar, e.op)
 		return ""
 	}
+	if !value && l.x != "" && l.f == nil && t.isArith() && t.kind != kBool && !t.isBitInt() && !is128(t) && !fe && !t.isCap() && t.kind != kLDouble && t.kind != kComplex {
+		g.p("%s%s", l.x, e.op)
+		return ""
+	}
 	g.bind(&l)
 	old := g.load(l)
 	var res string
 	if value && e.post {
-		o := g.tmp(goType(t))
+		o := g.tmp(g.gt(t))
 		g.p("%s = %s", o, old)
 		old, res = o, o
 	}
@@ -1013,7 +1056,7 @@ func (g *gen) incDec(e *incDec, value bool) string {
 		nv = wrapBits(fmt.Sprintf("(%s %s 1)", old, op), t)
 	}
 	if value && !e.post {
-		n := g.tmp(goType(t))
+		n := g.tmp(g.gt(t))
 		g.p("%s = %s", n, nv)
 		nv, res = n, n
 	}
@@ -1043,7 +1086,7 @@ func (g *gen) condExpr(e *cond) string {
 	if preX == "" && preY == "" && isPure(x) && isPure(y) {
 		return fmt.Sprintf("c23.If(%s, %s, %s)", c, x, y)
 	}
-	t := g.tmp(goType(e.t))
+	t := g.tmp(g.gt(e.t))
 	g.p("if %s {", c)
 	g.out.WriteString(preX)
 	g.p("%s = %s", t, x)
@@ -1057,7 +1100,7 @@ func (g *gen) condExpr(e *cond) string {
 // elvis generates GNU's c ?: y, with c evaluated once.
 func (g *gen) elvis(e *cond) string {
 	{
-		t := g.tmp(goType(e.t))
+		t := g.tmp(g.gt(e.t))
 		g.p("%s = %s", t, g.rv(e.x))
 		var y string
 		preY := g.capture(func() { y = g.rv(e.y) })
@@ -1110,7 +1153,7 @@ func (g *gen) stmtExprCode(e *stmtExpr, value bool) string {
 		}
 		return ""
 	}
-	t := g.tmp(goType(e.t))
+	t := g.tmp(g.gt(e.t))
 	body()
 	g.p("%s = %s", t, g.rv(e.last))
 	return t
@@ -1159,6 +1202,9 @@ func (g *gen) funcName(s *symbol, at pos) string {
 
 // funcPtr is the c23.Ptr to a function: its descriptor.
 func (g *gen) funcPtr(s *symbol) string {
+	if g.o.thin {
+		return g.tfuncPtr(s)
+	}
 	name := g.funcName(s, s.p)
 	if name == "" {
 		return "c23.Ptr{}" // weak, and not defined
@@ -1179,6 +1225,9 @@ func (g *gen) funcPtr(s *symbol) string {
 }
 
 func (g *gen) callCode(c *call) string {
+	if g.o.thin {
+		return g.tcall(c)
+	}
 	var fn string
 	direct := false
 	callee := c.ft // the type the function has where it is defined
@@ -1231,7 +1280,7 @@ func (g *gen) callCode(c *call) string {
 		if !direct && !isSimple(v) && !isPure(v) {
 			// C evaluates the arguments before the call, whose pointer
 			// is checked when Go evaluates the function.
-			t := g.tmp(goType(a.ty()))
+			t := g.tmp(g.gt(a.ty()))
 			if i >= len(c.ft.params) && a.ty().kind == kStruct {
 				t = g.tmp("c23.Ptr")
 			}
@@ -1362,11 +1411,16 @@ func (g *gen) vaOp(e *vaOp) string {
 }
 
 func (g *gen) builtinCode(e *builtinCall) string {
+	if g.o.thin {
+		if v, ok := g.tbuiltin(e); ok {
+			return v
+		}
+	}
 	switch e.name {
 	case "trap":
 		return "c23.Trap()"
 	case "conj":
-		x := g.tmp(goType(e.t))
+		x := g.tmp(g.gt(e.t))
 		g.p("%s = %s", x, g.rv(e.args[0]))
 		return fmt.Sprintf("complex(real(%s), -imag(%s))", x, x)
 	case "cxx_zero":
@@ -1537,7 +1591,7 @@ func (g *gen) directElem(e *deref) (lval, bool) {
 	if idx != nil {
 		i = g.rv(idx)
 		if !isSimple(i) && !isConvLit(i) {
-			t := g.tmp(goType(idx.ty()))
+			t := g.tmp(g.gt(idx.ty()))
 			g.p("%s = %s", t, i)
 			i = t
 		}

@@ -35,6 +35,9 @@ func localKindOf(s *symbol) localKind {
 
 // funcSig is the Go type of a C function of type ft.
 func (g *gen) funcSig(ft *funcType, names []string) string {
+	if g.o.thin {
+		return g.tfuncSig(ft, names)
+	}
 	var ps []string
 	if ft.ret.kind == kStruct && names != nil {
 		ps = append(ps, "sret c23.Ptr")
@@ -101,6 +104,10 @@ func (g *gen) localName(s *symbol) string {
 
 // declareLocal declares a local at the top of the function.
 func (g *gen) declareLocal(s *symbol) {
+	if g.o.thin {
+		g.tdeclareLocal(s)
+		return
+	}
 	if s.nrvo {
 		g.names[s] = "sret"
 		return
@@ -141,6 +148,22 @@ func (g *gen) funcLit(f *funcDecl) string {
 	g.sret = ft.ret.kind == kStruct
 	names := []string{} // not nil: named
 	for _, ps := range f.params {
+		if g.o.thin {
+			if ps.t.kind != kStruct {
+				names = append(names, g.localName(ps)) // the Go parameter is the object
+				continue
+			}
+			g.tmpN++
+			pn := fmt.Sprintf("p%d", g.tmpN)
+			names = append(names, pn)
+			if ps.noCopy {
+				g.names[ps] = "(*" + pn + ")" // C++: the caller's object
+				continue
+			}
+			g.declareLocal(ps)
+			g.p("%s = *%s", g.localName(ps), pn)
+			continue
+		}
 		if localKindOf(ps) == lkVar {
 			names = append(names, g.localName(ps))
 			continue
@@ -182,14 +205,14 @@ func (g *gen) funcLit(f *funcDecl) string {
 	if !g.jmp {
 		fb.WriteString(text)
 		if hasRes {
-			fmt.Fprintf(&fb, "\treturn %s\n", zeroOf(ft.ret))
+			fmt.Fprintf(&fb, "\treturn %s\n", g.zero(ft.ret))
 		}
 	} else {
 		// setjmp: the body runs again from a setjmp's site when longjmp
 		// unwinds to it (c23.Longjmp).
 		fb.WriteString("jf := c23.NewJmpFrame()\ndefer jf.Done()\nvar jsite, jval int32\n_ = jval\nfor {\n")
 		if hasRes {
-			fmt.Fprintf(&fb, "r, ok := func() (r %s, ok bool) {\n", goType(ft.ret))
+			fmt.Fprintf(&fb, "r, ok := func() (r %s, ok bool) {\n", g.gt(ft.ret))
 		} else {
 			fb.WriteString("ok := func() (ok bool) {\n")
 		}
@@ -200,7 +223,7 @@ func (g *gen) funcLit(f *funcDecl) string {
 		fb.WriteString("}\n")
 		fb.WriteString(text)
 		if hasRes {
-			fmt.Fprintf(&fb, "return %s, true\n}()\nif ok {\nreturn r\n}\n}\n", zeroOf(ft.ret))
+			fmt.Fprintf(&fb, "return %s, true\n}()\nif ok {\nreturn r\n}\n}\n", g.zero(ft.ret))
 		} else {
 			fb.WriteString("return true\n}()\nif ok {\nreturn\n}\n}\n")
 		}
@@ -232,7 +255,7 @@ func (g *gen) nestedFunc(f *funcDecl) {
 func (g *gen) ret(v string) {
 	if g.hasExits(0) {
 		if v != "" {
-			t := g.tmp(goType(g.fn.sym.t.fn.ret))
+			t := g.tmp(g.gt(g.fn.sym.t.fn.ret))
 			g.p("%s = %s", t, v)
 			v = t
 		}
@@ -376,13 +399,19 @@ func (g *gen) stmt(s stmt) {
 		switch {
 		case s.x == nil:
 			if g.fn.sym.t.fn.ret.kind != kVoid && g.fn.sym.t.fn.ret.kind != kStruct {
-				g.ret(zeroOf(g.fn.sym.t.fn.ret))
+				g.ret(g.zero(g.fn.sym.t.fn.ret))
 			} else {
 				g.ret("")
 			}
 		case s.x.ty().kind == kStruct:
 			v := g.rv(s.x)
-			g.p("%s", moveCode("sret", v, s.x.ty()))
+			if g.o.thin {
+				if v != "sret" {
+					g.p("*sret = *%s", v)
+				}
+			} else {
+				g.p("%s", moveCode("sret", v, s.x.ty()))
+			}
 			g.ret("")
 		default:
 			g.ret(g.rv(s.x))
@@ -390,7 +419,11 @@ func (g *gen) stmt(s stmt) {
 	case *gotoStmt:
 		if s.x != nil {
 			// goto *x: to the label whose address x is.
-			g.p("switch c23.Addr(%s) {", g.rv(s.x))
+			if g.o.thin {
+				g.p("switch uintptr(%s) {", g.unsafePtr(g.rv(s.x), s.x.ty()))
+			} else {
+				g.p("switch c23.Addr(%s) {", g.rv(s.x))
+			}
 			for _, l := range g.fn.addrLabels {
 				g.p("case %d:", l.id)
 				g.p("goto L_%s", l.goName())
@@ -498,7 +531,7 @@ func (g *gen) capture(f func()) string {
 
 func (g *gen) switchStmt(s *switchStmt) {
 	x := g.rv(s.x)
-	t := g.tmp(goType(s.x.ty()))
+	t := g.tmp(g.gt(s.x.ty()))
 	g.p("%s = %s", t, x)
 	// The clauses: each case label starts one, with the statements up to
 	// the next.
@@ -620,6 +653,10 @@ func containsLabel(s stmt) bool {
 
 // localInit runs a local's declaration: allocates a VLA, and initializes.
 func (g *gen) localInit(s *symbol) {
+	if g.o.thin {
+		g.tlocalInit(s)
+		return
+	}
 	n := g.localName(s)
 	switch localKindOf(s) {
 	case lkHeap:
@@ -688,6 +725,10 @@ func (g *gen) vlaSize(t *ctype) string {
 // initObject stores an initializer into the object of type t at addr,
 // which is zero.
 func (g *gen) initObject(addr string, t *ctype, in *initializer) {
+	if g.o.thin {
+		g.tinitObject(tderef(addr), t, in)
+		return
+	}
 	if in.scalar != nil {
 		g.store(addr, t, g.rv(in.scalar), in.scalar)
 		return

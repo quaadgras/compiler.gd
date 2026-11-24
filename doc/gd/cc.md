@@ -31,6 +31,53 @@ change to one file translates them all. (When `cmd/go` builds a package
 with cc, the translation is part of the package's build, which `cmd/go`
 caches.)
 
+## The 1:1 translation (`cc -thin`)
+
+A second way to translate, begun on 2026-11-24 and meant to replace the
+capabilities below once it covers what they do. With `-thin` a C object
+is a Go variable of the Go type that mirrors it (the struct, field for
+field), a C pointer is Go's (`*T`, or `unsafe.Pointer` for `void *` and
+for a pointer to a type that is not complete), and a load, a store or a
+member's access is Go's own: `n->count++` is `n.count++`. Nothing
+carries a capability. What is checked is what the compiler checks of
+`unsafe.Pointer` (unsafe.md): the generated Go uses `unsafe` only where C
+converts a pointer or does arithmetic on one, and an element of an array
+that is named (`a[i]`, not `p[i]`) is Go's index, with Go's bounds check.
+
+- **Why.** Measured on a benchmark of what Godot's core does (a sorted
+  vector of structs, a tree, a hash map with string keys, byte strings),
+  against `gcc -O2`: the capabilities are 1.5 to 9.8 times slower; the
+  1:1 translation is 0.85 to 1.3 times with `-d=checkptr=0`. With the
+  checks as they are today it is 0.9 to 10 times: each arithmetic and
+  conversion is a call into the runtime. The typed code, which is most
+  of C and C++, is at Go's speed either way; making the checks of the
+  untyped code cheap is the compiler's work (static analysis), not cc's.
+- **Structs** are still passed by the pointer to them and returned in
+  memory the caller gives, as C++'s lowering expects (cxx.md).
+- **Pointers to functions** are `*c23.Func`, a descriptor, as before. A
+  call through one passes every pointer as an `unsafe.Pointer`: C and
+  C++ call functions whose types differ in what their pointers point to
+  (a virtual function's `this`), which to Go are different types.
+- **malloc** converted to a pointer to a type that has pointers is a Go
+  allocation of that type. Otherwise it is memory in which every word
+  may hold a pointer (`c23.AllocRaw`), which the collector looks at word
+  by word: memory that C gives a type later (an allocator's blocks,
+  placement `new`) is then still seen. `free` does nothing.
+- **The library** is the capabilities' (internal/c23), given a `c23.Ptr`
+  made of each Go pointer where it is called (`c23.Thin`); `strlen`,
+  `strcmp`, `memcpy`, `memmove` and `memset` have versions on Go's
+  pointers.
+- **C's types** have their C names in internal/c23 (`c23.Int`,
+  `c23.Long`, `c23.Float`, `c23.Void`), aliases of the Go types.
+
+Not there yet, and reported as errors: bit-fields, variable length
+arrays, thread-local objects, `_Atomic`, `va_arg` (so variadic functions
+defined in C), `setjmp`, `long double` and `_Complex` in memory, pointers
+to the library's functions. `delete[]` takes an array's length from its
+allocation, which in this mode is its size class: wrong for a class with
+a destructor. `go test cmd/cc -run Thin` runs the C++ programs of
+`testdata/cxx` (38 of 41) and `testdata/thin` this way.
+
 ## cgo packages, with cgo off
 
 Go code uses C through cgo's `import "C"`, unchanged. When cgo is off

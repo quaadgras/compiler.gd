@@ -165,7 +165,7 @@ func (g *gen) flatStmt(s stmt) {
 		g.placeLabel(brk)
 	case *switchStmt:
 		x := g.rv(s.x)
-		t := g.tmp(goType(s.x.ty()))
+		t := g.tmp(g.gt(s.x.ty()))
 		g.p("%s = %s", t, x)
 		brk := g.label()
 		// A Go switch of gotos, which Go makes a jump table (an

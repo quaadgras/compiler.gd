@@ -41,6 +41,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	pkg := fs.String("pkg", "main", "package of the output")
 	withMain := fs.Bool("main", false, "make C's main the program's main")
 	undef := fs.Bool("undef", false, "let a call of an undefined function panic when it runs, instead of being an error")
+	thin := fs.Bool("thin", false, "translate 1:1: C's objects as Go variables and its pointers as Go's, checked as unsafe.Pointer is")
 	out := fs.String("o", "", "output file")
 	cacheDir := fs.String("cache", "", "keep translations in `dir`, and take from it the one of this command line if what it read has not changed")
 	var incDirs []string
@@ -77,7 +78,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 		in = newInputs()
 	}
-	gosrc, err := translateFiles(fs.Args(), *pkg, *withMain, incDirs, *undef, in)
+	gosrc, err := translateFiles(fs.Args(), options{pkg: *pkg, main: *withMain, undef: *undef, thin: *thin}, incDirs, in)
 	if err == nil && cache != nil {
 		if err := cache.put(gosrc, in); err != nil {
 			fmt.Fprintln(stderr, "cc: cache:", err) // not kept: not an error of the translation
@@ -99,17 +100,17 @@ func Run(args []string, stdout, stderr io.Writer) int {
 // Program translates the C files files, a whole program with main, to
 // the Go source of package pkg. incDirs are searched for #include.
 func Program(files []string, pkg string, incDirs []string) ([]byte, error) {
-	return translateFiles(files, pkg, true, incDirs, false, nil)
+	return translateFiles(files, options{pkg: pkg, main: true}, incDirs, nil)
 }
 
 // translateFiles translates files, each a translation unit, to one Go
 // file. What it reads is recorded in in, if in is not nil.
-func translateFiles(files []string, pkg string, withMain bool, incDirs []string, undef bool, in *inputs) ([]byte, error) {
+func translateFiles(files []string, o options, incDirs []string, in *inputs) ([]byte, error) {
 	units, err := parseFiles(files, incDirs, in)
 	if err != nil {
 		return nil, err
 	}
-	out, _, err := generate(files[0], units, options{pkg: pkg, main: withMain, undef: undef})
+	out, _, err := generate(files[0], units, o)
 	return out, err
 }
 

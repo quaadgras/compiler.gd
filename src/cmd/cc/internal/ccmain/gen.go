@@ -32,6 +32,7 @@ type options struct {
 	prefix string // of every package-level name: "_C23" in a package that
 	// imports "C", so that nothing clashes with the package's own names
 	undef bool // a call of an undefined function panics, instead of being an error
+	thin  bool // the 1:1 translation: C's pointers are Go's (thin.go)
 }
 
 type genError struct{ msg string }
@@ -156,6 +157,10 @@ func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, er
 		args := ""
 		if len(m.t.fn.params) >= 2 {
 			args = "int32(len(os.Args)), c23.Args()"
+			if o.thin {
+				g := &gen{pkgGen: pg, u: units[0]}
+				args = "int32(len(os.Args)), " + g.retype("c23.Unthin(c23.Args())", "unsafe.Pointer", g.gt(m.t.fn.params[1]))
+			}
 		}
 		ret := fmt.Sprintf("%s(%s)", pg.names[m], args)
 		// C's streams are flushed if main panics (a fault): what it
@@ -294,6 +299,10 @@ func (g *gen) unit() {
 }
 
 func (g *gen) globalVar(s *symbol) {
+	if g.o.thin {
+		g.tglobalVar(s)
+		return
+	}
 	if v, ok := libcVars[s.name]; ok && s.storage == sExtern && !s.defined {
 		// The library's object (headers_env.go).
 		fmt.Fprintf(&g.vars, "var %s = %s()\n", g.names[s], g.libcFunc(v))
