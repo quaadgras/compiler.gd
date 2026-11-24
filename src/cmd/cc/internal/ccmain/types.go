@@ -644,13 +644,19 @@ func composite(a, b *ctype) *ctype {
 // lookupField finds a member, through anonymous members: the path of
 // fields to it.
 func (r *record) lookupField(name string) []*field {
-	for _, f := range r.fields {
-		if f.name == name {
-			return []*field{f}
-		}
-		if f.name == "" && f.t.kind == kStruct {
-			if p := f.t.rec.lookupField(name); p != nil {
-				return append([]*field{f}, p...)
+	// A C++ class's own members hide its bases': the bases last.
+	for _, bases := range []bool{false, true} {
+		for _, f := range r.fields {
+			if f.base != bases {
+				continue
+			}
+			if f.name == name {
+				return []*field{f}
+			}
+			if f.name == "" && f.t.kind == kStruct {
+				if p := f.t.rec.lookupField(name); p != nil {
+					return append([]*field{f}, p...)
+				}
 			}
 		}
 	}

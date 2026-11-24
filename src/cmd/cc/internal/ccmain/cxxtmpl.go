@@ -513,7 +513,14 @@ func (p *parser) templateDecl() {
 	tm := &template{params: params, start: p.pos, sc: p.sc, at: at}
 	j := 0
 	friend := false
-	for p.isAt(j, "inline") || p.isAt(j, "static") || p.isAt(j, "constexpr") || p.isAt(j, "friend") || p.isAt(j, "extern") {
+	for {
+		if k := p.attrEnd(j); k > j {
+			j = k
+			continue
+		}
+		if !(p.isAt(j, "inline") || p.isAt(j, "static") || p.isAt(j, "constexpr") || p.isAt(j, "friend") || p.isAt(j, "extern")) {
+			break
+		}
 		friend = friend || p.isAt(j, "friend")
 		tm.static = tm.static || p.isAt(j, "static")
 		j++
@@ -864,6 +871,27 @@ func placeholders(tm *template) []targ {
 		args = append(args, a)
 	}
 	return args
+}
+
+// attrEnd is the token offset after the __attribute__((...)) at offset
+// j: j if there is none.
+func (p *parser) attrEnd(j int) int {
+	if !p.isAt(j, "__attribute__") && !p.isAt(j, "__attribute") {
+		return j
+	}
+	depth := 0
+	for k := j + 1; ; k++ {
+		switch t := p.peekAt(k); {
+		case t.kind == tkEOF:
+			return j
+		case t.kind == tkPunct && t.text == "(":
+			depth++
+		case t.kind == tkPunct && t.text == ")":
+			if depth--; depth == 0 {
+				return k + 1
+			}
+		}
+	}
 }
 
 // funcAddr is the function whose address e is, if it is one's: a

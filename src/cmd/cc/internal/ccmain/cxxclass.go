@@ -1271,7 +1271,12 @@ func (p *parser) thisObject(at pos) expr {
 // fieldRef is the non-static data member sym named by itself (or
 // qualified by the scope in): this's.
 func (p *parser) fieldRef(sym *symbol, in *scope, at pos) expr {
-	return p.memberOf(p.thisObject(at), sym.src, at)
+	obj := p.thisObject(at)
+	if sc := sym.sc; sc != nil && sc.kind == skClass && sc.rec != nil && sc.rec.cls != nil && sc.rec != obj.ty().rec && isBaseOf(sc.rec.cls.t, obj.ty()) {
+		// A base's member, which one of the class's own may hide.
+		obj = p.baseObject(obj, sc.rec.cls.t, at)
+	}
+	return p.memberOf(obj, sym.src, at)
 }
 
 // cxxMember parses a member access in C++, after its "." or "->".

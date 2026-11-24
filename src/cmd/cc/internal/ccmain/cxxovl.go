@@ -248,6 +248,9 @@ func (p *parser) convRank(a expr, pt *ctype) int {
 			return rkConv + 2 // after a conversion to a base
 		}
 		if isBaseOf(pt.elem, vt.elem) && pt.elem.q&vt.elem.q == vt.elem.q {
+			if pt.elem.q != vt.elem.q {
+				return rkConv + 1 // after the base with the same qualifiers
+			}
 			return rkConv
 		}
 		if compatible(pt.elem.unqual(), vt.elem.unqual()) {
