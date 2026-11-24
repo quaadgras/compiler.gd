@@ -284,7 +284,24 @@ func (ip *initParser) list(t *ctype, off int64, braced, desig bool) {
 				return // the enclosing brace level's
 			}
 		}
+		packed := false
+		if p.cxx && ip.pending == nil && !isDes {
+			if pn, dots, pend, ok := p.packAhead(false); ok && dots == pend-1 {
+				// A pack expansion: an initializer for each element.
+				packed = true
+				p.expand(pn, pend, func() {
+					if n >= 0 && idx >= n && !(t.kind == kArray && t.n < 0) {
+						p.assignment()
+						return
+					}
+					et, eoff, ef := elemAt(idx)
+					ip.element(et, eoff, ef, false)
+					idx++
+				})
+			}
+		}
 		switch {
+		case packed:
 		case isDes:
 			k, hi := ip.designator(t, off, fields)
 			idx = k
@@ -502,7 +519,12 @@ func (ip *initParser) element(t *ctype, off int64, f *field, afterDesignator boo
 	if e == nil {
 		e = p.initExpr()
 	}
-	x := p.assignConvert(p.rvalue(e), t, e.at(), "initializer")
+	var x expr
+	if p.cxx && t.isRef() {
+		x = p.bindRef(t, e, e.at(), "initializer")
+	} else {
+		x = p.assignConvert(p.rvalue(e), t, e.at(), "initializer")
+	}
 	if f != nil && f.bits >= 0 {
 		ip.add(initItem{off: off, t: t, f: f, x: x})
 		return

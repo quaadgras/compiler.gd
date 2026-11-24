@@ -490,8 +490,11 @@ func (p *parser) isTypeStart(i int) bool {
 		if cxxTypeWords[t.text] {
 			return true
 		}
-		s, _ := p.cxxTypeAt(i)
-		return s != nil || p.ctadAt(i) != nil
+		if s, _ := p.cxxTypeAt(i); s != nil {
+			return true
+		}
+		tm, _ := p.ctadAt(i)
+		return tm != nil
 	}
 	s := p.lookup(t.text)
 	return s != nil && s.kind == symTypedef
@@ -565,18 +568,20 @@ func (p *parser) declSpecs() specs {
 			case "consteval":
 				w = "constexpr"
 			case "wchar_t":
-				w = "int"
+				p.next()
+				s.t, seen = tWChar, true
+				continue
 			case "char8_t":
 				p.next()
 				s.t, seen = tUChar, true
 				continue
 			case "char16_t":
 				p.next()
-				s.t, seen = tUShort, true
+				s.t, seen = tChar16, true
 				continue
 			case "char32_t":
 				p.next()
-				s.t, seen = tUInt, true
+				s.t, seen = tChar32, true
 				continue
 			case "decltype":
 				w = "typeof"
@@ -752,10 +757,10 @@ func (p *parser) declSpecs() specs {
 			continue
 		default:
 			if p.cxx && base == "" && s.t == nil && !unsigned && !signed && !short && nlong == 0 && nint == 0 {
-				if tm := p.ctadAt(0); tm != nil {
+				if tm, n := p.ctadAt(0); tm != nil {
 					// A class template's name: its arguments are deduced
 					// from the initializer.
-					p.next()
+					p.pos += n
 					s.t = &ctype{kind: kInt, isAuto: true, ctad: tm}
 					seen = true
 					continue
@@ -905,6 +910,15 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 			return sym.t
 		}
 	}
+	if p.cxx && p.instTag == nil && p.peek().kind == tkIdent && p.isAt(1, "::") {
+		// A member class defined outside its class: struct A::B {...}.
+		if in, j := p.nested(0); in != nil && p.peekAt(j).kind == tkIdent && (p.isAt(j+1, "{") || p.isAt(j+1, ":") || p.isAt(j+1, "final")) {
+			p.pos += j
+			save := p.sc
+			p.sc = in
+			defer func() { p.sc = save }()
+		}
+	}
 	tag := ""
 	if p.peek().kind == tkIdent && !p.is("__attribute__") {
 		tag = p.ident()
@@ -920,6 +934,12 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 	var bases []*ctype
 	if p.cxx && p.is(":") && tag != "" {
 		p.next()
+		if _, ok := p.sc.tags[tag]; !ok {
+			// Its name is declared in its bases: class D : Base<D>.
+			t := &ctype{kind: kStruct, rec: &record{tag: tag, union: union, id: p.nextRecord(), sc: p.sc}}
+			p.sc.tags[tag] = t
+			p.declareTag(p.sc, tag, t)
+		}
 		bases = p.parseBases()
 		if !p.is("{") {
 			p.errorf("expected a class's body")
@@ -1368,7 +1388,18 @@ func (p *parser) declarator(base *ctype) (string, *ctype, attrs) {
 				depth--
 			}
 		}
+		save := p.sc
+		if p.cxx {
+			// (*C::m)(params): the parameters are in C's scope.
+			after := p.pos
+			p.pos = start
+			if in := p.innerDeclScope(); in != nil {
+				p.sc = in
+			}
+			p.pos = after
+		}
 		t = p.suffixes(t, &a)
+		p.sc = save
 		end := p.pos
 		p.pos = start
 		name, it, ia := p.declarator(t)
@@ -1383,7 +1414,7 @@ func (p *parser) declarator(base *ctype) (string, *ctype, attrs) {
 		name, in = p.declaratorID()
 		a.merge(p.attributes())
 		save := p.sc
-		if in != nil {
+		if in != nil && !within(p.sc, in) {
 			// What follows the name is in its scope.
 			p.sc = in
 		}
@@ -1402,6 +1433,42 @@ func (p *parser) declarator(base *ctype) (string, *ctype, attrs) {
 	t = p.suffixes(t, &a)
 	a.merge(p.attributes())
 	return name, t, a
+}
+
+// within reports whether the scope sc is in, or is nested in it.
+func within(sc, in *scope) bool {
+	for ; sc != nil; sc = sc.parent {
+		if sc == in {
+			return true
+		}
+	}
+	return false
+}
+
+// innerDeclScope is the scope that the qualified name declared by the
+// parenthesized declarator at the parser's position is in: nil if its
+// name is not qualified.
+func (p *parser) innerDeclScope() *scope {
+	k := 0
+	for {
+		if _, n := p.memPtrAhead(k); n > 0 {
+			k += n
+			continue
+		}
+		if p.isAt(k, "*") || p.isAt(k, "&") || p.isAt(k, "&&") || p.isAt(k, "(") || p.isAt(k, "const") || p.isAt(k, "volatile") {
+			k++
+			continue
+		}
+		break
+	}
+	if !(p.peekAt(k).kind == tkIdent && p.isAt(k+1, "::")) && !p.isAt(k, "::") {
+		return nil
+	}
+	in, j := p.nested(k)
+	if in == nil || p.peekAt(j).kind != tkIdent {
+		return nil
+	}
+	return in
 }
 
 // nestedDeclarator reports whether the "(" next starts a parenthesized

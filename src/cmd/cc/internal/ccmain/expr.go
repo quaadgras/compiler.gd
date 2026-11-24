@@ -201,6 +201,11 @@ func (p *parser) conditional() expr {
 			}
 		}
 	}
+	if p.cxx {
+		if pr := p.classCond(c, x, y, at); pr != nil {
+			return pr
+		}
+	}
 	lx, ly := x, y
 	x, y = p.rvalueVoid(x), p.rvalueVoid(y)
 	if cv, ok := p.foldInt(c); ok && isConstExpr(x) && isConstExpr(y) {
@@ -276,6 +281,8 @@ func isConstExpr(e expr) bool {
 func (p *parser) condType(x, y expr, at pos) *ctype {
 	xt, yt := x.ty(), y.ty()
 	switch {
+	case p.cxx && xt.enum != nil && xt.enum == yt.enum:
+		return xt.unqual()
 	case xt.isArith() && yt.isArith():
 		return usual(xt, yt)
 	case xt.kind == kStruct && yt.kind == kStruct && compatible(xt.unqual(), yt.unqual()):
@@ -647,6 +654,15 @@ func (p *parser) foldTruth(e expr) (bool, bool) {
 		return isStaticAddr(e.x)
 	case *addrOf:
 		return isStaticAddr(e.x)
+	case *binary:
+		// An address constant compared with a null pointer.
+		if e.op == "==" || e.op == "!=" {
+			xv, xok := p.foldTruth(e.x)
+			yv, yok := p.foldTruth(e.y)
+			if xok && yok && !(xv && yv) {
+				return (xv == yv) == (e.op == "=="), true
+			}
+		}
 	}
 	return false, false
 }
@@ -725,7 +741,8 @@ func isNullConst(e expr) bool {
 		e = c.x
 	}
 	if c, ok := e.(*intConst); ok && c.v == 0 && (c.t.isInteger() || c.t.isPtr() && c.t.elem.kind == kVoid) {
-		return true
+		// In C++ an enumerator is not a null pointer constant.
+		return c.t.enum == nil || c.t.enum.sc == nil
 	}
 	return false
 }

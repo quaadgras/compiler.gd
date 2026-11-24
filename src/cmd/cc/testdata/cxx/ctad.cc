@@ -23,6 +23,7 @@ int main() {
 	int v[3] = {1, 2, 3};
 	bool c = s[0] == 'h';
 	Q a(1), b(2);
-	printf("%lu %lu %lu %g %d\n", len(Span(s, strlen(s))), Span(v, 3).size(), sizeof(Span(v, 3)), take(c ? a : Q(5)), Q::copies);
+	float taken = take(c ? a : Q(5)); // a copy of a: the conditional is a prvalue
+	printf("%lu %lu %lu %g %d\n", len(Span(s, strlen(s))), Span(v, 3).size(), sizeof(Span(v, 3)), taken, Q::copies);
 	return 0;
 }

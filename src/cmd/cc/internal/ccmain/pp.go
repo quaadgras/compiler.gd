@@ -145,8 +145,20 @@ func lexUnitDirs(srcs []source, incDirs []string) ([]token, error) {
 	if isCxxFile(last) {
 		// C++: a character constant is a char.
 		for i := range toks {
-			if t := &toks[i]; t.kind == tkChar && t.ty == tInt && !strings.HasPrefix(t.text, "L") && t.ival == int64(int8(t.ival)) && len(t.text) <= 6 {
+			t := &toks[i]
+			if t.kind == tkChar && t.ty == tInt && !strings.HasPrefix(t.text, "L") && t.ival == int64(int8(t.ival)) && len(t.text) <= 6 {
 				t.ty = tChar
+			}
+			// A wide character or string: of its own character type.
+			if t.kind == tkChar || t.kind == tkString {
+				switch {
+				case t.ty == tUInt:
+					t.ty = tChar32
+				case t.ty == tUShort:
+					t.ty = tChar16
+				case t.ty == tInt && strings.HasPrefix(t.text, "L"):
+					t.ty = tWChar
+				}
 			}
 		}
 	}

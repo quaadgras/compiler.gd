@@ -297,6 +297,47 @@ func (p *parser) fullExpr(mark int, e expr) expr {
 	return &stmtExpr{node{t.unqual(), at}, &block{list: list}, last}
 }
 
+// classCond is c ? x : y where the result is a class prvalue: the
+// operands are of one class and not both lvalues, or one converts to
+// the other's class. It is nil for any other conditional.
+func (p *parser) classCond(c, x, y expr, at pos) expr {
+	xt, yt := x.ty(), y.ty()
+	xs, ys := xt.kind == kStruct, yt.kind == kStruct
+	if !xs && !ys || xt.kind == kVoid || yt.kind == kVoid || isPMF(xt) || isPMF(yt) {
+		return nil
+	}
+	if _, ok := x.(*initList); ok {
+		return nil
+	}
+	if _, ok := y.(*initList); ok {
+		return nil
+	}
+	var t *ctype
+	switch {
+	case xs && ys && sameType(xt.unqual(), yt.unqual()):
+		_, xp := x.(*classPR)
+		_, yp := y.(*classPR)
+		if !xp && !yp && (!nontrivialABI(xt.unqual()) || p.isLvalueCxx(x) && p.isLvalueCxx(y)) {
+			return nil // an lvalue, or the bytes
+		}
+		t = xt.unqual()
+	case xs && p.convRank(y, xt.unqual()) != rkNone:
+		t = xt.unqual()
+	case ys && p.convRank(x, yt.unqual()) != rkNone:
+		t = yt.unqual()
+	default:
+		return nil
+	}
+	return &classPR{node{t, at}, func(dst expr) expr {
+		// The temporaries of each are made only if it is chosen.
+		p.condDepth++
+		bx := p.constructAt(dst, t, []expr{x}, at, mImplicit)
+		by := p.constructAt(dst, t, []expr{y}, at, mImplicit)
+		p.condDepth--
+		return &cond{node{tVoid, at}, c, bx, by}
+	}}
+}
+
 // classTemp is a temporary of the class t initialized with e.
 func (p *parser) classTemp(t *ctype, e expr, at pos, what string) expr {
 	t = t.unqual()

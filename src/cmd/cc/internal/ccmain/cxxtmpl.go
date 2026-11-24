@@ -36,9 +36,11 @@ type targ struct {
 	tmpl   *template // a template
 	isPack bool      // a pack's elements
 	pack   []targ
-	dep    bool // a value that depends on a template parameter (in a pattern)
-	param  int  // dep: the parameter it is, or -1
-	packV  bool // dep: a pack of values, expanded
+	dep    bool    // a value that depends on a template parameter (in a pattern)
+	param  int     // dep: the parameter it is, or -1
+	packV  bool    // dep: a pack of values, expanded
+	sym    *symbol // a value that is a function's address: the function
+
 }
 
 type template struct {
@@ -135,6 +137,12 @@ func argsKey(args []targ) string {
 			b.WriteString("J" + argsKey(a.pack) + "E")
 		case a.tmpl != nil:
 			b.WriteString(sourceName(a.tmpl.name))
+		case a.isVal && a.sym != nil:
+			if strings.HasPrefix(a.sym.name, "_Z") {
+				b.WriteString("L" + a.sym.name + "E")
+			} else {
+				b.WriteString("L_Z" + sourceName(a.sym.name) + "E")
+			}
 		case a.isVal:
 			code := "i"
 			if a.vt != nil && int(a.vt.kind) < len(builtinCodes) && builtinCodes[a.vt.kind] != "" && a.vt.enum == nil {
@@ -171,7 +179,7 @@ func sameArg(a, b targ) bool {
 	case a.tmpl != nil:
 		return a.tmpl == b.tmpl
 	case a.isVal:
-		return a.v == b.v
+		return a.v == b.v && a.sym == b.sym
 	}
 	return sameType(a.t, b.t)
 }
@@ -279,6 +287,9 @@ func (p *parser) templateParams() []tparam {
 				case p.is("<"):
 					p.skipAngles()
 				case p.is("("):
+					if tp.name == "" && (p.isAt(1, "*") || p.isAt(1, "&")) && p.peekAt(2).kind == tkIdent && p.isAt(3, ")") {
+						tp.name = p.peekAt(2).text // R (*name)(params)
+					}
 					p.skipParens()
 				case p.is("..."):
 					tp.pack = true
@@ -810,6 +821,8 @@ func (p *parser) bindParam(sc *scope, tm *template, i int, a targ) {
 		sc.vars[tp.name] = &symbol{name: tp.name, src: tp.name, kind: symPack, pack: a.pack, sc: sc}
 	case a.tmpl != nil:
 		sc.vars[tp.name] = a.tmpl.sym
+	case a.isVal && a.sym != nil:
+		sc.vars[tp.name] = a.sym // the function, by the parameter's name
 	case a.isVal:
 		vt := a.vt
 		if vt == nil {
@@ -839,6 +852,29 @@ func placeholders(tm *template) []targ {
 		args = append(args, a)
 	}
 	return args
+}
+
+// funcAddr is the function whose address e is, if it is one's: a
+// template argument for a parameter that is a pointer to a function.
+func funcAddr(e expr) *symbol {
+	for {
+		switch x := e.(type) {
+		case *cast:
+			e = x.x
+			continue
+		case *decay:
+			e = x.x
+			continue
+		case *addrOf:
+			e = x.x
+			continue
+		case *varRef:
+			if x.sym.kind == symFunc {
+				return x.sym
+			}
+		}
+		return nil
+	}
 }
 
 // templateArgs parses template arguments, at their "<".
@@ -890,6 +926,10 @@ func (p *parser) templateArgs() []targ {
 				a.dep, a.param = true, d
 			} else if v, ok := p.foldInt(e); ok {
 				a.v = v
+			} else if f := funcAddr(e); f != nil {
+				a.sym = f
+			} else if e.ty().kind == kNullptr || isNullConst(e) {
+				a.v = 0
 			} else if p.pattern > 0 {
 				a.dep, a.param = true, -1
 			} else {
@@ -2023,16 +2063,26 @@ func (p *parser) ctad(tm *template, args []expr, at pos) *ctype {
 
 // ctadAt is the class template that the identifier at token offset i
 // names as a declaration's type, without arguments: T x(args).
-func (p *parser) ctadAt(i int) *template {
-	t := p.peekAt(i)
-	if t.kind != tkIdent || p.peekAt(i+1).kind != tkIdent || typeWords[p.peekAt(i+1).text] || cxxKeywords[p.peekAt(i+1).text] {
-		return nil
+func (p *parser) ctadAt(i int) (*template, int) {
+	j := i
+	var in *scope
+	if p.isAt(i, "::") || p.peekAt(i).kind == tkIdent && p.isAt(i+1, "::") {
+		in, j = p.nested(i)
 	}
-	s := p.lookup(t.text)
+	t := p.peekAt(j)
+	if t.kind != tkIdent || p.peekAt(j+1).kind != tkIdent || typeWords[p.peekAt(j+1).text] || cxxKeywords[p.peekAt(j+1).text] {
+		return nil, 0
+	}
+	var s *symbol
+	if in != nil {
+		s = in.find(t.text)
+	} else {
+		s = p.lookup(t.text)
+	}
 	if s == nil || s.kind != symTemplate || s.tmpl.kind != 'c' {
-		return nil
+		return nil, 0
 	}
-	return s.tmpl
+	return s.tmpl, j + 1 - i
 }
 
 // inInstance reports whether sc is a template instance's scope, or a

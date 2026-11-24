@@ -279,7 +279,7 @@ func (p *parser) convRank(a expr, pt *ctype) int {
 		if vt.enum != nil && vt.enum.scoped || pt.enum != nil {
 			return rkNone // no conversion from a scoped enumeration, or to an enumeration
 		}
-		if vt.isInteger() && pt.isInteger() && sameType(promote(vt), pt) && (vt.rank() < 320 || vt.enum != nil) {
+		if vt.isInteger() && pt.isInteger() && sameType(promote(vt), pt) && (vt.rank() < 320 || vt.enum != nil || vt.chr != 0) {
 			return rkPromo
 		}
 		if vt.kind == kFloat && pt.kind == kDouble {

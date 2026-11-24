@@ -84,6 +84,8 @@ type ctype struct {
 	mp      *memPtr   // a pointer to data member (an integer: the offset); kMemPtr
 	ctad    *template // isAuto: a class template's name, whose arguments the initializer gives
 	dep     *depType  // kDependent
+	chr     byte      // a character type that is its own type: 'w' wchar_t, 's' char16_t, 'i' char32_t
+
 }
 
 type record struct {
@@ -419,6 +421,12 @@ func (t *ctype) unsignedOf() *ctype {
 
 // promote is the integer promotion of t.
 func promote(t *ctype) *ctype {
+	if t.chr != 0 {
+		// wchar_t, char16_t, char32_t: as the integer type under it.
+		c := *t
+		c.chr, c.q = 0, 0
+		t = &c
+	}
 	if t.isInteger() && !t.isBitInt() && t.rank() < 320 {
 		return tInt
 	}

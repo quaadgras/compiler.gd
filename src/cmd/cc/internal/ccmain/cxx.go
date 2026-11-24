@@ -405,6 +405,14 @@ func (p *parser) cxxTypeAt(i int) (*symbol, int) {
 	return nil, 0
 }
 
+// C++'s character types that are types of their own, not the integer
+// types they are represented as.
+var (
+	tWChar  = &ctype{kind: kInt, chr: 'w'}
+	tChar16 = &ctype{kind: kUShort, chr: 's'}
+	tChar32 = &ctype{kind: kUInt, chr: 'i'}
+)
+
 // References. A reference is a pointer in the tree (ctype.ref); no
 // expression has reference type.
 
@@ -594,7 +602,7 @@ func sameType(a, b *ctype) bool {
 	if a == b {
 		return true
 	}
-	if a.kind != b.kind || a.q != b.q || a.enum != b.enum || a.ref != b.ref {
+	if a.kind != b.kind || a.q != b.q || a.enum != b.enum || a.ref != b.ref || a.chr != b.chr {
 		return false
 	}
 	if a.mp != nil || b.mp != nil {
@@ -1084,8 +1092,19 @@ func (p *parser) cxxVarName(sym *symbol, name string, s specs, at pos) {
 // C: a deduced type, T x(a) and T x{a}. It reports whether it did.
 func (p *parser) cxxInit(sym *symbol, s specs, at pos) bool {
 	t := sym.t
-	if t.kind == kArray && !sym.global && p.fn != nil && (p.is("{") || p.is("=") && p.isAt(1, "{")) && p.packInBraces() {
-		// An array whose initializer expands a pack: element by element.
+	if t.isRef() && p.is("=") && p.isAt(1, "{") {
+		// A reference to the temporary that a braced list makes.
+		p.next()
+		p.initVar(sym, p.braceList(), at)
+		sym.defined = true
+		if sym.storage == sExtern {
+			sym.storage = sAuto
+		}
+		return true
+	}
+	if t.kind == kArray && (p.is("{") || p.is("=") && p.isAt(1, "{")) && (!sym.global && p.fn != nil && p.packInBraces() || hasUserCtor(baseElem(t))) {
+		// An array whose initializer expands a pack, or of a class
+		// with constructors: element by element.
 		p.accept("=")
 		l := p.braceList()
 		if t.n < 0 {
@@ -1164,6 +1183,13 @@ func (p *parser) cxxInit(sym *symbol, s specs, at pos) bool {
 	return true
 }
 
+// hasUserCtor reports whether t is a class with a constructor that the
+// program declares: braces do not initialize its members.
+func hasUserCtor(t *ctype) bool {
+	ci := classOf(t)
+	return ci != nil && ci.complete && ci.userCtor
+}
+
 // initVar initializes the variable sym with the expression e.
 func (p *parser) initVar(sym *symbol, e expr, at pos) {
 	if sym.t.kind == kStruct {
@@ -1230,6 +1256,23 @@ func (p *parser) cxxName(at pos) expr {
 			a.set = funcSet(sym)
 		}
 		return a
+	}
+	if sym == nil && in != nil && p.isAt(n, "operator") {
+		// A qualified operator function: Base::operator=(x).
+		p.pos += n + 1
+		name := p.operatorName()
+		sym = in.find(name)
+		if sym == nil || sym.kind != symFunc {
+			p.errorAt(at, "%q is not a member of %s", name, in.name)
+		}
+		sym.used = true
+		p.use(sym)
+		v := &varRef{node{sym.t, at}, sym}
+		if p.qualified == nil {
+			p.qualified = map[expr]bool{}
+		}
+		p.qualified[v] = true
+		return v
 	}
 	if sym == nil {
 		t := p.peekAt(n)

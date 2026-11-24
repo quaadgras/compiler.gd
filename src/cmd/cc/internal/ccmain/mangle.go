@@ -187,6 +187,17 @@ func (m *mangler) typ(t *ctype, raw bool) {
 		m.named(t.enum.sc, sourceName(t.enum.tag), raw)
 		return
 	}
+	switch t.chr {
+	case 'w':
+		m.b.WriteString("w")
+		return
+	case 's':
+		m.b.WriteString("Ds")
+		return
+	case 'i':
+		m.b.WriteString("Di")
+		return
+	}
 	switch t.kind {
 	case kPtr, kArray, kFunc, kStruct, kComplex:
 	case kTParam:
