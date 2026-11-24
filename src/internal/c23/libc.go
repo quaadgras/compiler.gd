@@ -185,15 +185,40 @@ func SetEnd(end, s Ptr, n int) {
 
 // errno.h
 
-// errnoObj is errno: a C int, which C reads and writes through the
-// pointer ErrnoLoc returns.
-var ErrnoObj = New[int32]()
+// errno is each thread's own: a C int in the goroutine's gTable, which C
+// reads and writes through the pointer ErrnoLoc returns. It is made when
+// the thread first sets errno or takes its address: until then it is 0,
+// as a new thread's is.
+
+// ErrnoLoc returns the pointer to the calling thread's errno
+// (__cc_errno).
+func ErrnoLoc() Ptr {
+	tb := GSelf()
+	if tb.errnoP == nil {
+		tb.errno = New[int32]()
+		tb.errnoP = (*int32)(Check(tb.errno, 4))
+	}
+	return tb.errno
+}
 
 // Errno returns errno.
-func Errno() int32 { return int32(Load32(ErrnoObj)) }
+func Errno() int32 {
+	tb := (*gTable)(*gTableSlot())
+	if tb == nil || tb.errnoP == nil {
+		return 0
+	}
+	return *tb.errnoP
+}
 
 // SetErrno sets errno.
-func SetErrno(e int32) { Store32(ErrnoObj, uint32(e)) }
+func SetErrno(e int32) {
+	tb := (*gTable)(*gTableSlot())
+	if tb == nil || tb.errnoP == nil {
+		Store32(ErrnoLoc(), uint32(e))
+		return
+	}
+	*tb.errnoP = e
+}
 
 // stdio.h
 

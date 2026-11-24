@@ -8,5 +8,6 @@ import (
 	c23 "internal/c23"
 )
 
-// ErrnoLoc returns the pointer to errno (__cc_errno).
-func ErrnoLoc() c23.Ptr { return c23.ErrnoObj }
+// ErrnoLoc returns the pointer to the calling thread's errno
+// (__cc_errno).
+func ErrnoLoc() c23.Ptr { return c23.ErrnoLoc() }
