@@ -148,13 +148,19 @@ compiled: the mangled names are the Itanium ABI's, the calls are Go's.
 ## Status
 
 `go test cmd/cc -run Cxx` compiles `testdata/cxx/*.cc` with cmd/cc and
-with g++ and compares what they print (13 programs). Against Godot
-(4.7.1, with its own defines and include directories), 31 of the 47
-`.cpp` files of `core/math`, `core/os`, `core/error` and
-`core/templates` translate, each alone: `core/os/memory.cpp`, the
-vectors, `basis.cpp`, `quaternion.cpp`, `a_star.cpp`, `color.cpp` among
-them. None has been run: a file's functions call others' that are not
-there until the files are translated together.
+with g++ and compares what they print (34 programs). Against Godot
+(4.7.1, with its own defines and include directories, and `__GNUC__`
+defined: Godot expects its compiler to be GCC, clang or MSVC), 175 of
+the 177 `.cpp` files of `core` translate, each alone. The two others
+include `<vector>` and `<algorithm>` for third-party code (clipper2,
+GamepadMotionHelpers).
+
+Translated together with `cc -undef` (a call of a function that no file
+defines panics, so a part of a program can be built), seven of them run:
+`vector3.cpp`, `vector3i.cpp`, `basis.cpp`, `quaternion.cpp`,
+`math_funcs.cpp`, `random_pcg.cpp` and `pcg.cpp` with a test that
+prints what the vectors, a Basis and a Quaternion compute, the same as
+g++'s build of the same files prints. Nothing larger has been run.
 
 What is there, by step of the order above:
 
@@ -172,7 +178,10 @@ What is there, by step of the order above:
    allocation functions of the program's own; braced lists as
    initializers, arguments and results, with `std::initializer_list`;
    range-based `for`; lambdas (captures by value and reference, `this`,
-   initialized captures, nested, converted to function pointers).
+   initialized captures, nested, converted to function pointers);
+   `wchar_t`, `char16_t` and `char32_t` as types of their own; raw
+   strings; a conditional of class type; aggregates with members that
+   have constructors.
 2. **Inheritance and virtual functions**: bases as leading fields with
    no name, empty bases that take no room, conversions to a base and
    back; tables of virtual functions as C arrays of function pointers,
@@ -188,13 +197,16 @@ What is there, by step of the order above:
    and fold expressions, deduction (forwarding references, arrays'
    lengths, classes derived from a template's instance, pointers to
    members), class template argument deduction from constructors,
-   SFINAE, `if constexpr`, the type traits as built-ins. Instances are
-   made when needed: a class when it must be complete, a function's
-   body (any inline function's, a template's or not) when it is used.
+   SFINAE, `if constexpr`, the type traits as built-ins, functions as
+   arguments of pointer-to-function parameters, partial ordering of
+   function templates. Instances are made when needed: a class when it
+   must be complete, a function's body (any inline function's, a
+   template's or not) when it is used.
 4. **The library**: `<type_traits>`, `<utility>`, `<initializer_list>`,
    `<new>`, `<atomic>`, `<limits>`, `<functional>`, `<mutex>`,
    `<condition_variable>`, `<shared_mutex>`, `<thread>`, `<typeinfo>`,
-   `<cmath>` with its overloads, and the other `<c...>` headers.
+   `<array>`, `<cmath>` with its overloads, and the other `<c...>`
+   headers.
 
 Not there yet:
 
@@ -211,8 +223,8 @@ Not there yet:
   initialization of static locals;
 - generic lambdas, structured bindings, user-defined literals,
   deduction guides, member templates of class templates defined outside
-  both, partial ordering of function templates (of two that match, the
-  first is chosen);
+  both, designated initializers and brace elision for aggregates with
+  members that have constructors;
 - the containers and algorithms of the standard library (`<vector>`,
   `<string>`, `<algorithm>`): Godot's own code does not use them, some
   of its third-party libraries do;
