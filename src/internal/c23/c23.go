@@ -91,10 +91,16 @@ func Local[T any](o *Obj[T]) *Void { return (*Void)(unsafe.Pointer(&o.V)) }
 func LocalT[T any](o *Obj[T], t *Type) *Void { return (*Void)(unsafe.Pointer(&o.V)) }
 
 // New allocates an object of type T.
-func New[T any]() *Void { return (*Void)(unsafe.Pointer(new(T))) }
+func New[T any]() *Void { return (*Void)(unsafe.Pointer(&new(padded[T]).v)) }
+
+// padded is T as it is allocated: with a byte after it (see AllocOf).
+type padded[T any] struct {
+	v T
+	_ byte
+}
 
 // NewT is New.
-func NewT[T any](t *Type) *Void { return (*Void)(unsafe.Pointer(new(T))) }
+func NewT[T any](t *Type) *Void { return New[T]() }
 
 // NewArray allocates n bytes as an array of T's.
 func NewArray[T any](n uintptr) *Void { return (*Void)(unsafe.Pointer(AllocOf[T](uint64(n)))) }
@@ -107,7 +113,7 @@ func newOf(ti *Type, n uintptr) *Void {
 	if ti.size == 0 {
 		return (*Void)(unsafe.Pointer(new(byte)))
 	}
-	count := int(max((n+ti.size-1)/ti.size, 1))
+	count := int(n/ti.size + 1) // a byte after it at least (see AllocOf)
 	return (*Void)(reflect.MakeSlice(reflect.SliceOf(ti.t), count, count).UnsafePointer())
 }
 

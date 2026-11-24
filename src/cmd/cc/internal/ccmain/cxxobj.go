@@ -1026,8 +1026,23 @@ func (p *parser) newExpr(at pos) expr {
 	}
 	p.requireComplete(baseElem(t), at)
 	size := expr(p.intc(t.sizeof(), tULong, at))
+	var pre []stmt
+	cookie := int64(0)
 	if count != nil {
+		if _, ok := p.foldInt(count); !ok {
+			// Evaluated once.
+			n := p.newLocalOrStatic("n", tULong, at)
+			nv := &varRef{node{tULong, at}, n}
+			pre = append(pre, &exprStmt{&assign{node{tULong, at}, "=", nv, count, tULong}})
+			count = nv
+		}
 		size = &binary{node{tULong, at}, "*", count, size}
+		if needsDtor(t) && len(placement) == 0 {
+			// delete[] destroys as many elements as new[] made: their
+			// number is kept in front of the array.
+			cookie = arrayCookie(t)
+			size = &binary{node{tULong, at}, "+", size, p.intc(cookie, tULong, at)}
+		}
 	}
 	pt := ptrTo(t)
 	// The memory: an allocation function of the program's, the memory
@@ -1050,7 +1065,14 @@ func (p *parser) newExpr(at pos) expr {
 	}
 	ptr := p.newLocalOrStatic("new", pt, at)
 	pv := &varRef{node{pt, at}, ptr}
-	pre := []stmt{&exprStmt{&assign{node{pt, at}, "=", pv, mem, pt}}}
+	if cookie != 0 {
+		mem = &cast{node{pt, at}, p.bytesFrom(mem, cookie, at)}
+	}
+	pre = append(pre, &exprStmt{&assign{node{pt, at}, "=", pv, mem, pt}})
+	if cookie != 0 {
+		n := p.cookieOf(pv, at)
+		pre = append(pre, &exprStmt{&assign{node{tULong, at}, "=", n, count, tULong}})
+	}
 	obj := &deref{node{t, at}, pv}
 	// The initializer.
 	var init stmt
@@ -1191,7 +1213,11 @@ func (p *parser) deleteExpr(at pos) expr {
 		}
 	}
 	if !virtual {
-		body = append(body, p.deallocate(&cast{node{ptrTo(tVoid), at}, pv}, t, array, at))
+		mem := expr(pv)
+		if array && t.kind != kVoid && needsDtor(t) {
+			mem = p.bytesFrom(pv, -arrayCookie(t.unqual()), at)
+		}
+		body = append(body, p.deallocate(&cast{node{ptrTo(tVoid), at}, mem}, t, array, at))
 	}
 	list := []stmt{
 		&exprStmt{&assign{node{ptr.t, at}, "=", pv, v, ptr.t}},
@@ -1215,13 +1241,30 @@ func (p *parser) deallocate(ptr expr, t *ctype, array bool, at pos) stmt {
 	return &exprStmt{&call{node{tVoid, at}, free, free.ty().elem.fn, []expr{ptr}}}
 }
 
+// arrayCookie is the number of bytes that new[] allocates in front of an
+// array of t's, whose elements have a destructor: for their number,
+// which is in the 8 bytes before the array, and for the alignment of t.
+func arrayCookie(t *ctype) int64 { return max(8, t.alignof()) }
+
+// bytesFrom is the pointer n bytes from ptr: a char *.
+func (p *parser) bytesFrom(ptr expr, n int64, at pos) expr {
+	pc := ptrTo(tChar)
+	return &binary{node{pc, at}, "+", &cast{node{pc, at}, ptr}, p.intc(n, tLong, at)}
+}
+
+// cookieOf is the number of elements that new[] kept in front of the
+// array at ptr.
+func (p *parser) cookieOf(ptr expr, at pos) expr {
+	pn := ptrTo(tULong)
+	return &deref{node{tULong, at}, &binary{node{pn, at}, "+", &cast{node{pn, at}, ptr}, p.intc(-1, tLong, at)}}
+}
+
 // destroyArray is the statement that destroys the objects of type t of
-// the array that new[] made at ptr, the last first: the capability has
-// the array's size.
+// the array that new[] made at ptr, the last first.
 func (p *parser) destroyArray(ptr expr, t *ctype, at pos) stmt {
 	i := p.newLocalOrStatic("i", tLong, at)
 	iv := &varRef{node{tLong, at}, i}
-	count := &binary{node{tLong, at}, "/", &cast{node{tLong, at}, &builtinCall{node{tULong, at}, "cxx_size", []expr{ptr}}}, p.intc(t.sizeof(), tLong, at)}
+	count := &cast{node{tLong, at}, p.rvalue(p.cookieOf(ptr, at))}
 	elem := &deref{node{t, at}, &binary{node{ptrTo(t), at}, "+", &cast{node{ptrTo(t), at}, ptr}, iv}}
 	return &forStmt{
 		init: &exprStmt{&assign{node{tLong, at}, "=", iv, count, tLong}},

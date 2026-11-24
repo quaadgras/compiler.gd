@@ -367,6 +367,13 @@ type Invocation struct {
 	// against its own LocalPkg.
 	WalkScaseType any // *types.Type
 
+	// CObjects is set if the package is C translated by cmd/cc, whose
+	// objects on the heap have a byte after them, and CObjTypes are
+	// the types they are allocated as, a map[*types.Type]*types.Type:
+	// see ir.CObjType.
+	CObjects  bool
+	CObjTypes any
+
 	// inline package's PGO maps. Were package-level `var` maps,
 	// one of which (candHotEdgeMap) is written by PGOInlinePrologue
 	// in invocation A while invocation B reads it from inlineCostOK,

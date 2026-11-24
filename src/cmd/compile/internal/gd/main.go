@@ -271,6 +271,16 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 	// Parse and typecheck input.
 	noder.LoadPackage(gd, gd.Flagset.Args())
 
+	// C translated by cmd/cc: its objects are allocated with a byte
+	// after them (ir.CObjType), and stay where they are, since C keeps
+	// pointers to them where the compiler does not see pointers.
+	for _, p := range typecheck.Target(gd).Imports {
+		if p.Path == "internal/c23" {
+			gd.CObjects = true
+			gd.Debug.GdEscBitsOff = 1
+		}
+	}
+
 	// As a convenience to users (toolchain maintainers, in particular),
 	// when compiling a package named "main", we default the package
 	// path to "main" if the -p flag was not specified.

@@ -1142,8 +1142,6 @@ func (g *gen) tbuiltin(e *builtinCall) (string, bool) {
 			g.p("c23.Memcpy1(%s, %s, %d)", g.vptr(dst, e.args[0].ty()), g.vptr(src, e.args[1].ty()), n)
 		}
 		return "", true
-	case "cxx_size":
-		return fmt.Sprintf("%s(c23.SizeOf1(%s))", goType(tULong), g.vptr(g.rv(e.args[0]), e.args[0].ty())), true
 	case "alloca":
 		return fmt.Sprintf("c23.AllocRaw(uint64(%s))", g.rv(e.args[0])), true
 	}

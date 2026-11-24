@@ -865,7 +865,9 @@ func (s *state) newHeapaddr(n *ir.Name) {
 	if s.f.Config.WasmGC {
 		tagKey = nil
 	}
-	aggregate := !(n.Type().HasPointers() || size >= maxAggregatedHeapAllocation || size == 0 || s.f.Config.WasmGC)
+	// (A C object has a byte after it, ir.CObjType: each is allocated
+	// alone.)
+	aggregate := !(n.Type().HasPointers() || size >= maxAggregatedHeapAllocation || size == 0 || s.f.Config.WasmGC || s.gd.CObjects)
 	if tagKey != nil && size != 0 && !aggregate {
 		s.setHeapaddr(n.Pos(), n, s.newObjectLocal(n.Type(), nil, s.localTag(n, tagKey == true)))
 		return
@@ -1077,14 +1079,15 @@ func (s *state) newObject(typ *types.Type) *ssa.Value {
 	if typ.Size() == 0 {
 		return s.newValue1A(ssa.OpAddr, types.NewPtr(typ), ir.Syms(s.gd).Zerobase, s.sb)
 	}
-	rtype := s.reflectType(typ)
+	as := ir.CObjType(s.gd, typ) // the type it is allocated as
+	rtype := s.reflectType(as)
 	if s.f.Config.WasmGC {
 		// The backend allocates an object of the WebAssembly type.
 		return s.rtcall(ir.Syms(s.gd).Newobject, true, []*types.Type{types.NewPtr(typ)}, rtype)[0]
 	}
-	if specialMallocSym := s.specializedMallocSym(typ.Size(), typ.HasPointers()); specialMallocSym != nil {
+	if specialMallocSym := s.specializedMallocSym(as.Size(), as.HasPointers()); specialMallocSym != nil {
 		return s.rtcall(specialMallocSym, true, []*types.Type{types.NewPtr(typ)},
-			s.constInt(types.Types[types.TUINTPTR], typ.Size()),
+			s.constInt(types.Types[types.TUINTPTR], as.Size()),
 			rtype,
 			s.constBool(true),
 		)[0]
@@ -1100,7 +1103,7 @@ func (s *state) newObjectLocal(typ *types.Type, rtype, tag *ssa.Value) *ssa.Valu
 		return s.newValue1A(ssa.OpAddr, types.NewPtr(typ), ir.Syms(s.gd).Zerobase, s.sb)
 	}
 	if rtype == nil {
-		rtype = s.reflectType(typ)
+		rtype = s.reflectType(ir.CObjType(s.gd, typ))
 	}
 	return s.rtcall(ir.Syms(s.gd).Newobject, true, []*types.Type{types.NewPtr(typ)}, s.localType(rtype, tag))[0]
 }
@@ -1178,7 +1181,7 @@ func (s *state) newObjectNonSpecialized(typ *types.Type, rtype *ssa.Value) *ssa.
 		return s.newValue1A(ssa.OpAddr, types.NewPtr(typ), ir.Syms(s.gd).Zerobase, s.sb)
 	}
 	if rtype == nil {
-		rtype = s.reflectType(typ)
+		rtype = s.reflectType(ir.CObjType(s.gd, typ))
 	}
 	return s.rtcall(ir.Syms(s.gd).Newobject, true, []*types.Type{types.NewPtr(typ)}, rtype)[0]
 }

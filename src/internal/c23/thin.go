@@ -21,7 +21,14 @@ func Lit[A any](s string) (a A) {
 	return a
 }
 
-// AllocOf is malloc(n) converted to *T: an array of T's of at least n
+// Every object of C's on the heap has at least a byte after it, so that
+// the pointer one past its end, which C may make and keep, points into
+// it and to no other object: the collector would keep the other alive
+// in its place, or stop on a pointer to one that is free. The compiler
+// does the same for the variables of translated C (cmd/compile's
+// ir.CObjType).
+
+// AllocOf is malloc(n) converted to *T: an array of T's of more than n
 // bytes, which the collector knows the pointers of.
 func AllocOf[T any](n uint64) *T {
 	var z T
@@ -29,14 +36,14 @@ func AllocOf[T any](n uint64) *T {
 	if size == 0 {
 		return new(T)
 	}
-	return unsafe.SliceData(make([]T, max((n+size-1)/size, 1)))
+	return unsafe.SliceData(make([]T, n/size+1))
 }
 
 // AllocRaw is malloc(n) that is given no type: memory in which any word
 // may come to hold a pointer, which the collector therefore looks at
 // word by word.
 func AllocRaw(n uint64) *Void {
-	return (*Void)(unsafe.Pointer(unsafe.SliceData(make([]unsafe.Pointer, max((n+wordBytes-1)/wordBytes, 1)))))
+	return (*Void)(unsafe.Pointer(unsafe.SliceData(make([]unsafe.Pointer, n/wordBytes+1))))
 }
 
 // sizeOf is the number of bytes from p to the end of the heap object it
@@ -160,8 +167,9 @@ func Memset1(to *Void, c int32, n uint64) *Void {
 
 // SizeOf1 is the number of bytes from p to the end of the object it
 // points into, as the collector knows it: the object's size class, which
-// may be more than what was asked for.
-func SizeOf1(p *Void) uint64 { return uint64(sizeOf(unsafe.Pointer(p))) }
+// is more than what was asked for (malloc_usable_size), less the byte that
+// stays after every object (see AllocOf).
+func SizeOf1(p *Void) uint64 { return uint64(max(sizeOf(unsafe.Pointer(p)), 1) - 1) }
 
 // labels are what the addresses of labels (GNU's &&label) point to: one
 // byte for each label of a function, by its number.

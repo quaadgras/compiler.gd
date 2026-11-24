@@ -1429,8 +1429,6 @@ func (g *gen) builtinCode(e *builtinCall) string {
 	case "cxx_zero":
 		g.p("c23.Memset(%s, 0, %d)", g.orv(e.args[0]), e.args[1].(*intConst).v)
 		return ""
-	case "cxx_size":
-		return fmt.Sprintf("%s(c23.SizeOf1(%s))", goType(tULong), g.orv(e.args[0]))
 	case "cxx_copy":
 		g.p("c23.Memmove(%s, %s, %d)", g.orv(e.args[0]), g.orv(e.args[1]), e.args[2].(*intConst).v)
 		return ""
