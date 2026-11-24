@@ -274,6 +274,9 @@ func (p *parser) toMemPtr(e expr, t *ctype, at pos) expr {
 		if t.kind == kBool {
 			return p.memPtrTruth(e, at)
 		}
+		if p.castingMemPtr {
+			return nil
+		}
 		p.errorAt(at, "a pointer to member is not converted to %s", t)
 	case amp == nil:
 		if e.ty().kind != kNullptr && !isNullConst(e) {
@@ -288,7 +291,13 @@ func (p *parser) toMemPtr(e expr, t *ctype, at pos) expr {
 		return e
 	}
 	off, ok := baseOffset(amp.cls.rec, mp.cls.rec)
-	if !ok && !sameType(mp.cls, amp.cls) || !sameType(mp.t, amp.t) {
+	if !ok {
+		// To a base's (a cast): the derived class's place taken off.
+		if back, isBase := baseOffset(mp.cls.rec, amp.cls.rec); isBase {
+			off, ok = -back, true
+		}
+	}
+	if !p.castingMemPtr && (!ok && !sameType(mp.cls, amp.cls) || !sameType(mp.t, amp.t)) {
 		p.errorAt(at, "%s is not converted to %s", e.ty(), t)
 	}
 	if !isPMF(t) {

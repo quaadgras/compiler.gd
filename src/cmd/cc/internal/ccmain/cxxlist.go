@@ -76,7 +76,12 @@ func (p *parser) listRank(l *initList, pt *ctype) int {
 		if pt.ref == 1 && pt.elem.q&qConst == 0 {
 			return rkNone
 		}
-		pt = pt.elem
+		// The temporary it makes: T && binds it better than const T &.
+		r := p.listRank(l, pt.elem)
+		if r != rkNone && pt.ref == 1 {
+			r++
+		}
+		return r
 	}
 	pt = pt.unqual()
 	p.complete(pt)

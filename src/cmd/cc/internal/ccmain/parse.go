@@ -56,39 +56,40 @@ type parser struct {
 	translationTime int         // in an initializer computed as if at translation time
 
 	// C++ (cxx.go).
-	cxx        bool
-	externC    int        // in extern "C"
-	externSpec bool       // in extern "C" declaration, without braces: as if extern
-	noGT       int        // in template arguments: ">" ends them
-	declIn     *scope     // the scope the last declarator's qualified name is in
-	this       *symbol    // in a non-static member function
-	cls        *ctype     // the class whose members are being declared
-	temps      []*tempObj // the temporaries with destructors of the full expression being parsed
-	extend     *[]*symbol // where temporaries a declared reference binds are kept, to live as long
-	declTo     *scope     // the scope the next function is declared in, if not the current one
-	userConv   int        // ranking a user-defined conversion's own argument
-	pattern    int        // parsing a template's pattern: its parameters are placeholders
-	packOn     bool       // parsing a pack expansion's pattern, for the element packI
-	packI      int
-	gtHalf     int                // the ">>" token whose first ">" has closed template brackets, or -1
-	lambda     *lambdaInfo        // the lambda whose body is being parsed
-	typeinfos  map[string]*symbol // the type_info objects typeid made
-	pmfTypes   map[string]*ctype
-	pmfConsts  map[*symbol]*symbol
-	pmfNulls   map[*record]*symbol
-	noPM       int       // parsing the right operand of .* or ->*
-	explicitT  []targ    // the explicit template arguments of the call being resolved
-	tmplSuffix string    // the template arguments, mangled, of the function being instantiated
-	instTag    *ctype    // the class template instance whose definition is being parsed
-	pending    []*symbol // used, and not yet defined: template instances' functions
-	draining   bool
-	tids       map[tidKey]tidVal
-	direct     bool          // the next call of a virtual function is not virtual: its name is qualified
-	qualified  map[expr]bool // the functions named with a qualified name
-	condDepth  int           // in an operand that is not always evaluated
-	convType   *ctype        // the type of the conversion function whose name was last parsed
-	exprType   int           // parsing a type specifier in an expression: T(x)
-	xvalues    map[expr]bool // lvalues of the tree that are rvalues to C++: temporaries, what T && casts and calls give
+	cxx           bool
+	externC       int        // in extern "C"
+	externSpec    bool       // in extern "C" declaration, without braces: as if extern
+	noGT          int        // in template arguments: ">" ends them
+	declIn        *scope     // the scope the last declarator's qualified name is in
+	this          *symbol    // in a non-static member function
+	cls           *ctype     // the class whose members are being declared
+	temps         []*tempObj // the temporaries with destructors of the full expression being parsed
+	extend        *[]*symbol // where temporaries a declared reference binds are kept, to live as long
+	declTo        *scope     // the scope the next function is declared in, if not the current one
+	userConv      int        // ranking a user-defined conversion's own argument
+	pattern       int        // parsing a template's pattern: its parameters are placeholders
+	packOn        bool       // parsing a pack expansion's pattern, for the element packI
+	packI         int
+	gtHalf        int                // the ">>" token whose first ">" has closed template brackets, or -1
+	lambda        *lambdaInfo        // the lambda whose body is being parsed
+	typeinfos     map[string]*symbol // the type_info objects typeid made
+	pmfTypes      map[string]*ctype
+	pmfConsts     map[*symbol]*symbol
+	pmfNulls      map[*record]*symbol
+	noPM          int       // parsing the right operand of .* or ->*
+	castingMemPtr bool      // converting a pointer to member in a cast
+	explicitT     []targ    // the explicit template arguments of the call being resolved
+	tmplSuffix    string    // the template arguments, mangled, of the function being instantiated
+	instTag       *ctype    // the class template instance whose definition is being parsed
+	pending       []*symbol // used, and not yet defined: template instances' functions
+	draining      bool
+	tids          map[tidKey]tidVal
+	direct        bool          // the next call of a virtual function is not virtual: its name is qualified
+	qualified     map[expr]bool // the functions named with a qualified name
+	condDepth     int           // in an operand that is not always evaluated
+	convType      *ctype        // the type of the conversion function whose name was last parsed
+	exprType      int           // parsing a type specifier in an expression: T(x)
+	xvalues       map[expr]bool // lvalues of the tree that are rvalues to C++: temporaries, what T && casts and calls give
 }
 
 type parseError struct{ msg string }
@@ -886,6 +887,16 @@ done:
 // recordSpec parses a struct or union specifier, after its keyword.
 func (p *parser) recordSpec(union bool, kw token) *ctype {
 	a := p.attributes()
+	if p.cxx && p.is("alignas") && p.isAt(1, "(") {
+		p.pos += 2
+		if p.isTypeStart(0) {
+			a.aligned = max(a.aligned, p.typeName().alignof())
+		} else {
+			a.aligned = max(a.aligned, p.constInt(p.conditional()))
+		}
+		p.expect(")")
+		a.merge(p.attributes())
+	}
 	if p.cxx {
 		// A class that is named, perhaps with a qualified name.
 		if sym, n := p.cxxTypeAt(0); p.instTag == nil && sym != nil && sym.t.kind == kStruct && (n > 1 || !sym.tagName) && !p.isAt(n, "{") && !p.isAt(n, ":") && !p.isAt(n, ";") && !p.isAt(n, "final") {

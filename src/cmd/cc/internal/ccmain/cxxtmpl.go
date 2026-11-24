@@ -317,6 +317,17 @@ func (p *parser) skipDecl(class bool) bool {
 		if t.kind == tkEOF {
 			p.errorf("unterminated declaration")
 		}
+		if t.kind == tkIdent && t.text == "operator" && paren == 0 {
+			// An operator's name: operator=, operator(), operator[].
+			p.next()
+			if p.is("(") && p.isAt(1, ")") {
+				p.pos += 2
+			}
+			for !p.is("(") && p.peek().kind != tkEOF {
+				p.next()
+			}
+			continue
+		}
 		if t.kind == tkPunct {
 			switch t.text {
 			case "(", "[":

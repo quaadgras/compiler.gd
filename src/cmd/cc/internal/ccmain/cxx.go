@@ -727,7 +727,10 @@ func (p *parser) castTo(e expr, t *ctype, at pos, how string) expr {
 		return &cast{node{tVoid, at}, p.rvalueVoid(e)}
 	}
 	if _, ok := e.(*memFnRef); ok || memPtrOf(t) != nil || memPtrOf(e.ty()) != nil && (t.kind == kBool || isPMF(e.ty())) {
-		if c := p.toMemPtr(e, t, at); c != nil {
+		p.castingMemPtr = true // a cast converts any to any
+		c := p.toMemPtr(e, t, at)
+		p.castingMemPtr = false
+		if c != nil {
 			return c
 		}
 	}
@@ -1066,6 +1069,18 @@ func (p *parser) cxxVarName(sym *symbol, name string, s specs, at pos) {
 // C: a deduced type, T x(a) and T x{a}. It reports whether it did.
 func (p *parser) cxxInit(sym *symbol, s specs, at pos) bool {
 	t := sym.t
+	if t.kind == kArray && !sym.global && p.fn != nil && (p.is("{") || p.is("=") && p.isAt(1, "{")) && p.packInBraces() {
+		// An array whose initializer expands a pack: element by element.
+		p.accept("=")
+		l := p.braceList()
+		if t.n < 0 {
+			sym.t = arrayOf(t.elem, int64(len(l.args)))
+			sym.t.q = t.q
+		}
+		sym.ctor = p.listInit(&varRef{node{sym.t, at}, sym}, sym.t, l, at)
+		sym.defined = true
+		return true
+	}
 	if !hasAuto(t) && !(p.is("(") || p.is("{")) {
 		if t.kind == kStruct {
 			return p.classInit(sym, s, at)

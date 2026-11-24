@@ -185,6 +185,22 @@ func (p *parser) conditional() expr {
 		y = p.conditional()
 	}
 	p.condDepth--
+	if p.cxx {
+		// One operand of a class: converted to the other's type, if it
+		// can be.
+		xs, ys := x.ty().kind == kStruct, y.ty().kind == kStruct
+		if _, ok := x.(*initList); !ok && xs != ys && !isPMF(x.ty()) && !isPMF(y.ty()) {
+			if xs && y.ty().kind != kVoid {
+				if c := p.convertClass(x, valueType(y), at); c != nil {
+					x = c
+				}
+			} else if ys && x.ty().kind != kVoid {
+				if c := p.convertClass(y, valueType(x), at); c != nil {
+					y = c
+				}
+			}
+		}
+	}
 	lx, ly := x, y
 	x, y = p.rvalueVoid(x), p.rvalueVoid(y)
 	if cv, ok := p.foldInt(c); ok && isConstExpr(x) && isConstExpr(y) {

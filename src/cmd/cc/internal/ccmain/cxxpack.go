@@ -311,3 +311,38 @@ func (p *parser) foldExpr(at pos) (expr, bool) {
 	}
 	return e, true
 }
+
+// packInBraces reports whether the braced list next (after "=", if
+// that is next) has a pack expansion among its elements.
+func (p *parser) packInBraces() bool {
+	j := 0
+	if p.isAt(j, "=") {
+		j++
+	}
+	if !p.isAt(j, "{") {
+		return false
+	}
+	depth := 0
+	for ; ; j++ {
+		t := p.peekAt(j)
+		if t.kind == tkEOF {
+			return false
+		}
+		if t.kind != tkPunct {
+			continue
+		}
+		switch t.text {
+		case "{", "(", "[":
+			depth++
+		case "}", ")", "]":
+			depth--
+			if depth == 0 {
+				return false
+			}
+		case "...":
+			if depth == 1 {
+				return true
+			}
+		}
+	}
+}
