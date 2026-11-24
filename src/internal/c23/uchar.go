@@ -85,7 +85,7 @@ func mbDecode(p *Void, n uint64, st mbstate) (rune, uint64) {
 // mbrto is mbrtowc and mbrtoc32 without the store.
 func Mbrto(s *Void, n uint64, ps *Void, internal **Void) (rune, uint64) {
 	if Addr(s) == 0 {
-		s, n = String[int8]("\x00"), 1
+		s, n = FromGo(String("")), 1
 	}
 	st := StateOf(ps, internal)
 	if st.Count() < 0 {

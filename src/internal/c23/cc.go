@@ -149,12 +149,19 @@ func convertible(a, b reflect.Type) bool {
 	return num(a) && num(b)
 }
 
-// String allocates a string literal's array: s holds its elements'
-// bytes, the null element included.
-func String[T any](s string) *Void {
-	p := NewArray[T](uintptr(len(s)))
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(p)), len(s)), s)
-	return p
+// emptyString is the empty string literal: its 0 byte.
+var emptyString [1]byte
+
+// String is the string literal s: the pointer to its first character.
+// The 0 byte that ends it is the one the compiler puts after the data of
+// every string constant, so s must be a constant. Its bytes are
+// read-only, as C's literal's are: storing through the pointer is a
+// fault.
+func String(s string) *Char {
+	if len(s) == 0 {
+		return (*Char)(unsafe.Pointer(&emptyString))
+	}
+	return (*Char)(unsafe.Pointer(unsafe.StringData(s)))
 }
 
 // StringOf is String for a literal whose array, A ([N]T), cmd/cc knows:

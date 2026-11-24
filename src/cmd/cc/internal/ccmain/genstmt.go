@@ -204,7 +204,7 @@ func (g *gen) funcLit(f *funcDecl) string {
 	}
 	if !g.jmp {
 		fb.WriteString(text)
-		if hasRes {
+		if hasRes && !endsInReturn(text) {
 			fmt.Fprintf(&fb, "\treturn %s\n", g.zero(ft.ret))
 		}
 	} else {
@@ -230,6 +230,14 @@ func (g *gen) funcLit(f *funcDecl) string {
 	}
 	fb.WriteString("}")
 	return fb.String()
+}
+
+// endsInReturn reports whether the last statement of body, a function's,
+// is a return: Go then wants none after it.
+func endsInReturn(body string) bool {
+	body = strings.TrimRight(body, " \t\n")
+	last := body[strings.LastIndexByte(body, '\n')+1:]
+	return strings.HasPrefix(strings.TrimSpace(last), "return")
 }
 
 // nestedFunc generates GNU's nested function f where it is defined: a

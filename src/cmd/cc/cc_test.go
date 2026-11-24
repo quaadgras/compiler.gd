@@ -17,6 +17,10 @@ import (
 	"unsafe"
 )
 
+// The tests translate with the assertions that Go lays each record out as
+// C does (cc -debug), which the Go compiler then checks.
+func init() { os.Setenv("CCDEBUG", "layout") }
+
 func translate(t *testing.T, in, out string, withMain bool) {
 	t.Helper()
 	src, err := os.ReadFile(in)

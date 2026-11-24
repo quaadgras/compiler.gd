@@ -222,6 +222,10 @@ func (g *gen) tlv1(e expr, forAddr bool) lval {
 	case *compoundLit:
 		return lval{x: g.tcompound(e), t: e.t}
 	case *strLit:
+		if q, ok := cString(e); ok {
+			// The Go constant itself, read-only as C's literal is.
+			return lval{x: fmt.Sprintf("(*(*%s)(unsafe.Pointer(c23.String(%s))))", g.mirror(e.t), q), t: e.t}
+		}
 		return lval{x: g.tstr(e), t: e.t}
 	case *retSlot:
 		return lval{x: "(*sret)", t: e.t}
@@ -337,7 +341,7 @@ func (g *gen) trv(e expr) (string, bool) {
 			return g.retype(fmt.Sprintf("c23.FromInt(%d)", uint64(e.v)), voidPtr, g.gt(e.t)), true
 		}
 	case *strLit:
-		return "&" + g.tstr(e), true
+		return taddr(g.tlv(e, true).x), true
 	case *varRef:
 		if e.sym.kind == symFunc {
 			return g.tfuncPtr(e.sym), true
@@ -351,6 +355,11 @@ func (g *gen) trv(e expr) (string, bool) {
 				return g.tfuncPtr(v.sym), true
 			}
 			return g.rv(e.x), true
+		}
+		if lit, ok := e.x.(*strLit); ok {
+			if q, ok := cString(lit); ok {
+				return g.retype("c23.String("+q+")", "*int8", g.gt(e.t)), true
+			}
 		}
 		return g.tdecay(g.tlv(e.x, true), e.t), true
 	case *addrOf:
@@ -634,7 +643,11 @@ func (g *gen) tinitObject(x string, t *ctype, in *initializer) {
 			dst := g.tat(x, t, it.off, it.t)
 			if s, ok := it.x.(*strLit); ok && it.t.kind == kArray {
 				n := min(it.t.sizeof(), s.t.sizeof())
-				g.p("c23.Memcpy1((*c23.Void)(unsafe.Pointer(%s)), (*c23.Void)(unsafe.Pointer(&%s)), %d)", taddr(dst), g.tstr(s), n)
+				src := taddr(g.tlv(s, true).x)
+				if q, ok := cString(s); ok {
+					src = "c23.String(" + q + ")"
+				}
+				g.p("c23.Memcpy1((*c23.Void)(unsafe.Pointer(%s)), (*c23.Void)(unsafe.Pointer(%s)), %d)", taddr(dst), src, n)
 				continue
 			}
 			g.tstore(lval{x: dst, t: it.t}, g.rv(it.x), it.x)
@@ -692,7 +705,17 @@ func (g *gen) tglobalVar(s *symbol) {
 	g.out, g.ind = save, saveInd
 }
 
-// tstr is the Go variable of the string literal s: an array.
+// cString is the string literal s as a Go string constant, if its
+// characters are bytes: the compiler puts the 0 byte after it.
+func cString(s *strLit) (string, bool) {
+	if s.t.elem.sizeof() != 1 {
+		return "", false
+	}
+	return strconv.Quote(s.data), true
+}
+
+// tstr is the Go variable of the string literal s, whose characters are
+// wider than a byte: an array.
 func (g *gen) tstr(s *strLit) string {
 	key := s.t.elem.String() + "|" + s.data
 	if n, ok := g.strs[key]; ok {
