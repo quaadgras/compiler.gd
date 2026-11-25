@@ -66,7 +66,7 @@ func init() {
 	}
 	// cgo's C.long and C.ulong, which are Go's int32 and uint32 on
 	// 32-bit targets.
-	cgoBasic["long"], cgoBasic["ulong"] = goType(tLong), goType(tULong)
+	cgoBasic["long"], cgoBasic["ulong"] = "int32", "uint32"
 }
 
 // ilp32Macros are the predefined macros that differ from LP64's
