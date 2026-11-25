@@ -12,11 +12,17 @@ import (
 )
 
 // Mlock is mlock: memory is not paged out by request, and the request
-// succeeds.
-func Mlock(addr *c23.Void, length uint64) int32 { return 0 }
+// succeeds for memory that the program has.
+func Mlock(addr *c23.Void, length uint64) int32 {
+	if !advisable(addr, length) {
+		c23.SetErrno(c23.ENOMEM)
+		return -1
+	}
+	return 0
+}
 
 // Munlock is munlock.
-func Munlock(addr *c23.Void, length uint64) int32 { return 0 }
+func Munlock(addr *c23.Void, length uint64) int32 { return Mlock(addr, length) }
 
 // mlockall's flags.
 const (
@@ -50,6 +56,9 @@ const (
 func PosixMadvise(addr *c23.Void, length uint64, advice int32) int32 {
 	if advice < POSIX_MADV_NORMAL || advice > POSIX_MADV_DONTNEED {
 		return c23.EINVAL
+	}
+	if !advisable(addr, length) {
+		return c23.ENOMEM
 	}
 	return 0
 }
