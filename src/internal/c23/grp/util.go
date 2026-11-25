@@ -18,7 +18,7 @@ import (
 type group struct {
 	name, passwd unsafe.Pointer
 	gid          uint32
-	mem          unsafe.Pointer
+	mem          **int8 // (as C has it: the type is what C's pointer to a group is compared with)
 }
 
 var grMu sync.Mutex

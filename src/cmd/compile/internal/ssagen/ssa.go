@@ -154,6 +154,16 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).
 		CheckPtrConvC = typecheck.LookupRuntimeFunc(gd, "checkptrConvC")
 	ir.Syms(gd).
+		CheckPtrArithmeticC = typecheck.LookupRuntimeFunc(gd, "checkptrArithmeticC")
+	ir.Syms(gd).
+		CheckPtrConvCLoad = typecheck.LookupRuntimeFunc(gd, "checkptrConvCLoad")
+	ir.Syms(gd).
+		C23ByteStore = typecheck.LookupRuntimeFunc(gd, "c23ByteStore")
+	ir.Syms(gd).
+		C23PtrStore = typecheck.LookupRuntimeFunc(gd, "c23PtrStore")
+	ir.Syms(gd).
+		C23PtrStores = typecheck.LookupRuntimeFunc(gd, "c23PtrStores")
+	ir.Syms(gd).
 		CheckPtrAlignmentLoad = typecheck.LookupRuntimeFunc(gd, "checkptrAlignmentLoad")
 	ir.Syms(gd).
 		C23Header = typecheck.LookupRuntimeFunc(gd, "c23Header")
@@ -1198,9 +1208,10 @@ func (s *state) newObjectNonSpecialized(typ *types.Type, rtype *ssa.Value) *ssa.
 
 // checkPtrAlignment checks the conversion n of v, an unsafe.Pointer, to
 // a pointer, and returns the pointer that the conversion gives: v, but
-// in a package of C's for a conversion to a pointer to a type with
-// pointers, where the runtime may give another (runtime.checkptrConvC:
-// a union's member is not where the union is).
+// in a package of C's, where the runtime may give another
+// (runtime.checkptrConvC: a union's member is not where the union is,
+// and a pointer that the type does not fit at is one that nothing is
+// loaded through).
 func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value) *ssa.Value {
 	if !n.Type().IsPtr() {
 		s.Fatalf("expected pointer type: %v", n.Type())
@@ -1241,7 +1252,7 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 		fn = ir.Syms(s.gd).CheckPtrAlignmentC
 	}
 	// conv: the call gives the pointer.
-	conv := s.gd.CObjects && fn == ir.Syms(s.gd).CheckPtrAlignmentC && count == nil && elem.HasPointers()
+	conv := s.gd.CObjects && (fn == ir.Syms(s.gd).CheckPtrAlignmentC || fn == ir.Syms(s.gd).CheckPtrView) && count == nil
 	if conv {
 		defer delete(s.vars, convVar)
 	}
@@ -1271,7 +1282,14 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 			rtype = s.reflectType(elem)
 		}
 		if conv {
-			s.vars[convVar] = s.rtcall(ir.Syms(s.gd).CheckPtrConvC, true, []*types.Type{v.Type}, v, rtype, count)[0]
+			fn := ir.Syms(s.gd).CheckPtrConvC
+			if n.LoadOnly {
+				// What is only loaded through may have integers
+				// where the memory has pointers: the int of a
+				// union of the system's that holds a pointer.
+				fn = ir.Syms(s.gd).CheckPtrConvCLoad
+			}
+			s.vars[convVar] = s.rtcall(fn, true, []*types.Type{v.Type}, v, rtype, count)[0]
 			return
 		}
 		s.rtcall(fn, true, nil, v, rtype, count)
@@ -1311,6 +1329,95 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 		return s.variable(convVar, v.Type)
 	}
 	return v
+}
+
+// What a store through a pointer of C's is to be checked for.
+const (
+	cStoreNone  = iota
+	cStoreBytes // it is through a pointer to bytes
+	cStorePtr   // it is through a pointer to a pointer to anything
+)
+
+// cUntypedPtr reports whether t is a pointer to anything, to C: an
+// unsafe.Pointer, a pointer to what has no size, or a pointer to a byte.
+func cUntypedPtr(t *types.Type) bool {
+	return t.IsUnsafePtr() || t.IsPtr() && (t.Elem().Size() == 0 || t.Elem().Size() == 1 && !t.Elem().HasPointers())
+}
+
+// cStoreKind returns what the store to left, in a package of C's, is to
+// be checked for (runtime/cclaim.go's c23ByteStore). A store to a
+// variable, or through a pointer to a type whose words the pointer's
+// conversion claimed, is not checked. The two that are: through a
+// pointer to bytes, which may be over anything; and through a pointer to
+// a pointer to anything, or to an array of them, which may be over
+// pointers of a type.
+func (s *state) cStoreKind(left ir.Node) int {
+	for n := left; ; {
+		var t *types.Type // what the pointer that is stored through points to
+		switch n.Op() {
+		case ir.ODOT:
+			n = n.(*ir.SelectorExpr).X
+			continue
+		case ir.OINDEX:
+			x := n.(*ir.IndexExpr).X
+			if !x.Type().IsArray() {
+				return cStoreNone
+			}
+			n = x
+			continue
+		case ir.OPAREN:
+			n = n.(*ir.ParenExpr).X
+			continue
+		case ir.ODEREF:
+			n := n.(*ir.StarExpr)
+			if c, ok := n.X.(*ir.ConvExpr); ok && c.CheckPtr() {
+				// Of a function that is not checked, inlined.
+				return cStoreNone
+			}
+			t = n.Type()
+		case ir.ODOTPTR:
+			t = n.(*ir.SelectorExpr).X.Type().Elem()
+		default:
+			return cStoreNone
+		}
+		switch {
+		case t.Size() == 0:
+		case !t.HasPointers() && t.Alignment() == 1:
+			return cStoreBytes
+		case cUntypedPtr(t), t.IsArray() && cUntypedPtr(t.Elem()):
+			return cStorePtr
+		}
+		return cStoreNone
+	}
+}
+
+// cStoreCheck checks a store of size bytes at addr, for check, one of
+// ssa's CSlowStoreByte and CSlowStorePtr, and returns what is to be
+// stored: v, the pointer, which the runtime may give another for.
+func (s *state) cStoreCheck(check int, addr, v *ssa.Value, size int64) *ssa.Value {
+	if v != nil {
+		defer delete(s.vars, convVar)
+	}
+	call := func() {
+		if v == nil {
+			s.rtcall(ir.Syms(s.gd).C23ByteStore, true, nil, addr, s.constInt(types.Types[types.TUINTPTR], size))
+			return
+		}
+		s.vars[convVar] = s.rtcall(ir.Syms(s.gd).C23PtrStore, true, []*types.Type{v.Type}, addr, v)[0]
+	}
+	if !s.cHeaders() || size > ssa.CStoreWords*int64(s.config.PtrSize) {
+		call()
+	} else {
+		var fast func()
+		if v != nil {
+			fast = func() { s.vars[convVar] = v }
+		}
+		s.cSlow(s.newValue3I(ssa.OpC23Slow, types.Types[types.TBOOL], ssa.CSlowAux(check, 0, size), addr, addr, s.mem()), call, fast)
+	}
+	if v != nil {
+		return s.variable(convVar, v.Type)
+	}
+	return nil
 }
 
 // cHeaders reports whether the checks of C's pointers are made in the
@@ -4487,7 +4594,16 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 		// as not-pointers or vice-versa because of copy
 		// elision.
 		if to.IsPtrShaped() != from.IsPtrShaped() {
-			return s.newValue2(ssa.OpConvert, to, x, s.mem())
+			v := s.newValue2(ssa.OpConvert, to, x, s.mem())
+			if s.gd.CObjects && from.IsPtrShaped() && to.Size() == 8 && !n.CheckPtr() {
+				// The address that a pointer of C's is: without the
+				// bit of a pointer to the end of its object
+				// (runtime's cEnd), which what is added to it, what
+				// it is compared with and what is taken from it
+				// know nothing of.
+				v = s.newValue2(ssa.OpAnd64, to, v, s.constInt64(to, ^ssa.CEnd))
+			}
+			return v
 		}
 
 		v := s.newValue1(ssa.OpCopy, to, x) // ensure that v has the right type
@@ -4589,6 +4705,15 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 		if n.X.Type().IsFloat() {
 			// float comparison
 			return s.newValueOrSfCall2(s.ssaOp(op, n.X.Type()), types.Types[types.TBOOL], a, b)
+		}
+		if t := n.X.Type(); s.gd.CObjects && (op == ir.OEQ || op == ir.ONE) && (t.IsPtr() || t.IsUnsafePtr()) && t.Size() == 8 && !ir.IsNil(n.X) && !ir.IsNil(n.Y) {
+			// Two pointers of C's are the same if their addresses
+			// are: one of them may have the bit of a pointer that
+			// nothing is loaded through (runtime's cEnd).
+			u := types.Types[types.TUINTPTR]
+			a = s.newValue2(ssa.OpAnd64, u, s.newValue2(ssa.OpConvert, u, a, s.mem()), s.constInt64(u, ^ssa.CEnd))
+			b = s.newValue2(ssa.OpAnd64, u, s.newValue2(ssa.OpConvert, u, b, s.mem()), s.constInt64(u, ^ssa.CEnd))
+			return s.newValue2(s.ssaOp(op, u), types.Types[types.TBOOL], a, b)
 		}
 		// integer comparison
 		return s.newValue2(s.ssaOp(op, n.X.Type()), types.Types[types.TBOOL], a, b)
@@ -6120,6 +6245,24 @@ func (s *state) assignWhichMayOverlap(left ir.Node, right *ssa.Value, deref bool
 
 	// Left is not ssa-able. Compute its address.
 	addr := s.addr(left)
+	if s.gd.CObjects && s.checkPtrEnabled && t.Size() != 0 {
+		// A store through a pointer to bytes, or through a pointer
+		// to a pointer to anything, of C's: the word may be one that
+		// holds something else (cStoreCheck).
+		switch s.cStoreKind(left) {
+		case cStoreBytes:
+			s.cStoreCheck(ssa.CSlowStoreByte, addr, nil, t.Size())
+		case cStorePtr:
+			switch {
+			case deref && right == nil:
+				// Null pointers.
+			case deref || !cUntypedPtr(t):
+				s.rtcall(ir.Syms(s.gd).C23PtrStores, true, nil, addr, s.constInt(types.Types[types.TUINTPTR], t.Size()))
+			default:
+				right = s.cStoreCheck(ssa.CSlowStorePtr, addr, right, t.Size())
+			}
+		}
+	}
 	if s.localExpr(left) {
 		// Memory that no other goroutine can reach.
 		if !deref {
@@ -10091,6 +10234,12 @@ func (e *ssafn) Syslook(name string) *obj.LSym {
 		return ir.Syms(e.gd).SliceHdrNotInHeap
 	case "c23Header":
 		return ir.Syms(e.gd).C23Header
+	case "checkptrArithmeticC":
+		return ir.Syms(e.gd).CheckPtrArithmeticC
+	case "checkptrConvC":
+		return ir.Syms(e.gd).CheckPtrConvC
+	case "checkptrConvCLoad":
+		return ir.Syms(e.gd).CheckPtrConvCLoad
 	}
 	e.Fatalf(src.NoXPos, "unknown Syslook func %v", name)
 	return nil

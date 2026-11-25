@@ -2284,7 +2284,9 @@ func CScalar(p unsafe.Pointer) bool {
 
 // CConvert is the conversion of p to a pointer to n values of the type
 // of e, as a package that is C translated by cmd/cc makes it.
-func CConvert(p unsafe.Pointer, e any, n uintptr) { checkptrAlignmentC(p, efaceOf(&e)._type, n) }
+func CConvert(p unsafe.Pointer, e any, n uintptr) unsafe.Pointer {
+	return checkptrConvC(p, efaceOf(&e)._type, n)
+}
 
 // CClasses returns what the words from p on, in an object of C's, are
 // claimed for: '-' nothing, '.' no pointer, 'u' a pointer to anything,
@@ -2323,6 +2325,15 @@ func CClaimCounts() (claims, reclaims, narrowed, forged, bytes uint64) {
 
 // CTag returns p with the bit that a pointer of C's to a union has, and
 // CUntag takes it off.
+// SetCReclaim sets GODEBUG's creclaim, with which memory of C's that is
+// claimed again is counted and the program goes on, and returns what it
+// was.
+func SetCReclaim(v int32) int32 {
+	old := debug.creclaim
+	debug.creclaim = v
+	return old
+}
+
 func CTag(p unsafe.Pointer) unsafe.Pointer { return unsafe.Pointer(uintptr(p) | cPtrTag) }
 
 func CUntag(p unsafe.Pointer) unsafe.Pointer { return unsafe.Pointer(uintptr(p) &^ cPtrTag) }

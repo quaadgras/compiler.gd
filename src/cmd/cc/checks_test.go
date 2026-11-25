@@ -20,7 +20,9 @@ import (
 // as where the runtime checks them, and with -d=cheaders=1.
 func TestChecks(t *testing.T) {
 	testenv.MustHaveGoRun(t)
-	const pastEnd = "fatal error: checkptr: pointer arithmetic result is past the end of its object"
+	// A load or a store through the pointer to the end of an object, which
+	// each of these reaches before a pointer past it, faults.
+	const pastEnd = "fatal error: checkptr: load or store through a pointer to the end of its object"
 	tests := []struct {
 		name, src, want string
 	}{

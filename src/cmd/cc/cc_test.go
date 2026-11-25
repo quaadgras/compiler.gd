@@ -55,10 +55,11 @@ func module(t *testing.T, in string, withMain bool, goFiles ...string) string {
 	return dir
 }
 
-func goRun(t *testing.T, dir string) string {
+func goRun(t *testing.T, dir string, env ...string) string {
 	t.Helper()
 	cmd := testenv.Command(t, testenv.GoToolPath(t), "run", ".")
 	cmd.Dir = dir
+	cmd.Env = append(cmd.Environ(), env...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go run: %v\n%s", err, out)

@@ -169,33 +169,40 @@ it (`unsafe.md`), which was a call for each `p < end` and `p - a`.
 Where C and Go's rules for pointers disagree:
 
 - **One past the end.** C lets a program make the pointer one past the
-  end of an object and keep it. To Go that is a pointer to the next
-  object of the heap: the check of pointer arithmetic refuses it, the
-  collector would keep the wrong object alive for it, and stops if
-  that one is free. So every object of C's on the heap has at least a
-  byte after it: malloc and new allocate one more element (or word),
-  and in a package that imports internal/c23 the compiler allocates a
-  variable that it moves to the heap as `struct { v T; _ byte }`
-  (cmd/compile's `ir.CObjType`), as Go itself does for a struct that
-  ends in a field of no size. The stack, and the program's data, are
-  each one allocation to both. The escape bits (`escape-bits.md`) are
-  on in such a package as in any other: what they put on the heap as
-  the program runs, a variable moved there at a call whose callee
-  keeps its address and an object that a caller gave no buffer for,
-  is allocated with the byte too (`runtime.materializeToHeapC`,
-  `maybeInPlaceC`). `new T[n]` of a class with a
-  destructor keeps n in front of the array, as other compilers do,
-  since the size of the allocation no longer says it.
-  A typed pointer to the end (`T *end = a + n`) is a conversion to
-  `*T` of a pointer that no T fits at. In such a package the
-  conversion is checked by `runtime.checkptrAlignmentC`, which lets a
-  pointer into an object of the heap be if its type reaches past the
-  object's end. This is the one place where C is checked less than Go:
-  a load or a store through such a pointer reaches up to one value
-  past the end, and nothing stops it. For what malloc gave, the end is
-  where C asked for it, not where the allocator's slot ends: a pointer
-  that arithmetic takes past it, or that is converted there, stops the
-  program.
+  end of an object and keep it: the end of an array that a loop runs
+  to, or back from. It may compare with it and step back from it, and
+  may not load or store through it. That last part is what nothing
+  checked, since a load is not checked: `*end` read what was after the
+  object. Now the pointer to the end is one that faults. Arithmetic
+  whose result is the end of its object gives the address with a bit
+  that no address has (bit 54, `runtime.cEnd`), and so does a
+  conversion to `*T` at a place where a `T` does not fit in what is
+  left of the object: `(struct big *)p` for a `p` to a few bytes is a
+  pointer that C may keep and compare, and that faults when it is used.
+  The compiled code takes the bit off what it adds to
+  (`uintptr(p) &^ cEnd` is what a conversion of a pointer to an integer
+  is in such a package) and off both sides of `==`; the runtime puts it
+  on (`checkptrArithmeticC`, `checkptrConvC`), which is the call that a
+  comparison in the compiled code leaves to it, so a loop pays for it
+  once, when it ends. A fault through such a pointer says so:
+  `checkptr: load or store through a pointer to the end of its object`.
+  To the collector, and to the code that copies a stack, the pointer is
+  its address: it keeps its object alive. So every object of C's on
+  the heap still has at least a byte after it, in which that address
+  is: malloc and new allocate one more, and in a package that imports
+  internal/c23 the compiler allocates a variable that it moves to the
+  heap as `struct { v T; _ byte }` (cmd/compile's `ir.CObjType`), as Go
+  itself does for a struct that ends in a field of no size. The escape
+  bits (`escape-bits.md`) are on in such a package as in any other:
+  what they put on the heap as the program runs is allocated with the
+  byte too (`runtime.materializeToHeapC`, `maybeInPlaceC`). `new T[n]`
+  of a class with a destructor keeps n in front of the array, as other
+  compilers do, in memory that is allocated as bytes.
+  A pointer that arithmetic takes out of its object, before it or past
+  its end, stops the program: for what malloc gave, the end is where C
+  asked for it, not where the allocator's slot ends. A result that is
+  in nothing the runtime knows (the originals were not either: memory
+  that the program mapped) is let be for now.
 - **Integers in pointers.** C keeps them there (`SIG_IGN`, `(void *)1`,
   a union's `int`) and adds to a null pointer. Such a conversion goes
   through `c23.FromInt`, unchecked; a pointer to a function is a
@@ -243,34 +250,76 @@ memory-safe `unsafe` (`unsafe.md`, "Compatible types", is the first):
 | `malloc(n)` with no type (`void *p = malloc(n)`), or for bytes (`char *s = malloc(n)`) | not claimed |
 | `(T *)malloc(n)`, `calloc`, `realloc` to a `T *` | claimed as an array of T: for no pointer, or for T's pointer there |
 | converts a pointer to `T *` over words that nothing claimed, which every step of pointer arithmetic does | claimed for what T has there: the one T at the pointer |
-| converts to a `T *` that is compatible with the claims (`unsafe.md`'s rule: the same, an `unsafe.Pointer` or `void *` over a typed pointer, a pointer to a type of the same shape) | unchanged |
+| converts to a `T *` that is compatible with the claims (`unsafe.md`'s rule: the same, a `void *` or a `char *` over a typed pointer, a pointer to a type of the same shape) | unchanged |
 | converts to bytes (`char *`, a type of alignment 1) | unchanged: bytes claim nothing and may be over anything |
-| converts to a `T *` that is not compatible | claimed again for T, and counted |
-| `memset` | unchanged |
-| `memcpy`, `memmove` of whole words, to words that nothing claimed | claimed as the words they are copied from, if those are C's; to words that were claimed, unchanged |
+| converts to a `T **` over a word that is a pointer to anything | the pointer that the word holds is converted to `T *`, as the program would have to convert it: it stays if what it points to is a T or can be claimed for one, and is otherwise a pointer that faults. Then the word is a `T *` |
+| converts to a `T *` whose result is only loaded through (`*(long *)p` as a value) | unchanged: what is loaded as an integer may be a pointer |
+| converts to a `T *` that is not compatible | the program stops |
+| `memset` | unchanged. A word that holds a pointer is set whole or the program stops, and by a byte that is not 0 to a pointer that faults |
+| `memcpy`, `memmove` of whole words, to words that nothing claimed | claimed as the words they are copied from: those of C's, and those of an object of Go's by its type |
+| the same, to a word that is claimed for a pointer | unchanged; what is copied there is a pointer of the word's kind, or one that faults: an integer, or a pointer of a type that is not compatible and that points to nothing of the word's type |
+| the same, of bytes that are not whole words, over a word that holds a pointer | the program stops |
 
-- **A store is a plain store**, of a pointer too: the conversion that
-  its pointer comes from claimed the word for one. (It was a call to
-  the runtime, `c23StorePtr`, when a word had a bit that a store
-  changed; a store of an integer in memory with no type had a call
-  before it, from a pass of its own; and a struct with pointers was
-  stored by `typedmemmove`. All three are gone.)
+- **A pointer to a byte is a pointer to anything**, to C: a `char *` is
+  claimed as a `void *` is, a `char **` may be over a `void *` and the
+  reverse, and what C loads from either is a pointer that it may look
+  at the bytes of. (To a package of Go's a `*byte` is a pointer to a
+  byte that is no part of a pointer, which nothing checks again: there
+  the two are not the same.)
+- **A store through a pointer to a type is a plain store**, of a
+  pointer too: the conversion that its pointer comes from claimed the
+  word for what the type has there. Two kinds of pointer claim nothing
+  that says what may be stored, and a store through one looks at the
+  word first (`ssagen`'s `cStoreCheck`, `runtime.c23ByteStore`,
+  `c23PtrStore`):
+  - *a pointer to bytes* (`char *`) is over anything. Bytes stored
+    over a word that holds a pointer would make a pointer that the
+    program was not given: `checkptr: bytes stored over a pointer`.
+  - *a pointer to a pointer to anything* (`void **`, `char **`) may be
+    over a pointer of a type. What is stored there is converted to that
+    type first, as the program would have to convert it, and is a
+    pointer that faults if what it points to is not what the type
+    says.
+
+  The look is at the class of the word, two bits that the compiled code
+  loads where it has the header of what the pointer points into, with
+  the call for what that does not let through. A store to a member
+  through a pointer to a struct is not looked at: the struct's
+  conversion claimed the member's word, and a `void *` member is not
+  compatible with a word that is a pointer of a type.
+- **`memcpy`, `memmove` and `memset` stay in the objects they are
+  given**, both of them for a copy, or the program stops (`checkptr:
+  memory copied or set past the end of its object`), and what they
+  write is what a store would be let write, word by word (the table).
 - **The collector** skips a word that is claimed for no pointer, and
   looks at any other as it looks at a word of a stack frame that it has
   no map for: what is there is a pointer if it is the address of an
   object that is allocated, and is nothing otherwise. C keeps `(void
   *)1` and the address past an array in its pointers, so a word claimed
   for a pointer is looked at in the same way.
-- **A word that is claimed again** is memory that C uses for something
-  else. The pointers that were converted before are then wrong for it:
-  one of them stores an integer where the new type has a pointer. The
-  plan is to stop the world there, find them, and make of them a
-  pointer that faults; and a word that is claimed for a pointer, and
-  holds what was written as an integer or as bytes, is to hold that
-  faulting pointer too. Neither is done yet: the word keeps what it
-  holds, the collector sees it, and the case is counted.
-  `GODEBUG=cclaims=1` prints the counts when the program exits, and
-  `cclaims=2` the first 64 conversions that claimed a word again.
+- **A conversion that is not compatible with the claim stops the
+  program**: `checkptr: converted pointer type is not compatible with
+  what the memory was claimed for`, after a line that says the word,
+  what it was and what it is asked to be. The memory is used for
+  something else than it was, as an allocator of C's does with the
+  blocks it keeps, and the pointers that were converted before are
+  wrong for it: one of them stores an integer where the new type has a
+  pointer. The plan is to stop the world there instead, find those
+  pointers, and make of them pointers that fault, so that such a
+  program runs; until then it does not. `GODEBUG=creclaim=1` claims
+  the word again and counts it, as before, with nothing taken away:
+  for measuring. `GODEBUG=cclaims=1` prints the counts when the program
+  exits, and `cclaims=2` the first 64 conversions that claimed a word
+  again.
+- **A string, a slice or an interface of Go's** in C's memory is
+  claimed as what it is: each of its words for that word of that type,
+  the length as much as the pointer, and nothing else may be over one.
+  An integer that C stored where Go has a length would be an index
+  that Go trusts.
+- **An object of Go's that C converts a pointer into** is compared with
+  the type it was allocated as, as a conversion of Go's is
+  (`unsafe.md`, "Compatible types"): the library's structs that C sees
+  have the types of C's declarations for that.
 - **Go that is not C's** claims with its conversions as C does
   (`checkptrAlignment`), with Go's rule that what is only loaded
   through may have integers over pointers.
@@ -283,9 +332,9 @@ What the claims found, 2026-11-25:
 | Godot's core, the test of strings, containers and Variant (176 files) | 1758 | 18 | all 18 are Variant's union: its words, claimed for a pointer to anything, converted to `int64`, `float64`, `Vector3`, and back |
 | `testdata/programs/malloc.c`, written to use memory again as an allocator of C's does | 18268 | 1003 | integers over the pointers of blocks that were given back, and the reverse |
 
-So in the C++ that this was built for, memory is claimed again where a
-union is, and nowhere else: what stopping the world there would cost
-depends on unions being something else first (step 7).
+So in the C++ that this was built for, memory was claimed again where a
+union is, and nowhere else. Unions are something else now ("Unions",
+below), and Godot's core claims nothing again.
 
 What it costs, on the benchmark above against `gcc -O2`: the vector 2.3
 times (1.6 before the claims), the tree 1.3 (1.1), the hash map 2.3
@@ -308,12 +357,19 @@ What this does not do yet:
   nothing since where their pointers are is not looked up, and
   internal/c23's own stores are not checked. Once those claim, such a
   word is bytes and is skipped.
-- **A union** is words that its members are converted over, each a
-  claim again of the same word: until unions are Go interfaces (the
-  plan's step 7) they are counted with the rest.
-- **A store of a byte over a pointer** is not seen (step 3).
-- **A string, a slice or an interface of Go's** in C's memory is
-  claimed as its pointers and integers, not as what it is.
+- **A word that is claimed for a pointer for the first time** keeps
+  what bytes were written in it: it is to hold a pointer that faults.
+  (A copy from a variable of the stack or of the data claims nothing,
+  since their words have no types here yet, and what such a copy
+  brought is let through for the same reason.)
+- **The stack and the program's data** are each one object to these
+  checks: a pointer to a variable reaches the next one, and a store of
+  bytes or a copy there is not looked at.
+- **The library** (internal/c23) is compiled without the checks, so
+  what it stores for C is not looked at: `strcpy` goes past an object
+  as it always has.
+- **A store and its check are two steps**: another thread that claims
+  the word between them is not seen.
 - **`new`** and the variables that the compiler moves to the heap are
   Go objects still, with the byte after them.
 - **wasm.**

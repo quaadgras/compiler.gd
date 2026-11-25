@@ -654,6 +654,12 @@ const (
 )
 
 type m struct {
+	// gd: cprobe is set while a conversion is only asked about
+	// (checkptrProbe): what it would stop the program for sets
+	// cprobeFail instead.
+	cprobe, cprobeFail bool
+	cprobeDepth        uint16
+
 	g0      *g     // goroutine with scheduling stack
 	morebuf gobuf  // gobuf arg to morestack
 	divmod  uint32 // div/mod denominator for arm - known to liblink (cmd/internal/obj/arm/obj5.go)

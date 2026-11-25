@@ -133,13 +133,75 @@ const (
 type compatSeen struct {
 	n     int
 	pairs [32][2]*_type
+	c     bool // the conversion is C's: see compatLeaves
+	// direct: the type converted to is itself a pointer to anything
+	// (void **, char **), or an array of them.
+	direct bool
+	// cmem: the memory is an object that C allocated.
+	cmem bool
+}
+
+// cDirect reports whether t is a pointer to anything, to C, or an array
+// of them: what a pointer to it is stored through is looked at where it
+// is stored (cclaim.go's c23PtrStore), so such a pointer may be over a
+// pointer of a type.
+func cDirect(t *_type) bool {
+	for t.Kind() == abi.Array {
+		t = (*arraytype)(unsafe.Pointer(t)).Elem
+	}
+	switch t.Kind() {
+	case abi.UnsafePointer:
+		return true
+	case abi.Pointer:
+		e := (*ptrtype)(unsafe.Pointer(t)).Elem
+		return e.Size_ == 0 || e.Size_ == 1 && !e.Pointers()
+	}
+	return false
+}
+
+// cObjectIsC reports whether typ is what a package of C's allocates an
+// object of the heap as: struct { v T; _ byte } (cmd/compile's
+// ir.CObjType, internal/c23's padded). In such an object a pointer to a
+// byte is C's, a pointer to anything.
+func cObjectIsC(typ *_type) bool {
+	if typ == nil || typ.Kind() != abi.Struct {
+		return false
+	}
+	st := (*structtype)(unsafe.Pointer(typ))
+	return len(st.Fields) == 2 && st.Fields[1].Typ.Kind() == abi.Uint8 && st.Fields[0].Name.Name() == "v" && st.Fields[1].Name.Name() == "_"
+}
+
+// compatBytePtr reports whether t, a pointer type, is a pointer to a
+// byte: C's char *, which C keeps the address of anything in, as it
+// does in a void *.
+func compatBytePtr(t *_type) bool {
+	elem := (*ptrtype)(unsafe.Pointer(t)).Elem
+	return elem.Size_ == 1 && !elem.Pointers()
 }
 
 // compatLeaves reports whether a word that is (vk, vt, vin) to the
 // converted type may be over one that is (mk, mt, min) to the memory. If
 // view is not set the two are the types of what two pointers point to,
 // and they must agree both ways.
+//
+// In a conversion of C's (seen.c) a pointer to a byte is a pointer to
+// anything, as unsafe.Pointer is: what C loads from a void * as a char *
+// is a pointer that it may look at the bytes of, and what it stores
+// through either is checked where it stores (doc/gd/cc.md). The memory's
+// own word is what its type says, unless C allocated the object
+// (seen.cmem): a *byte of Go's is a pointer to a byte that is no part of
+// a pointer. And only a pointer to a pointer to anything (seen.direct)
+// is over a pointer of a type: a struct of C's that has a void * where
+// the memory has a typed pointer would store through it unlooked at.
 func compatLeaves(mk uint8, mt *_type, min uintptr, vk uint8, vt *_type, vin uintptr, view bool, seen *compatSeen) int {
+	if seen.c {
+		if vk == compatPtr && compatBytePtr(vt) {
+			vk = compatUnsafe
+		}
+		if (!view || seen.cmem) && mk == compatPtr && compatBytePtr(mt) {
+			mk = compatUnsafe
+		}
+	}
 	if mk == compatScalar || vk == compatScalar {
 		switch {
 		case mk == vk:
@@ -151,8 +213,12 @@ func compatLeaves(mk uint8, mt *_type, min uintptr, vk uint8, vt *_type, vin uin
 	}
 	if view && vk == compatUnsafe {
 		switch mk {
-		case compatPtr, compatUnsafe, compatFunc, compatMap, compatChan:
+		case compatUnsafe:
 			return compatOK
+		case compatPtr, compatFunc, compatMap, compatChan:
+			if !seen.c || seen.direct {
+				return compatOK
+			}
 		}
 		return compatPointee
 	}
@@ -296,7 +362,9 @@ func compatWords(m, v *_type, view bool, seen *compatSeen) bool {
 // checkptrCompat checks that the view of size bytes at p, of values of
 // type elem, is compatible with the object that ends at limit, which
 // holds values of type typ from tbase on.
-func checkptrCompat(typ *_type, tbase, limit, p uintptr, elem *_type, size uintptr, load bool) {
+//
+// If c is set the conversion is one of a package of C's (compatLeaves).
+func checkptrCompat(typ *_type, tbase, limit, p uintptr, elem *_type, size uintptr, load, c bool) {
 	if size == 0 || p < tbase || p >= limit {
 		return
 	}
@@ -313,6 +381,9 @@ func checkptrCompat(typ *_type, tbase, limit, p uintptr, elem *_type, size uintp
 	mmask, vmask := getGCMask(typ), getGCMask(elem)
 	aligned := lo&(word-1) == 0
 	var seen compatSeen
+	seen.c = c
+	seen.direct = c && cDirect(elem)
+	seen.cmem = c && cObjectIsC(typ)
 	for w := lo &^ (word - 1); w < lo+size; w += word {
 		mo := w % typ.Size_
 		mp := compatMaskBit(typ, mmask, mo)
@@ -350,6 +421,10 @@ const (
 // to elem of a pointer into memory that is typ's, or nil's if it has no
 // type, at offset off.
 func checkptrIncompatible(why int, elem, typ *_type, off uintptr) {
+	if mp := getg().m; mp.cprobe {
+		mp.cprobeFail = true
+		return
+	}
 	var buf [20]byte
 	msg := checkptrWhy(why) + ": *" + toRType(elem).string() + ", at offset " + string(itoa(buf[:], uint64(off)))
 	if typ != nil {

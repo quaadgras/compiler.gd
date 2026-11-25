@@ -40,6 +40,16 @@ func walkConv(gd *base.Invocation, n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 		// (below).
 		markArithmeticOriginals(n.X)
 	}
+	if n.Op() == ir.OCONVNOP && n.Type().IsUnsafePtr() && gd.Debug.Checkptr < 2 {
+		// gd: unsafe.Pointer((*T)(p)) makes no pointer to a T that
+		// anything is loaded or stored through: what C writes as
+		// (struct header *)p - 1 is p, less the size of a header, and
+		// nothing says that a header is at p. (-d=checkptr=2 is for
+		// checking such a conversion all the same.)
+		if x, ok := n.X.(*ir.ConvExpr); ok && x.Op() == ir.OCONVNOP && x.Type().IsPtr() && x.X.Type().IsUnsafePtr() {
+			x.SetCheckPtr(true)
+		}
+	}
 	n.X = walkExpr(gd, n.X, init)
 	if n.Op() == ir.OCONVNOP && n.Type() == n.X.Type() {
 		return n.X
@@ -638,32 +648,43 @@ func walkCheckPtrArithmetic(gd *base.Invocation, n *ir.ConvExpr, init *ir.Nodes)
 	}
 	walk(n.X)
 
-	cheap := cheapExpr(gd, n, init)
-
-	slice := typecheck.MakeDotArgs(gd, gd.Pos, types.NewSlice(types.Types[types.TUNSAFEPTR]), originals)
-	slice.SetEsc(ir.EscNone)
-
-	if len(originals) > 0 && gd.CObjects && gd.Flag.N == 0 && gd.Debug.CHeaders == 0 && types.PtrSize == 8 {
-		// Where C's pointers are checked, the compiled code may know
-		// what the first of the originals points into, and that
-		// the result is in it (ssa's cheaders): the runtime is
-		// asked only if it does not.
+	if len(originals) > 0 && gd.CObjects {
+		// C's rule (runtime.checkptrArithmeticC): the result is in
+		// the object of an original, or it is the pointer to the
+		// object's end, which the runtime gives back with the bit
+		// that such a pointer has. Where C's pointers are checked
+		// in the compiled code, that may know what the first of the
+		// originals points into, and that the result is in it (ssa's
+		// cheaders): the runtime is asked only if it does not.
 		//
-		//	if c23slow(cheap, original) {
-		//		checkptrArithmetic(cheap, originals)
+		//	if c23slow(tmp, original) {
+		//		tmp = checkptrArithmeticC(tmp, originals)
 		//	}
+		tmp := copyExpr(gd, n, n.Type(), init)
+		slice := typecheck.MakeDotArgs(gd, gd.Pos, types.NewSlice(types.Types[types.TUNSAFEPTR]), originals)
+		slice.SetEsc(ir.EscNone)
+		var body ir.Nodes
+		call := mkcall(gd, "checkptrArithmeticC", types.Types[types.TUNSAFEPTR], &body, typecheck.ConvNop(gd, tmp, types.Types[types.TUNSAFEPTR]), slice)
+		body.Append(typecheck.Stmt(gd, ir.NewAssignStmt(gd, gd.Pos, tmp, typecheck.ConvNop(gd, call, n.Type()))))
+		if gd.Flag.N != 0 || gd.Debug.CHeaders != 0 || types.PtrSize != 8 {
+			init.Append(body...)
+			return tmp
+		}
 		first := originals[0]
 		if c, ok := first.(*ir.ConvExpr); ok {
 			first = c.X
 		}
-		cond := mkcall(gd, "c23slow", types.Types[types.TBOOL], init, typecheck.ConvNop(gd, cheap, types.Types[types.TUNSAFEPTR]), typecheck.ConvNop(gd, first, types.Types[types.TUNSAFEPTR]))
-		var body ir.Nodes
-		body.Append(mkcall(gd, "checkptrArithmetic", nil, &body, typecheck.ConvNop(gd, cheap, types.Types[types.TUNSAFEPTR]), slice))
+		cond := mkcall(gd, "c23slow", types.Types[types.TBOOL], init, typecheck.ConvNop(gd, tmp, types.Types[types.TUNSAFEPTR]), typecheck.ConvNop(gd, first, types.Types[types.TUNSAFEPTR]))
 		nif := ir.NewIfStmt(gd, gd.Pos, cond, body, nil)
 		nif.Likely = false
 		init.Append(typecheck.Stmt(gd, nif))
-		return cheap
+		return tmp
 	}
+
+	cheap := cheapExpr(gd, n, init)
+
+	slice := typecheck.MakeDotArgs(gd, gd.Pos, types.NewSlice(types.Types[types.TUNSAFEPTR]), originals)
+	slice.SetEsc(ir.EscNone)
 
 	init.Append(mkcall(gd, "checkptrArithmetic", nil, init, typecheck.ConvNop(gd, cheap, types.Types[types.TUNSAFEPTR]), slice))
 	// TODO(khr): Mark backing store of slice as dead. This will allow us to reuse

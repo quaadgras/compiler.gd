@@ -123,7 +123,7 @@ func c23UnionBox(slot *unsafe.Pointer, typ *_type) unsafe.Pointer {
 			if p := *(*unsafe.Pointer)(ov); p != nil {
 				if typ.Kind() == abi.Pointer {
 					if elem := (*ptrtype)(unsafe.Pointer(typ)).Elem; elem.Size_ != 0 {
-						checkptrAlignmentC(p, elem, 1)
+						p = checkptrConvC1(p, elem, false)
 					}
 				}
 				*(*unsafe.Pointer)(v) = p
@@ -346,6 +346,7 @@ func cViewOK(m, v *_type) bool {
 	const word = goarch.PtrSize
 	mmask, vmask := getGCMask(m), getGCMask(v)
 	var seen compatSeen
+	seen.c = true
 	for w := uintptr(0); w < v.Size_; w += word {
 		if !compatMaskBit(m, mmask, w) && !compatMaskBit(v, vmask, w) {
 			continue
@@ -357,35 +358,6 @@ func cViewOK(m, v *_type) bool {
 		}
 	}
 	return true
-}
-
-// checkptrConvC is checkptrAlignmentC for a conversion to a pointer to
-// a type with pointers, and returns the pointer that the conversion
-// gives, which is p but for a union's:
-//
-//   - if p is the address of a union, and elem is not a type that begins
-//     with one, the conversion is to the union's member of that type,
-//     which C has at the union's address: the union's value as an elem
-//     (c23UnionBox);
-//   - if p is the address of a union's value, and elem is not a type
-//     that the value may be looked at as, the conversion goes back
-//     through the union that the value is the value of, if it still
-//     is: to the union itself if elem is its type, and otherwise to the
-//     union's value as an elem.
-//
-// p has no bit of cPtrBits after it.
-func checkptrConvC(p unsafe.Pointer, elem *_type, n uintptr) unsafe.Pointer {
-	if p == nil {
-		return nil
-	}
-	p = unsafe.Pointer(uintptr(p) &^ cPtrBits)
-	if cUnionRefType != nil && elem.Pointers() {
-		if q := cUnionConv(uintptr(p), elem); q != nil {
-			return q
-		}
-	}
-	checkptrAlignmentC(p, elem, n)
-	return p
 }
 
 // cUnionConv returns what the conversion of a to a pointer to elem

@@ -35,14 +35,29 @@ type Intcap struct {
 // intTag is the bit of an intptr_t or a uintptr_t that is a pointer.
 const intTag = uintptr(1) << (8*unsafe.Sizeof(uintptr(0)) - 1)
 
-// capInt returns the integer that x is: its address without the bit.
-func capInt(x *Void) uintptr { return Addr(x) &^ intTag }
+// endTag and poisonTag are the runtime's cEnd and cPoison: the bits of a
+// pointer to the end of its object, and of one that the program was not
+// given. A load or a store through either faults.
+const (
+	endTag    = uintptr((1 << 54) * (unsafe.Sizeof(uintptr(0)) / 8))
+	poisonTag = uintptr((1 << 55) * (unsafe.Sizeof(uintptr(0)) / 8))
+)
+
+// capInt returns the integer that x is: its address without the bits,
+// if it is a pointer.
+func capInt(x *Void) uintptr {
+	v := Addr(x)
+	if v&intTag != 0 {
+		return v &^ (intTag | endTag)
+	}
+	return v
+}
 
 // capSint is capInt for an intptr_t: the 63 bits are a signed integer's.
 func capSint(x *Void) int {
 	v := Addr(x)
 	if v&intTag != 0 {
-		return int(v &^ intTag)
+		return int(v &^ (intTag | endTag))
 	}
 	return int(v<<1) >> 1
 }
@@ -57,6 +72,10 @@ func CapSintOf(x *Void) int   { return capSint(x) }
 func PtrToCap(p *Void) *Void {
 	if p == nil {
 		return nil
+	}
+	if a := Addr(p); a&poisonTag != 0 {
+		// What was made of an integer is the integer again.
+		return FromInt(a &^ (poisonTag | intTag))
 	}
 	return FromInt(Addr(p)&^ptrTags | intTag)
 }
@@ -99,17 +118,20 @@ func capOf(r uintptr, x, y *Void) *Void {
 	if b&intTag != 0 {
 		p = b
 	}
-	if inObject(p&^intTag, r) {
+	switch inObject(p&^intTag, r) {
+	case 1:
 		return FromInt(r | intTag)
+	case 2:
+		return FromInt(r | intTag | endTag)
 	}
 	return FromInt(r &^ intTag)
 }
 
-// inObject reports whether r is an address in what p points into, or at
-// its end.
+// inObject says where r is in what the pointer p, which may have endTag,
+// points into: 0 if out of it, 1 if in it, 2 if at its end.
 //
 //go:linkname inObject runtime.c23InObject
-func inObject(p, r uintptr) bool
+func inObject(p, r uintptr) int
 
 // CapArith is x op y ('+', '-', '*', '/', '%', '&', '|', '^'), signed if
 // s.

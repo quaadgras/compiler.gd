@@ -46,7 +46,15 @@ func TestPrograms(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := goRun(t, dir); got != string(want) {
+			var env []string
+			if filepath.Base(f) == "malloc.c" {
+				// The program uses memory again for other types,
+				// as an allocator of C's does: that stops a
+				// program until the pointers that were converted
+				// before are taken away (doc/gd/cc.md).
+				env = []string{"GODEBUG=creclaim=1"}
+			}
+			if got := goRun(t, dir, env...); got != string(want) {
 				t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
 			}
 		})

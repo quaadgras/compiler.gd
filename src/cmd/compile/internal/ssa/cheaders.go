@@ -18,7 +18,13 @@ const (
 	CSlowConvScalar         // the same, to a type of one word or less that has no pointer and is not bytes
 	CSlowConvUntyped        // the same, to unsafe.Pointer or a pointer to what has no size
 	CSlowConvClaim          // the same, to any other type: the runtime's, if arg0 is in an object of C's
+	CSlowStoreByte          // bytes are stored at arg0 through a pointer to bytes: runtime.c23ByteStore
+	CSlowStorePtr           // a pointer is stored at arg0 through a pointer to a pointer to anything: runtime.c23PtrStore
 )
+
+// CStoreWords is the number of words of the largest store of bytes
+// whose words' classes are looked at in the compiled code.
+const CStoreWords = 16
 
 // CHeaders reports whether the checks of C's pointers, and the stores of
 // C's that the runtime is told of, are made in the compiled code where
@@ -40,6 +46,11 @@ const CConvWords = 16
 // CConvMax is the size of the largest type that a C23Slow of a
 // conversion is for: runtime's cConvMax.
 const CConvMax = 4096
+
+// CEnd is the bit of a pointer of C's to the end of its object, or to a
+// type that does not fit in what is left of it: runtime's cEnd. No
+// address has it, so a load or a store through the pointer faults.
+const CEnd = 1 << 54
 
 // CSlowAux returns the auxint of a C23Slow: the check, the mask of the
 // alignment that the pointer is to have, and the size of what it is
@@ -117,6 +128,7 @@ func cheaders(f *Func) {
 	type header struct {
 		call *Value
 		sel  [6]*Value
+		fits map[int64]*Value // by the size of a type: see fit
 	}
 	headers := map[*Value][]*header{}
 	var aux *AuxCall
@@ -139,6 +151,34 @@ func cheaders(f *Func) {
 			h.sel[i] = h.call.Block.NewValue1I(h.call.Pos, OpSelectN, uintptrT, int64(i), h.call)
 		}
 		return h.sel[i]
+	}
+
+	// fit returns the offset from which a value of size bytes does
+	// not fit in what h is of: max(m+1, size) - size, where m is the
+	// header's third result, for a conversion, or its second, for a
+	// store, which is what was converted.
+	fit := func(h *header, size int64, store bool) *Value {
+		key := size << 1
+		if store {
+			key |= 1
+		}
+		if v := h.fits[key]; v != nil {
+			return v
+		}
+		b, pos := h.call.Block, h.call.Pos
+		m := result(h, 2)
+		if store {
+			m = result(h, 1)
+		}
+		c := f.ConstInt64(uintptrT, size)
+		// all is all ones if size <= m, and 0 otherwise.
+		all := b.NewValue2(pos, OpSub64, uintptrT, f.ConstInt64(uintptrT, 0), b.NewValue1(pos, OpZeroExt8to64, uintptrT, b.NewValue1(pos, OpCvtBoolToUint8, f.Config.Types.UInt8, b.NewValue2(pos, OpLeq64U, boolT, c, m))))
+		v := b.NewValue2(pos, OpAnd64, uintptrT, b.NewValue2(pos, OpAdd64, uintptrT, b.NewValue2(pos, OpSub64, uintptrT, m, c), f.ConstInt64(uintptrT, 1)), all)
+		if h.fits == nil {
+			h.fits = map[int64]*Value{}
+		}
+		h.fits[key] = v
+		return v
 	}
 
 	inLoop := func(b *Block, l *loop) bool {
@@ -284,14 +324,17 @@ func cheaders(f *Func) {
 		check := v.AuxInt & 0xff
 		mask := v.AuxInt >> 8 & 0xff
 		q := b.NewValue2(pos, OpConvert, uintptrT, v.Args[0], mem)
-		// off is where q is in what r points into.
-		off := b.NewValue2(pos, OpAdd64, uintptrT, b.NewValue2(pos, OpSub64, uintptrT, q, b.NewValue2(pos, OpConvert, uintptrT, r, mem)), result(h, 0))
+		// off is where q is in what r points into: r may be a
+		// pointer to its end, with the bit of one. (A q that has
+		// the bit is out of it, and the runtime's.)
+		ra := b.NewValue2(pos, OpAnd64, uintptrT, b.NewValue2(pos, OpConvert, uintptrT, r, mem), f.ConstInt64(uintptrT, ^CEnd))
+		off := b.NewValue2(pos, OpAdd64, uintptrT, b.NewValue2(pos, OpSub64, uintptrT, q, ra), result(h, 0))
 		switch check {
 		case CSlowArith:
-			v.reset(OpLess64U)
+			v.reset(OpLeq64U)
 			v.AddArg2(result(h, 1), off)
 		case CSlowConv, CSlowConvScalar, CSlowConvUntyped, CSlowConvClaim:
-			out := b.NewValue2(pos, OpLeq64U, boolT, result(h, 2), off)
+			out := b.NewValue2(pos, OpLeq64U, boolT, fit(h, v.AuxInt>>16, false), off)
 			slow := out
 			if mask != 0 {
 				odd := b.NewValue2(pos, OpNeq64, boolT, b.NewValue2(pos, OpAnd64, uintptrT, q, f.ConstInt64(uintptrT, mask)), f.ConstInt64(uintptrT, 0))
@@ -349,10 +392,87 @@ func cheaders(f *Func) {
 				slow = b.NewValue2(pos, OpOrB, boolT, slow, differ)
 			}
 			v.copyOf(slow)
+		case CSlowStoreByte, CSlowStorePtr:
+			// The store is the runtime's unless what is stored is
+			// whole in what r points into, and the words it is
+			// stored in have the class that lets it through: none
+			// of a pointer for bytes, that of a pointer to
+			// anything for one (runtime/cclaim.go's c23ByteStore).
+			size := v.AuxInt >> 16
+			out := b.NewValue2(pos, OpLeq64U, boolT, fit(h, size, true), off)
+			u32T, u64T := f.Config.Types.UInt32, f.Config.Types.UInt64
+			w := b.NewValue2(pos, OpRsh64Ux64, uintptrT, b.NewValue2(pos, OpAdd64, uintptrT, off, result(h, 3)), result(h, 4))
+			w.AuxInt = 1 // the shift is less than 64
+			in := b.NewValue2(pos, OpSub64, uintptrT, b.NewValue1(pos, OpZeroExt8to64, uintptrT, b.NewValue1(pos, OpCvtBoolToUint8, f.Config.Types.UInt8, out)), f.ConstInt64(uintptrT, 1))
+			w = b.NewValue2(pos, OpAnd64, uintptrT, w, in)
+			at := b.NewValue2(pos, OpAdd64, uintptrT, result(h, 5), b.NewValue2(pos, OpLsh64x64, uintptrT, b.NewValue2(pos, OpRsh64Ux64, uintptrT, w, f.ConstInt64(uintptrT, 4)), f.ConstInt64(uintptrT, 2)))
+			if check == CSlowStorePtr {
+				// (What is not C's has the classes for this
+				// store in the uint32 after.)
+				at = b.NewValue2(pos, OpAdd64, uintptrT, at, b.NewValue2(pos, OpAnd64, uintptrT, b.NewValue2(pos, OpRsh64Ux64, uintptrT, result(h, 4), f.ConstInt64(uintptrT, 3)), f.ConstInt64(uintptrT, 4)))
+			}
+			lo := b.NewValue2(pos, OpLoad, u32T, b.NewValue2(pos, OpConvert, u32T.PtrTo(), at, mem), mem)
+			both := b.NewValue1(pos, OpZeroExt32to64, u64T, lo)
+			if check == CSlowStoreByte && size > 1 {
+				// (One word's class is in the one uint32.)
+				hi := b.NewValue2(pos, OpLoad, u32T, b.NewValue2(pos, OpConvert, u32T.PtrTo(), b.NewValue2(pos, OpAdd64, uintptrT, at, f.ConstInt64(uintptrT, 4)), mem), mem)
+				both = b.NewValue2(pos, OpOr64, u64T, both, b.NewValue2(pos, OpLsh64x64, u64T, b.NewValue1(pos, OpZeroExt32to64, u64T, hi), f.ConstInt64(uintptrT, 32)))
+			}
+			shift := b.NewValue2(pos, OpLsh64x64, uintptrT, b.NewValue2(pos, OpAnd64, uintptrT, w, f.ConstInt64(uintptrT, 15)), f.ConstInt64(uintptrT, 1))
+			class := b.NewValue2(pos, OpRsh64Ux64, u64T, both, shift)
+			class.AuxInt = 1
+			var bad *Value
+			if check == CSlowStorePtr {
+				bad = b.NewValue2(pos, OpNeq64, boolT, b.NewValue2(pos, OpAnd64, u64T, class, f.ConstInt64(u64T, 3)), f.ConstInt64(u64T, 2))
+			} else {
+				// The words that the bytes are in: one more than
+				// their size has if they do not begin at a word.
+				words := (size+7)/8 + 1
+				if size == 1 {
+					words = 1
+				}
+				ptrs := int64(-0x5555555555555556) & int64(uint64(1)<<(2*words)-1) // the high bit of each class
+				bad = b.NewValue2(pos, OpNeq64, boolT, b.NewValue2(pos, OpAnd64, u64T, class, f.ConstInt64(u64T, ptrs)), f.ConstInt64(u64T, 0))
+			}
+			v.copyOf(b.NewValue2(pos, OpOrB, boolT, out, bad))
 		default:
 			f.Fatalf("bad C23Slow %s", v.LongString())
 		}
 	}
+}
+
+// cAddend returns the pointer that the integer v is made of by adding
+// to it and taking from it: the p of uintptr(p)&^CEnd + n. nil if there
+// is none.
+func cAddend(v *Value) *Value {
+	for depth := 0; depth < 8; depth++ {
+		switch v.Op {
+		case OpAdd64:
+			// The pointer is on one side: the first that is one.
+			if x := cAddend(v.Args[0]); x != nil {
+				return x
+			}
+			v = v.Args[1]
+		case OpSub64:
+			v = v.Args[0]
+		case OpAnd64:
+			if c := v.Args[1]; c.Op == OpConst64 && c.AuxInt == ^CEnd {
+				v = v.Args[0]
+			} else if c := v.Args[0]; c.Op == OpConst64 && c.AuxInt == ^CEnd {
+				v = v.Args[1]
+			} else {
+				return nil
+			}
+		case OpConvert:
+			if v.Args[0].Type.IsPtrShaped() {
+				return v.Args[0]
+			}
+			return nil
+		default:
+			return nil
+		}
+	}
+	return nil
 }
 
 // cSlowAlways makes v, a C23Slow, true: the runtime makes the check.
@@ -376,7 +496,7 @@ func cSlowVariable(f *Func, v, r *Value) {
 	off := b.NewValue2(pos, OpSub64, uintptrT, q, b.NewValue2(pos, OpConvert, uintptrT, r, mem))
 	switch v.AuxInt & 0xff {
 	case CSlowArith:
-		v.reset(OpLess64U)
+		v.reset(OpLeq64U)
 		v.AddArg2(f.ConstInt64(uintptrT, varSize), off)
 	case CSlowConv, CSlowConvScalar, CSlowConvUntyped, CSlowConvClaim:
 		// (Not past the end of the variable, where the runtime
@@ -394,6 +514,24 @@ func cSlowVariable(f *Func, v, r *Value) {
 		odd := b.NewValue2(pos, OpNeq64, boolT, b.NewValue2(pos, OpAnd64, uintptrT, q, f.ConstInt64(uintptrT, mask)), f.ConstInt64(uintptrT, 0))
 		v.reset(OpOrB)
 		v.AddArg2(out, odd)
+	case CSlowStoreByte, CSlowStorePtr:
+		// What is stored in a variable that has no pointer is
+		// bytes, and a pointer to anything goes where the variable
+		// has one: the rest is the runtime's.
+		t := r.Aux.(*ir.Name).Type()
+		ok := !t.HasPointers()
+		if v.AuxInt&0xff == CSlowStorePtr {
+			for t.IsArray() {
+				t = t.Elem()
+			}
+			ok = t.IsUnsafePtr() || t.IsPtr() && (t.Elem().Size() == 0 || t.Elem().Size() == 1 && !t.Elem().HasPointers())
+		}
+		if !ok || size > varSize {
+			cSlowAlways(v)
+			return
+		}
+		v.reset(OpLess64U)
+		v.AddArg2(f.ConstInt64(uintptrT, varSize-size), off)
 	default:
 		cSlowAlways(v)
 	}
@@ -417,6 +555,31 @@ func cRoots(f *Func) func(*Value) *Value {
 			case OpOffPtr, OpAddPtr, OpPtrIndex, OpCopy, OpNilCheck:
 				v = v.Args[0]
 				continue
+			case OpConvert:
+				// What walk makes of unsafe.Add in a package of
+				// C's: the pointer as an integer, less the bit of
+				// a pointer to an end, and the sum as a pointer.
+				if v.Type.IsPtrShaped() {
+					if x := cAddend(v.Args[0]); x != nil {
+						v = x
+						continue
+					}
+				}
+			case OpSelectN:
+				// The pointer that the runtime's check gives is
+				// the one it is given, with that bit or without,
+				// or a pointer to a union's value, which is
+				// elsewhere. (What a root is for is where a
+				// pointer is looked for first: one that is not
+				// in what its root points into is the runtime's
+				// to check, as any that a comparison stops.)
+				if c := v.Args[0]; v.AuxInt == 0 && c.Op == OpStaticLECall {
+					switch c.Aux.(*AuxCall).Fn {
+					case f.fe.Syslook("checkptrArithmeticC"), f.fe.Syslook("checkptrConvC"), f.fe.Syslook("checkptrConvCLoad"):
+						v = c.Args[0]
+						continue
+					}
+				}
 			}
 			return v
 		}

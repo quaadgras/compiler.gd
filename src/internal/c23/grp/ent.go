@@ -68,9 +68,11 @@ func Setgrent() {
 func Endgrent() { Setgrent() }
 
 // grResultR is the result of getgrgid_r and getgrnam_r: e as the struct
-// group at gr, its strings and its array of members in the n bytes at
-// buf (ERANGE if they do not fit), and *result gr, or null if there is
-// no such group.
+// group at gr, its strings in the n bytes at buf (ERANGE if they and the
+// array of members do not fit), and *result gr, or null if there is no
+// such group. The array of members is allocated: the caller's buffer is
+// bytes, which hold no pointer, and the collector frees the array with
+// the last pointer to it.
 func grResultR(e []string, ok bool, gr, buf *c23.Void, n uint64, result *c23.Void) int32 {
 	c23.StorePtr(result, (*c23.Void)(nil))
 	if !ok {
@@ -89,8 +91,8 @@ func grResultR(e []string, ok bool, gr, buf *c23.Void, n uint64, result *c23.Voi
 	if need > n {
 		return c23.ERANGE
 	}
-	mem := c23.Add(buf, int(pad))
-	off := int(pad) + (len(members)+1)*int(ws)
+	mem := (*c23.Void)(unsafe.Pointer(c23.AllocOf[*int8](uint64(len(members)+1) * ws)))
+	off := 0
 	str := func(s string) *c23.Void {
 		p := c23.Add(buf, off)
 		copy(c23.BytesAt(p, uintptr(len(s)+1)), s+"\x00")

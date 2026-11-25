@@ -13,7 +13,7 @@ import (
 )
 
 func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
-	checkptrAlign(p, elem, n, true, false)
+	checkptrAlign(p, elem, n, false, false)
 }
 
 // checkptrAlignmentLoad is checkptrAlignment for a conversion whose
@@ -21,16 +21,14 @@ func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
 // in *(*uintptr)(p): what is not stored through may have integers where
 // the memory has pointers (checkptr_compat.go).
 func checkptrAlignmentLoad(p unsafe.Pointer, elem *_type, n uintptr) {
-	checkptrAlign(p, elem, n, true, true)
+	checkptrAlign(p, elem, n, true, false)
 }
 
-// checkptrAlign is checkptrAlignment. If claim is set the conversion is
-// one of a package of Go's: elem is compared with what the memory is
-// (checkptr_compat.go), and if p is to an object of C's (cspan.go), the
-// words of it that elem has pointers in may hold pointers from here on,
-// since the runtime does not see such a package's stores of pointers as
-// it sees those of C translated by cmd/cc.
-func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, claim, load bool) {
+// checkptrAlign is checkptrAlignment: elem is compared with what the
+// memory is (checkptr_compat.go), and if p is to an object of C's
+// (cspan.go), its words are claimed for what elem has there (cclaim.go).
+// If c is set the conversion is one of a package of C's.
+func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, load, c bool) {
 	// nil pointer is always suitably aligned (#47430).
 	if p == nil {
 		return
@@ -44,7 +42,9 @@ func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, claim, load bool) {
 	// aligned to 16 with 8-byte words for a 16-byte access, is only
 	// aligned to 8 in a stack frame: doc/gd/sso-string.md.)
 	if elem.Pointers() && uintptr(p)&(uintptr(min(elem.Align_, goarch.PtrSize))-1) != 0 {
-		throw("checkptr: misaligned pointer conversion")
+		if checkptrStop("checkptr: misaligned pointer conversion") {
+			return
+		}
 	}
 
 	// gd: these checks are on in every build (doc/gd/unsafe.md), so the
@@ -57,7 +57,9 @@ func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, claim, load bool) {
 	if s := spanOfHeap(uintptr(p)); s != nil && !s.isUserArenaChunk {
 		base := s.base() + s.objIndex(uintptr(p))*s.elemsize
 		if end := uintptr(p) + size; end > base+s.elemsize || end < uintptr(p) {
-			throw("checkptr: converted pointer straddles multiple allocations")
+			if checkptrStop("checkptr: converted pointer straddles multiple allocations") {
+				return
+			}
 		}
 		typ, tbase := checkptrObjectType(s, base)
 		if typ == elem && size != 0 && uintptr(p) >= tbase && (uintptr(p)-tbase)%elem.Size_ == 0 {
@@ -67,28 +69,18 @@ func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, claim, load bool) {
 		if s.spanclass.c() {
 			// An object of C's has no type: its words are what
 			// they were claimed for (cclaim.go).
-			if claim {
-				cClaim(s, s.objIndex(uintptr(p)), uintptr(p), elem, n, load)
-			}
+			cClaim(s, s.objIndex(uintptr(p)), uintptr(p), elem, n, load, c)
 			return
 		}
 		if typ != nil {
 			checkptrWhole(typ, tbase, base+s.elemsize, uintptr(p), elem, size)
-			if claim {
-				checkptrCompat(typ, tbase, base+s.elemsize, uintptr(p), elem, size, load)
-			} else if elem.Pointers() {
-				checkptrPointersC(s, uintptr(p), elem, n)
-			}
+			checkptrCompat(typ, tbase, base+s.elemsize, uintptr(p), elem, size, load, c)
 			return
 		}
 		if wholeBitsEnabled {
 			checkptrWholeSmall(s, base, uintptr(p), elem, size)
 		}
-		if !claim {
-			if elem.Pointers() {
-				checkptrPointersC(s, uintptr(p), elem, n)
-			}
-		} else if s.spanclass.noscan() || heapBitsInSpan(s.elemsize) {
+		if s.spanclass.noscan() || heapBitsInSpan(s.elemsize) {
 			checkptrPointers(s, uintptr(p), elem, n, load)
 		}
 		return
@@ -107,49 +99,219 @@ func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, claim, load bool) {
 	}
 }
 
-// checkptrAlignmentC is checkptrAlignment for the conversions of a
-// package that is C translated by cmd/cc. C's pointer may point to the
-// end of its object, where nothing of its type fits: the end of an array
-// that a loop runs to, the pointer that the next element is placed at
-// less one. An object of C's on the heap has a byte after it, so that
-// pointer is one into the object still (cmd/compile's ir.CObjType); and
-// what was added to stayed in the object, which checkptrArithmetic
-// saw. So a pointer into an object of the heap whose type reaches past
-// the object's end is let be. C must not load or store through it, and
-// nothing here stops that it does: what it reaches is less than one
-// value of the type past the end.
-//
-// What malloc gave (cspan.go) ends where C asked it to, which the
-// runtime knows: there the pointer is to the object or to its end, and
-// to nothing after it.
-func checkptrAlignmentC(p unsafe.Pointer, elem *_type, n uintptr) {
-	if p != nil {
-		if s := spanOfHeap(uintptr(p)); s != nil && !s.isUserArenaChunk {
-			i := s.objIndex(uintptr(p))
-			base := s.base() + i*s.elemsize
-			limit := base + s.elemsize
-			if s.spanclass.c() {
-				limit = base + s.cSizeOf(i)
-				if uintptr(p) > limit {
-					throw("checkptr: converted pointer is past the end of its object")
-				}
-				if elem.Pointers() && uintptr(p)&(uintptr(min(elem.Align_, goarch.PtrSize))-1) != 0 {
-					throw("checkptr: misaligned pointer conversion")
-				}
-				// An object of C's has no type: its words are
-				// what they were claimed for (cclaim.go).
-				cClaim(s, i, uintptr(p), elem, n, false)
-				return
-			}
-			if end := uintptr(p) + n*elem.Size_; end > limit && end >= uintptr(p) {
-				if elem.Pointers() && uintptr(p)&(uintptr(min(elem.Align_, goarch.PtrSize))-1) != 0 {
-					throw("checkptr: misaligned pointer conversion")
-				}
-				return
+// checkptrStop stops the program for a conversion that msg says what is
+// wrong with, unless the conversion is only asked about (cConvProbe):
+// then it reports true, and the conversion is to do nothing more.
+func checkptrStop(msg string) bool {
+	if mp := getg().m; mp.cprobe {
+		mp.cprobeFail = true
+		return true
+	}
+	throw(msg)
+	return true
+}
+
+// What an address is in, for the checks of a package of C's.
+const (
+	cObjNone  = iota // nothing that the runtime knows the bounds of
+	cObjC            // an object of C's: what malloc gave (cspan.go)
+	cObjGo           // an object of Go's heap
+	cObjStack        // the goroutine's stack
+	cObjData         // the program's data
+)
+
+// cObjectOf returns what the address a is in, for the checks of a
+// package of C's: where it begins and its size, which for an object of
+// C's is what was asked for.
+func cObjectOf(a uintptr) (base, size uintptr, kind int) {
+	if gp := getg(); gp.stack.lo <= a && a < gp.stack.hi {
+		return gp.stack.lo, gp.stack.hi - gp.stack.lo, cObjStack
+	}
+	if s := spanOfHeap(a); s != nil && !s.isUserArenaChunk {
+		i := s.objIndex(a)
+		base = s.base() + i*s.elemsize
+		if s.spanclass.c() {
+			return base, s.cSizeOf(i), cObjC
+		}
+		return base, s.elemsize, cObjGo
+	}
+	for _, datap := range activeModules() {
+		for _, r := range [...][2]uintptr{
+			{datap.data, datap.edata}, {datap.bss, datap.ebss},
+			{datap.noptrdata, datap.enoptrdata}, {datap.noptrbss, datap.enoptrbss},
+			{datap.rodata, datap.etypes},
+		} {
+			if r[0] <= a && a < r[1] {
+				return r[0], r[1] - r[0], cObjData
 			}
 		}
 	}
-	checkptrAlign(p, elem, n, false, false)
+	return 0, 0, cObjNone
+}
+
+// checkptrArithmeticC is checkptrArithmetic for a package that is C
+// translated by cmd/cc, and returns the pointer that the arithmetic
+// gives: p, which the compiled code made of the originals with cEnd
+// taken off, or p with cEnd if it is to the end of the object.
+//
+// C's rule is the one that is checked: the result is in the object that
+// an original is in, or one past its last byte. A pointer to the end is
+// one that C makes all the time, the end of an array that a loop runs
+// to; it has cEnd, so that a load or a store through it faults, and so
+// has every pointer to that address, which is what lets one be compared
+// with another. An object of C's on the heap has a byte after it
+// (cPad), so that pointer is into the object's own memory to the
+// collector; the end of anything else is where the next thing begins
+// (cEndAddr).
+//
+// What is in nothing that the runtime knows the bounds of, memory that
+// the program mapped, is let be for now.
+func checkptrArithmeticC(p unsafe.Pointer, originals []unsafe.Pointer) unsafe.Pointer {
+	r := uintptr(p)
+	if r&cPoison != 0 {
+		// Made of what was no pointer: it stays that.
+		return p
+	}
+	a := r &^ cEnd
+	if a < minLegalPointer || a >= ^uintptr(0)-minLegalPointer {
+		// An integer that C keeps in a pointer, or one added to
+		// a null pointer: the address of nothing.
+		return unsafe.Pointer(a)
+	}
+	known := false
+	for _, original := range originals {
+		o := uintptr(original)
+		if o&cPoison != 0 {
+			return unsafe.Pointer(a | cPoison)
+		}
+		base, size, kind := cObjectOf(cEndAddr(o))
+		if kind == cObjNone {
+			continue
+		}
+		known = true
+		switch {
+		case a-base < size:
+			return unsafe.Pointer(a)
+		case a-base == size:
+			return unsafe.Pointer(a | cEnd)
+		}
+	}
+	if !known {
+		if _, _, kind := cObjectOf(a); kind == cObjNone {
+			for _, original := range originals {
+				if uintptr(original) >= minLegalPointer {
+					// Memory that is not Go's.
+					return unsafe.Pointer(a)
+				}
+			}
+		}
+		// What was added to an integer, and is an address now.
+		cIntPtrs.Add(1)
+		return unsafe.Pointer(a | cPoison)
+	}
+	throw("checkptr: pointer arithmetic result is out of its object")
+	return nil
+}
+
+// checkptrAlignmentC is checkptrAlignment for unsafe.Slice and the like
+// in a package that is C translated by cmd/cc: the n values of elem at p
+// are in one object, each of them whole, and an object of C's is claimed
+// for them (cclaim.go).
+func checkptrAlignmentC(p unsafe.Pointer, elem *_type, n uintptr) {
+	if p == nil || uintptr(p) < minLegalPointer {
+		return
+	}
+	a := uintptr(p)
+	if a&(cPoison|cEnd) != 0 {
+		if n == 0 || elem.Size_ == 0 {
+			return
+		}
+		throw("checkptr: converted pointer is to the end of its object")
+	}
+	if s := spanOfHeap(a); s != nil && !s.isUserArenaChunk && s.spanclass.c() {
+		i := s.objIndex(a)
+		limit := s.base() + i*s.elemsize + s.cSizeOf(i)
+		if size := n * elem.Size_; a > limit || size > limit-a || elem.Size_ != 0 && size/elem.Size_ != n {
+			throw("checkptr: converted pointer type does not fit in its object")
+		}
+		if elem.Pointers() && a&(uintptr(min(elem.Align_, goarch.PtrSize))-1) != 0 {
+			throw("checkptr: misaligned pointer conversion")
+		}
+		cClaim(s, i, a, elem, n, false, true)
+		return
+	}
+	checkptrAlign(p, elem, n, false, true)
+}
+
+// checkptrConvC is the check of the conversion (*elem)(p) in a package
+// that is C translated by cmd/cc, and returns the pointer that the
+// conversion gives. That is p, but:
+//
+//   - a pointer that a value of elem does not fit at, in what it points
+//     into, has cEnd: the pointer to the end, as arithmetic gives it,
+//     and one to a type that is larger than what is left of the object.
+//     C makes both and keeps them; a load or a store through one
+//     faults;
+//   - a pointer to a union with pointers, or to the value of one, is
+//     converted to where what is asked for is (cUnionConv).
+//
+// Anywhere else a value of elem is whole in the object that p is in: the
+// code that uses the pointer is checked no further. In an object of C's the words that the value is over are
+// claimed for what elem has there, or were claimed for what is
+// compatible with it (cclaim.go); in an object of Go's the object's type
+// is (checkptr_compat.go).
+func checkptrConvC(p unsafe.Pointer, elem *_type, n uintptr) unsafe.Pointer {
+	return checkptrConvC1(p, elem, false)
+}
+
+// checkptrConvCLoad is checkptrConvC for a conversion whose result the
+// compiler knows to be loaded through and nothing else: what is not
+// stored through may have integers where the memory has pointers.
+func checkptrConvCLoad(p unsafe.Pointer, elem *_type, n uintptr) unsafe.Pointer {
+	return checkptrConvC1(p, elem, true)
+}
+
+func checkptrConvC1(p unsafe.Pointer, elem *_type, load bool) unsafe.Pointer {
+	a := uintptr(p)
+	if a < minLegalPointer || a&(cPoison|cEnd) != 0 {
+		// Null, an integer that C keeps in a pointer, or a pointer
+		// that nothing is loaded through.
+		return p
+	}
+	a &^= cPtrBits
+	p = unsafe.Pointer(a)
+	if cUnionRefType != nil && elem.Pointers() && !getg().m.cprobe {
+		if q := cUnionConv(a, elem); q != nil {
+			return q
+		}
+	}
+	if s := spanOfHeap(a); s != nil && !s.isUserArenaChunk && s.spanclass.c() {
+		i := s.objIndex(a)
+		limit := s.base() + i*s.elemsize + s.cSizeOf(i)
+		if a > limit {
+			checkptrStop("checkptr: converted pointer is past the end of its object")
+			return p
+		}
+		if elem.Size_ > limit-a {
+			return unsafe.Pointer(a | cEnd)
+		}
+		if elem.Pointers() && a&(uintptr(min(elem.Align_, goarch.PtrSize))-1) != 0 {
+			checkptrStop("checkptr: misaligned pointer conversion")
+			return p
+		}
+		cClaim(s, i, a, elem, 1, load, true)
+		return p
+	}
+	if base, size, kind := cObjectOf(a); kind != cObjNone && elem.Size_ > size-(a-base) {
+		return unsafe.Pointer(a | cEnd)
+	}
+	if !elem.Pointers() && elem.Align_ == 1 {
+		// Bytes, which C looks at everything as.
+		checkptrView(p, elem, 1)
+		return p
+	}
+	checkptrAlign(p, elem, 1, load, true)
+	return p
 }
 
 // checkptrObjectType returns the type that the object at base of the span
@@ -224,7 +386,7 @@ func checkptrViewKept(p unsafe.Pointer, elem *_type, n uintptr) {
 			return
 		}
 		checkptrWhole(typ, tbase, base+s.elemsize, uintptr(p), elem, size)
-		checkptrCompat(typ, tbase, base+s.elemsize, uintptr(p), elem, size, false)
+		checkptrCompat(typ, tbase, base+s.elemsize, uintptr(p), elem, size, false, false)
 		return
 	}
 	if wholeBitsEnabled {
@@ -456,68 +618,6 @@ func checkptrWholeIn(o *wholeObject, limit, p uintptr, elem *_type, size uintptr
 	}
 	if o.tbase+end < limit && o.state(end) == wordCont {
 		throw(checkptrPartialMsg)
-	}
-}
-
-// checkptrSameObject reports whether a, in an object of the span s, and v
-// are addresses in the same object.
-func checkptrSameObject(s *mspan, a, v uintptr) bool {
-	return s.base() <= v && v < s.limit && s.objIndex(a) == s.objIndex(v)
-}
-
-// checkptrPointersC is the check of the pointers of (*[n]elem)(p), which
-// is in one object of the span s, for a package that is C translated by
-// cmd/cc, whose types are not compared with the memory's yet
-// (checkptrCompat, checkptrPointers): the type has pointers only where
-// the object has, or where the object has a word that does not hold the
-// address of anything in the heap now.
-//
-// A word of C's (cspan.go) is what was last stored in it, and has
-// neither kind for good: a pointer may be stored where an integer is,
-// which a conversion cannot refuse. So nothing is checked there, and
-// what C reads as a pointer where it stored an integer is the integer.
-func checkptrPointersC(s *mspan, p uintptr, elem *_type, n uintptr) {
-	if s.spanclass.c() {
-		return
-	}
-	limit := p + n*elem.Size_
-	var tp typePointers
-	var slot uintptr // the next word of the object that holds a pointer
-	if !s.spanclass.noscan() {
-		tp = s.typePointersOf(p, limit-p)
-		tp, slot = tp.next(limit)
-	}
-	mask := getGCMask(elem)
-	words := elem.PtrBytes / goarch.PtrSize
-	for i := uintptr(0); i < n; i++ {
-		for w := uintptr(0); w < words; w++ {
-			if *addb(mask, w/8)>>(w%8)&1 == 0 {
-				continue
-			}
-			a := p + i*elem.Size_ + w*goarch.PtrSize
-			for slot != 0 && slot < a {
-				tp, slot = tp.next(limit)
-			}
-			if slot != a {
-				// The first word of an interface is one that the
-				// collector does not look at, and is a pointer all
-				// the same, to a type or a method table, which are
-				// not in the heap: package reflect and others read
-				// it as one. So is a pointer to a type that is
-				// never in the heap. So a word that holds no
-				// pointer may be seen as a pointer while what it
-				// holds is not one into the heap.
-				//
-				// Nor is it a pointer that the collector has to see
-				// if it points into the object that it is in, which
-				// lives while the word is read: a buffer of bytes
-				// that the system fills with a list whose links are
-				// addresses in the buffer (windows).
-				if v := *(*uintptr)(unsafe.Pointer(a)); v != 0 && spanOfHeap(v) != nil && !checkptrSameObject(s, a, v) {
-					throw("checkptr: converted pointer type has a pointer where the memory has an integer")
-				}
-			}
-		}
 	}
 }
 

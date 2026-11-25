@@ -92,6 +92,7 @@ func cChurn() {
 // TestCSpanPointers keeps Go objects alive from words of C's objects
 // only, at every word of objects of every size.
 func TestCSpanPointers(t *testing.T) {
+	defer runtime.SetCReclaim(runtime.SetCReclaim(1))
 	type holder struct {
 		p    unsafe.Pointer
 		n    uintptr
@@ -137,6 +138,7 @@ func TestCSpanPointers(t *testing.T) {
 // TestCSpanChain is a list whose links are in C's objects: each is
 // reached from the one before only.
 func TestCSpanChain(t *testing.T) {
+	defer runtime.SetCReclaim(runtime.SetCReclaim(1))
 	type link struct {
 		next unsafe.Pointer
 		leaf *cLeaf
@@ -200,6 +202,7 @@ func TestCSpanFree(t *testing.T) {
 // TestCSpanIntegers puts the addresses of objects that are free where
 // pointers may be: the collector finds nothing at them.
 func TestCSpanIntegers(t *testing.T) {
+	defer runtime.SetCReclaim(runtime.SetCReclaim(1))
 	const n = 20000
 	addrs := make([]uintptr, n)
 	for i := range addrs {
@@ -240,6 +243,7 @@ func TestCSpanIntegers(t *testing.T) {
 // that has just loaded it, and the words are claimed for no pointers
 // after.
 func TestCSpanScalars(t *testing.T) {
+	defer runtime.SetCReclaim(runtime.SetCReclaim(1))
 	const n = 2000
 	raw := runtime.MallocC(n * 8)
 	for round := range 20 {
@@ -292,6 +296,7 @@ type cLeaf2 struct {
 // TestCSpanClaims follows the words of C's objects through the
 // conversions of pointers into them.
 func TestCSpanClaims(t *testing.T) {
+	defer runtime.SetCReclaim(runtime.SetCReclaim(1))
 	check := func(what string, p unsafe.Pointer, want string) {
 		t.Helper()
 		if got := runtime.CClasses(p, len(want)); got != want {
@@ -375,8 +380,13 @@ func TestCSpanClaims(t *testing.T) {
 	c := runtime.MallocC(40)
 	runtime.CConvert(c, cPair{}, 1)
 	check("a struct of C's", c, ".p..u")
-	runtime.CConvert(unsafe.Add(c, 40), cPair{}, 1)
-	runtime.CConvert(unsafe.Add(c, 32), [2]uintptr{}, 1)
+	if end := runtime.CConvert(unsafe.Add(c, 40), cPair{}, 1); uintptr(end) == uintptr(c)+40 {
+		t.Errorf("the pointer to the end of an object of C's is one that can be loaded through: %#x", uintptr(end))
+	}
+	if over := runtime.CConvert(unsafe.Add(c, 32), [2]uintptr{}, 1); uintptr(over) == uintptr(c)+32 {
+		t.Errorf("a pointer to a type that does not fit in what is left of an object of C's is one that can be loaded through: %#x", uintptr(over))
+	}
+	runtime.CConvert(unsafe.Add(c, 32), uintptr(0), 1)
 	counts("C's conversions", 5, 1, 0, 0, 0)
 
 	// memset claims nothing, and takes no claim away.
@@ -399,8 +409,11 @@ func TestCSpanClaims(t *testing.T) {
 	dst = runtime.MallocC(64)
 	runtime.CMemmove(unsafe.Add(dst, 8), raw, 48)
 	check("a copy to other words", dst, "--.p.p.-")
-	runtime.CMemmove(unsafe.Add(dst, 1), raw, 40) // no word arrives whole
-	check("a copy to other bytes", dst, "--.p.p.-")
+	// No word arrives whole: bytes, which claim nothing. (Over the
+	// pointers of dst they would stop the program.)
+	bytes := runtime.MallocC(64)
+	runtime.CMemmove(unsafe.Add(bytes, 1), raw, 40)
+	check("a copy to other bytes", bytes, "--------")
 	var onStack [4]unsafe.Pointer
 	dst = runtime.MallocC(64)
 	runtime.CMemmove(unsafe.Add(dst, 8), unsafe.Pointer(&onStack), 32)
@@ -426,6 +439,7 @@ func TestCSpanClaims(t *testing.T) {
 // for no pointers and claimed for one after, and frees what only an
 // integer is the address of.
 func TestCSpanFlip(t *testing.T) {
+	defer runtime.SetCReclaim(runtime.SetCReclaim(1))
 	const n = 3000
 	blocks := make([]unsafe.Pointer, n)
 	for i := range blocks {
@@ -477,6 +491,7 @@ func TestCSpanFlip(t *testing.T) {
 // from several goroutines as the collector runs: a word that holds a
 // pointer at the end keeps what it points to.
 func TestCSpanRace(t *testing.T) {
+	defer runtime.SetCReclaim(runtime.SetCReclaim(1))
 	const words = 512
 	p := runtime.MallocC(words * 8)
 	var wg sync.WaitGroup
@@ -538,8 +553,12 @@ func TestCSpanHeader(t *testing.T) {
 	// words.
 	p := runtime.MallocC(40)
 	d, n, nc, b8, sh, bits := runtime.CHeader(unsafe.Add(p, 8))
-	if d != 8 || n != 40 || nc != 41 || sh != 3 {
-		t.Errorf("C: d=%d n=%d nc=%d sh=%d, want 8 40 41 3", d, n, nc, sh)
+	if d != 8 || n != 40 || nc != 40 || sh != 3 {
+		t.Errorf("C: d=%d n=%d m=%d sh=%d, want 8 40 40 3", d, n, nc, sh)
+	}
+	// The pointer to its end is one of it still.
+	if d, n, _, _, _, _ := runtime.CHeader(runtime.CConvert(unsafe.Add(p, 40), uintptr(0), 1)); d != 40 || n != 40 {
+		t.Errorf("C, the end: d=%d n=%d, want 40 40", d, n)
 	}
 	class := func(off uintptr) uint32 {
 		w := (off + b8) >> sh
@@ -558,7 +577,7 @@ func TestCSpanHeader(t *testing.T) {
 	g := new([10]int)
 	cHeaderSink = g
 	d, n, nc, _, _, _ = runtime.CHeader(unsafe.Pointer(&g[3]))
-	if d != 24 || n+1 < 80 || nc != 0 {
+	if d != 24 || n < 80 || nc != 0 {
 		t.Errorf("Go: d=%d n=%d nc=%d", d, n, nc)
 	}
 

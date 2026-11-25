@@ -1053,13 +1053,20 @@ func (p *parser) newExpr(at pos) expr {
 		opName = "operatornew[]"
 	}
 	args := append([]expr{size}, placement...)
+	// What is allocated with the number in front is bytes until the
+	// elements are where they are: an allocation of elements would
+	// have the first of them where the number is.
+	mt := pt
+	if cookie != 0 {
+		mt = ptrTo(tChar)
+	}
 	if sym := p.resolve(p.allocFuncs(opName, t), nil, args, at, opName, true); sym != nil && !stdPlacementNew(sym, placement) {
-		mem = &cast{node{pt, at}, p.rvalue(p.callFunc(sym, nil, args, at))}
+		mem = &cast{node{mt, at}, p.rvalue(p.callFunc(sym, nil, args, at))}
 	} else if len(placement) == 1 && p.rvalue(placement[0]).ty().isPtr() {
-		mem = &cast{node{pt, at}, p.rvalue(placement[0])}
+		mem = &cast{node{mt, at}, p.rvalue(placement[0])}
 	} else if len(placement) == 0 {
 		malloc := p.libcFunc("malloc", at)
-		mem = &cast{node{pt, at}, &call{node{ptrTo(tVoid), at}, malloc, malloc.ty().elem.fn, []expr{size}}}
+		mem = &cast{node{mt, at}, &call{node{ptrTo(tVoid), at}, malloc, malloc.ty().elem.fn, []expr{size}}}
 	} else {
 		p.errorAt(at, "no matching %s", opName)
 	}
