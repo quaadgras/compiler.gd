@@ -103,13 +103,17 @@ type gcGen struct {
 	// recovering from a panic throws (see runtime/wasmgc/panic.go).
 	hasDefer bool
 
-	scratchI32, scratchRef, scratchI64 int32              // scratch locals, or -1
-	scratchI32b                        int32              // a second i32 scratch local (split), or -1
-	fptr                               int32              // split: the local of the pointer to the frame
-	checked                            bool               // split: what is loaded and stored through a pointer is in what it points into (gcsplit.go)
-	framePtrs                          map[*ir.Name]int32 // split: the local of the pointer to each variable with pointers in the frame
-	scratchNil                         int32              // the scratch local of intToPtr, or -1
-	pos                                src.XPos           // of the value being generated
+	scratchI32, scratchRef, scratchI64 int32               // scratch locals, or -1
+	scratchI32b                        int32               // a second i32 scratch local (split), or -1
+	fptr                               int32               // split: the local of the pointer to the frame
+	checked                            bool                // split: what is loaded and stored through a pointer is in what it points into (gcsplit.go)
+	chkRange, chkDone                  map[string][2]int64 // split: see splitRanges
+	chkR, chkI                         int32               // split: the locals of a check that is not a call, or -1
+	inLoop                             map[ssa.ID]bool     // split: the blocks that are in a loop
+	hot                                bool                // split: the block that is generated is in a loop
+	framePtrs                          map[*ir.Name]int32  // split: the local of the pointer to each variable with pointers in the frame
+	scratchNil                         int32               // the scratch local of intToPtr, or -1
+	pos                                src.XPos            // of the value being generated
 
 	// typedLoc is, for a pointer that is the base of more than one
 	// access, a local that holds it as a reference to the type of
@@ -435,9 +439,13 @@ func (g *gcGen) wtype(t *types.Type) byte {
 
 // Instructions.
 
-func (g *gcGen) prog(as obj.As) *obj.Prog { return g.s.Prog(as) }
+func (g *gcGen) prog(as obj.As) *obj.Prog {
+	g.splitFlow(as)
+	return g.s.Prog(as)
+}
 
 func (g *gcGen) typed(as obj.As, sym *obj.LSym, n int64) *obj.Prog {
+	g.splitFlow(as)
 	p := g.s.Prog(as)
 	p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: sym, Offset: n}
 	return p
@@ -3191,7 +3199,7 @@ func gcRemat(v *ssa.Value) bool {
 }
 
 func genWasmGC(s *ssagen.State, f *ssa.Func) {
-	g := &gcGen{s: s, f: f, ctxt: s.GD().Ctxt, scratchI32: -1, scratchRef: -1, scratchI64: -1, scratchNil: -1, scratchI32b: -1, fptr: -1, fused: make(map[ssa.ID]bool)}
+	g := &gcGen{s: s, f: f, ctxt: s.GD().Ctxt, scratchI32: -1, scratchRef: -1, scratchI64: -1, scratchNil: -1, scratchI32b: -1, fptr: -1, chkR: -1, chkI: -1, fused: make(map[ssa.ID]bool)}
 	s.WasmGC = g
 	g.checked = splitChecked(s, f)
 	defer func() {
@@ -3447,6 +3455,7 @@ func genWasmGC(s *ssagen.State, f *ssa.Func) {
 				g.fillTyped(v)
 			}
 		}
+		g.splitRanges(b)
 		for _, v := range b.Values {
 			s.SetPos(v.Pos)
 			g.pos = v.Pos

@@ -14,10 +14,12 @@ import (
 	"cmd/internal/obj/wasm"
 	"cmd/internal/objabi"
 	"cmp"
+	"fmt"
 	"internal/buildcfg"
 	"math"
 	"os"
 	"slices"
+	"strings"
 )
 
 // Code generation for GOWASM=gc,split (stage 15 of doc/gd/wasm-gc.md).
@@ -261,13 +263,234 @@ func (a spAddr) direct(g *gcGen, n int64) int {
 	return -1
 }
 
+// One check for the loads and stores of a block that are through the
+// same pointer.
+//
+// The code of a block runs from its start to its end, so what is
+// loaded and stored at constant offsets from one pointer (and the same
+// indexes) is asked about once, for all the bytes from the first to the
+// last: p.x, p.y and p.z are one check, of the three. splitRanges finds
+// those bytes for each such address of the block (chkRange); the first
+// load or store that is generated asks for them all, and the others
+// are then of an address that is known to be inside (chkDone, which is
+// forgotten wherever the code that is generated branches: splitFlow).
+//
+// (So a program that loads the first field of a struct through a
+// pointer to less memory than the struct, and never reaches the load of
+// a later field that is in the same block, stops at the first.)
+
+// spKey returns what names the pointer and the indexes of a, for
+// chkRange, or "" if a is not checked.
+func (g *gcGen) spKey(a spAddr, n int64) string {
+	if !g.checked || a.direct(g, n) > 0 || g.integer(a) {
+		return ""
+	}
+	var b strings.Builder
+	switch a.kind {
+	case spBase:
+		fmt.Fprintf(&b, "v%d", a.base.ID)
+	case spLocal:
+		fmt.Fprintf(&b, "l%d", a.local)
+	default:
+		return ""
+	}
+	for _, t := range a.dyn {
+		fmt.Fprintf(&b, "+v%d*%d", t.v.ID, t.scale)
+	}
+	return b.String()
+}
+
+// splitRanges finds the bytes that the loads and stores of the block b
+// are of, by pointer.
+func (g *gcGen) splitRanges(b *ssa.Block) {
+	if !g.checked {
+		return
+	}
+	g.chkRange = make(map[string][2]int64)
+	g.chkDone = make(map[string][2]int64)
+	if g.inLoop == nil {
+		g.inLoop = splitLoops(g.f)
+	}
+	g.hot = g.inLoop[b.ID]
+	add := func(addr *ssa.Value, n int64) {
+		a := g.spResolve(addr)
+		k := g.spKey(a, n)
+		if k == "" {
+			return
+		}
+		r, ok := g.chkRange[k]
+		if !ok {
+			r = [2]int64{a.off, a.off + n}
+		}
+		g.chkRange[k] = [2]int64{min(r[0], a.off), max(r[1], a.off+n)}
+	}
+	for _, v := range b.Values {
+		switch v.Op {
+		case ssa.OpLoad:
+			if g.wtype(v.Type) != 'r' {
+				add(v.Args[0], spScalar(v.Type).Size())
+			}
+		case ssa.OpStore:
+			if t := v.Aux.(*types.Type); g.wtype(t) != 'r' {
+				add(v.Args[0], spScalar(t).Size())
+			}
+		case ssa.OpMove:
+			if t := v.Aux.(*types.Type); !t.HasPointers() && t.Size() != 0 {
+				add(v.Args[0], t.Size())
+				add(v.Args[1], t.Size())
+			}
+		case ssa.OpZero:
+			if t := v.Aux.(*types.Type); !t.HasPointers() && t.Size() != 0 {
+				add(v.Args[0], t.Size())
+			}
+		}
+	}
+}
+
+// splitFlow is called before the instruction as is generated: after one
+// that branches, or that a branch may reach, what was asked before is
+// not known to have been.
+func (g *gcGen) splitFlow(as obj.As) {
+	if len(g.chkDone) == 0 {
+		return
+	}
+	switch as {
+	case wasm.ABlock, wasm.ALoop, wasm.AIf, wasm.AElse, wasm.AEnd, wasm.ABr, wasm.ABrIf, wasm.ABrTable,
+		wasm.ATRYCATCH, wasm.ABrOnCast, wasm.ABrOnCastFail, wasm.ARefBlock, wasm.ABrOnNonNull:
+		clear(g.chkDone)
+	}
+}
+
+// spCheck is wasm.GCSplitCheck for n bytes, of the pointer and the
+// offset that are pushed, as instructions: in a loop, where a call that
+// the engine does not expand costs several times the load that it is
+// for.
+func (g *gcGen) spCheck(n int64) {
+	if g.chkR < 0 {
+		g.chkR, g.chkI = g.newLocal('r'), g.newLocal('i')
+	}
+	ptr := g.ptrSym()
+	g.local(wasm.ALocalSet, g.chkI)
+	g.local(wasm.ALocalTee, g.chkR)
+	g.typed(wasm.AStructGet, ptr, wasm.GCPtrOff)
+	g.local(wasm.ALocalGet, g.chkI)
+	g.prog(wasm.AI32Add)
+	g.prog(wasm.AI64ExtendI32U)
+	i64Const(g.s, n)
+	g.prog(wasm.AI64Add)
+	g.local(wasm.ALocalGet, g.chkR)
+	g.typed(wasm.AStructGet, ptr, wasm.GCPtrLim)
+	g.prog(wasm.AI64ExtendI32U)
+	g.prog(wasm.AI64GtU)
+	g.prog(wasm.AIf)
+	g.prog(obj.AUNDEF)
+	g.prog(wasm.AEnd)
+	g.local(wasm.ALocalGet, g.chkR)
+	g.typed(wasm.AStructGet, ptr, wasm.GCPtrAddr)
+	g.local(wasm.ALocalGet, g.chkI)
+	g.prog(wasm.AI32Add)
+}
+
+// splitLoops returns the blocks of f that are in a loop: those that can
+// be reached from themselves.
+func splitLoops(f *ssa.Func) map[ssa.ID]bool {
+	// (Tarjan's strongly connected components, without recursion.)
+	in := make(map[ssa.ID]bool)
+	index := make(map[ssa.ID]int)
+	low := make(map[ssa.ID]int)
+	on := make(map[ssa.ID]bool)
+	var stack []*ssa.Block
+	type frame struct {
+		b *ssa.Block
+		i int
+	}
+	next := 1
+	for _, root := range f.Blocks {
+		if index[root.ID] != 0 {
+			continue
+		}
+		work := []frame{{root, 0}}
+		index[root.ID], low[root.ID] = next, next
+		next++
+		stack = append(stack, root)
+		on[root.ID] = true
+		for len(work) > 0 {
+			fr := &work[len(work)-1]
+			b := fr.b
+			if fr.i < len(b.Succs) {
+				c := b.Succs[fr.i].Block()
+				fr.i++
+				if c == b {
+					in[b.ID] = true
+				}
+				if index[c.ID] == 0 {
+					index[c.ID], low[c.ID] = next, next
+					next++
+					stack = append(stack, c)
+					on[c.ID] = true
+					work = append(work, frame{c, 0})
+				} else if on[c.ID] {
+					low[b.ID] = min(low[b.ID], index[c.ID])
+				}
+				continue
+			}
+			work = work[:len(work)-1]
+			if len(work) > 0 {
+				p := work[len(work)-1].b
+				low[p.ID] = min(low[p.ID], low[b.ID])
+			}
+			if low[b.ID] == index[b.ID] {
+				n := 0
+				for i := len(stack) - 1; ; i-- {
+					n++
+					if stack[i] == b {
+						break
+					}
+				}
+				for i := 0; i < n; i++ {
+					c := stack[len(stack)-1]
+					stack = stack[:len(stack)-1]
+					on[c.ID] = false
+					if n > 1 {
+						in[c.ID] = true
+					}
+				}
+			}
+		}
+	}
+	return in
+}
+
 // spPushAddrN is spPushAddr for a load or a store of n bytes at a,
 // which in checked code are in what the pointer points into.
 func (g *gcGen) spPushAddrN(a spAddr, n int64) int64 {
 	if !g.checked || a.direct(g, n) > 0 || g.integer(a) {
 		return g.spPushAddr(a)
 	}
+	if k := g.spKey(a, n); k != "" {
+		if r, ok := g.chkDone[k]; ok && r[0] <= a.off && a.off+n <= r[1] {
+			return g.spPushAddr(a)
+		}
+		if r, ok := g.chkRange[k]; ok && r[0] <= a.off && a.off+n <= r[1] && (r[0] != a.off || r[1] != a.off+n) && r[1]-r[0] <= math.MaxInt32 {
+			// The first of several: all of them.
+			off := a.off - r[0]
+			a.off = r[0]
+			g.spPushPtrRel(a)
+			if g.hot {
+				g.spCheck(r[1] - r[0])
+			} else {
+				i32Const(g.s, int32(r[1]-r[0]))
+				g.helper(wasm.GCSplitCheck)
+			}
+			g.chkDone[k] = r
+			return off
+		}
+	}
 	g.spPushPtrRel(a)
+	if g.hot {
+		g.spCheck(n)
+		return 0
+	}
 	switch n {
 	case 1:
 		g.helper(wasm.GCSplitCheck1)

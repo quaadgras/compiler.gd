@@ -90,22 +90,22 @@ type (
 )
 
 type Types struct {
-	Bool       *types.Type
-	Int8       *types.Type
-	Int16      *types.Type
-	Int32      *types.Type
-	Int64      *types.Type
-	UInt8      *types.Type
-	UInt16     *types.Type
-	UInt32     *types.Type
-	UInt64     *types.Type
-	Int        *types.Type
-	Float32    *types.Type
-	Float64    *types.Type
-	UInt       *types.Type
-	Uintptr    *types.Type
-	String     *types.Type
-	BytePtr    *types.Type // TODO: use unsafe.Pointer instead?
+	Bool    *types.Type
+	Int8    *types.Type
+	Int16   *types.Type
+	Int32   *types.Type
+	Int64   *types.Type
+	UInt8   *types.Type
+	UInt16  *types.Type
+	UInt32  *types.Type
+	UInt64  *types.Type
+	Int     *types.Type
+	Float32 *types.Type
+	Float64 *types.Type
+	UInt    *types.Type
+	Uintptr *types.Type
+	String  *types.Type
+	BytePtr *types.Type // TODO: use unsafe.Pointer instead?
 	// ITab is the type of the word of an interface that holds its
 	// type or its table: an integer, as Go has it, which the collector
 	// does not look at. With GOWASM=gc,split it is a pointer in memory
@@ -113,7 +113,7 @@ type Types struct {
 	// was stored, with the size of what it points to
 	// (cmd/compile/internal/wasm/gcsplit.go), and never made of the
 	// integer that a program may have written there.
-	ITab *types.Type
+	ITab       *types.Type
 	Int32Ptr   *types.Type
 	UInt32Ptr  *types.Type
 	IntPtr     *types.Type
