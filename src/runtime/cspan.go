@@ -466,7 +466,7 @@ func mallocCLarge(size uintptr) (unsafe.Pointer, uintptr) {
 //
 //go:nowritebarrierrec
 func greyConservative(val, base, off uintptr, gcw *gcWork) {
-	val &^= cPtrTag // of a pointer to a union (cclaim.go)
+	val &^= cPtrBits // of a pointer to a union (cclaim.go)
 	span := spanOfHeap(val)
 	if span == nil {
 		return

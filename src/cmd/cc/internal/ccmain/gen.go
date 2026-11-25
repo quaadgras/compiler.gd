@@ -559,7 +559,7 @@ func (g *gen) record(t *ctype) string {
 		// has one is in an object that the pointer points to: no
 		// word is an integer to one member and a pointer to
 		// another (types.go's unionPtr).
-		fmt.Fprintf(&b, "// %s is C's %s, as Go sees it: the bytes of its members that have no\n// pointer, and the pointer to what of it has one.\ntype %s struct {\n\t_ [0]uint64\n\tb [%d]byte\n\tp unsafe.Pointer\n}\n\n",
+		fmt.Fprintf(&b, "// %s is C's %s, as Go sees it: the bytes of its members that have no\n// pointer, and the pointer to what of it has one.\ntype %s struct {\n\t_ [0]uint64\n\tb [%d]byte\n\tp c23.UnionRef\n}\n\n",
 			name, what, name, r.ubytes)
 	} else if bytes {
 		// As cgo does for unions, Go sees the bytes. The tag tells

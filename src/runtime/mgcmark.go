@@ -1510,7 +1510,7 @@ func scanblock(b0, n0 uintptr, ptrmask *uint8, gcw *gcWork, stk *stackScanState)
 		for j := 0; j < 8 && i < n; j++ {
 			if bits&1 != 0 {
 				// Same work as in scanObject; see comments there.
-				p := *(*uintptr)(unsafe.Pointer(b + i)) &^ cPtrTag // (gd: of a pointer of C's to a union)
+				p := *(*uintptr)(unsafe.Pointer(b + i)) &^ cPtrBits // (gd: of a pointer of C's to a union)
 				if p != 0 {
 					if stk != nil && p >= stk.stack.lo && p < stk.stack.hi {
 						if debug.stackptrcheck != 0 && p < stk.frameSP {
@@ -1555,7 +1555,7 @@ func scanConservative(b, n uintptr, ptrmask *uint8, gcw *gcWork, state *stackSca
 				}
 			}
 
-			val := *(*uintptr)(unsafe.Pointer(p)) &^ cPtrTag
+			val := *(*uintptr)(unsafe.Pointer(p)) &^ cPtrBits
 			if state != nil && state.stack.lo <= val && val < state.stack.hi {
 				m.start()
 				println("ptr to stack")
@@ -1598,7 +1598,7 @@ func scanConservative(b, n uintptr, ptrmask *uint8, gcw *gcWork, state *stackSca
 			}
 		}
 
-		val := *(*uintptr)(unsafe.Pointer(b + i)) &^ cPtrTag
+		val := *(*uintptr)(unsafe.Pointer(b + i)) &^ cPtrBits
 
 		// Check if val points into the stack.
 		if state != nil && state.stack.lo <= val && val < state.stack.hi {

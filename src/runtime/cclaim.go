@@ -44,14 +44,23 @@ import (
 // plan is that such a word holds bytes and is skipped, once every way
 // that a pointer gets into C's memory claims the word for it.
 
-// cPtrTag is the bit of a pointer of C's with no type (void *, char *)
-// that says that it is to a union with pointers, or to the value of one
-// (doc/gd/cc.md, "Unions"): compiled code and internal/c23 take it off
-// before they use the pointer, and look at the union where it matters.
-// Such a pointer is in words that the collector and the stack's copier
-// look at as at any pointer, so they take the bit off too: no address
-// has it.
-const cPtrTag = (1 << 63) * (goarch.PtrSize / 8)
+// The bits of a word of C's that no address has, and that say what the
+// word is to code that would otherwise have to look at the memory
+// (doc/gd/cc.md):
+//
+//   - cPtrTag, of a pointer with no type (void *, char *): it is to a
+//     union with pointers, or to the value of one ("Unions");
+//   - cIntTag, of a uintptr_t or an intptr_t: it was made of a pointer,
+//     and is one still.
+//
+// Compiled code and internal/c23 take them off before they use the
+// address. Such a word is one that the collector and the stack's copier
+// look at as at any pointer, so they take the bits off too (cPtrBits).
+const (
+	cPtrTag  = (1 << 62) * (goarch.PtrSize / 8)
+	cIntTag  = (1 << 63) * (goarch.PtrSize / 8)
+	cPtrBits = cPtrTag | cIntTag
+)
 
 // cClaimStats counts what the claims of C's memory found, for
 // GODEBUG=cclaims=1, which prints them when the program exits.
@@ -399,15 +408,6 @@ func c23Convert(p unsafe.Pointer, elem *_type, n uintptr) {
 	checkptrAlignmentC(p, elem, n)
 }
 
-// c23New and c23TypedMove are for the box of a union's member
-// (internal/c23's UnionClone): a new object of typ, and a copy of one.
-//
-//go:linkname c23New
-func c23New(typ *_type) unsafe.Pointer { return mallocgc(typ.Size_, typ, true) }
-
-//go:linkname c23TypedMove
-func c23TypedMove(typ *_type, dst, src unsafe.Pointer) { typedmemmove(typ, dst, src) }
-
 // c23Malloc is malloc for C translated by cmd/cc (internal/c23): size
 // bytes, zeroed. If typ is not nil the object is for values of typ: the
 // words of the values that fit in it are claimed for what typ has
@@ -432,8 +432,25 @@ func c23Malloc(size uintptr, typ *_type, scalar bool) unsafe.Pointer {
 	if typ.Size_%word != 0 {
 		return x
 	}
-	// The whole values of typ that fit in size, and no more: what is
-	// left of the slot is anything.
+	cClaimValues(s, b, w, typ, size)
+	publicationBarrier()
+	return x
+}
+
+// cClaimValues claims the words from the w'th of s, in an object that
+// is not reached yet by anything that looks at claims, for the whole
+// values of typ that fit in size bytes: what typ has there.
+func cClaimValues(s *mspan, b *cBits, w uintptr, typ *_type, size uintptr) {
+	const word = goarch.PtrSize
+	if typ.Size_ == 0 || typ.Size_%word != 0 {
+		return
+	}
+	if !typ.Pointers() {
+		if typ.Align_ != 1 {
+			cClassSet(b, w, size/typ.Size_*(typ.Size_/word), cScalar)
+		}
+		return
+	}
 	mask := getGCMask(typ)
 	each := typ.Size_ / word
 	total := size / typ.Size_ * each
@@ -467,8 +484,6 @@ func c23Malloc(size uintptr, typ *_type, scalar bool) unsafe.Pointer {
 			cClassSet(b, w+i, 1, class)
 		}
 	}
-	publicationBarrier()
-	return x
 }
 
 // c23Memmove is memmove for C: the words of it that may be whole
