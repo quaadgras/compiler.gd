@@ -752,6 +752,10 @@ func constLit(t *ctype, v int64) string {
 		if v == 0 {
 			return "(*c23.Void)(nil)"
 		}
+		if t.isCap() && target.ptrSize == 8 {
+			// An integer of an intptr_t: its low 63 bits.
+			return fmt.Sprintf("c23.FromInt(%d)", uint64(v)&(1<<63-1))
+		}
 		return fmt.Sprintf("c23.FromInt(%d)", uint64(v)&(1<<(8*target.ptrSize)-1))
 	case t.isFloat():
 		return fmt.Sprintf("%s(%d)", goType(t), v)

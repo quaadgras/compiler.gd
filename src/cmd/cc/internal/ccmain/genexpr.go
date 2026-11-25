@@ -471,10 +471,7 @@ func (g *gen) compare(e *binary) string {
 		}
 	}
 	if t := e.x.ty(); t.isCap() {
-		if t.kind == kIntCap {
-			return fmt.Sprintf("(int(c23.Addr(%s)) %s int(c23.Addr(%s)))", x, e.op, y)
-		}
-		return fmt.Sprintf("(c23.Addr(%s) %s c23.Addr(%s))", x, e.op, y)
+		return fmt.Sprintf("(%s %s %s)", capValue(x, t), e.op, capValue(y, t))
 	}
 	return fmt.Sprintf("(%s %s %s)", x, e.op, y)
 }
@@ -703,7 +700,7 @@ var constConv = regexp.MustCompile(`^(c23\.(?:Bool|Char|SChar|UChar|Short|UShort
 
 func convertCode(x string, from, to *ctype) string {
 	if is128(to) && from.isCap() {
-		x, from = fmt.Sprintf("%s(c23.Addr(%s))", goType(capInt(from)), x), capInt(from)
+		x, from = fmt.Sprintf("%s(%s)", goType(capInt(from)), capValue(x, from)), capInt(from)
 	}
 	if is128(from) && to.isCap() {
 		return convertCode(convertCode(x, from, capInt(to)), capInt(to), to)
@@ -734,15 +731,21 @@ func convertCode(x string, from, to *ctype) string {
 		}
 		return fmt.Sprintf("c23.B2U8(%s != 0)", x)
 	case to.isCap():
-		// A pointer's or an intcap's capability stays; an integer has none.
+		// A pointer is one still; an integer is its low 63 bits
+		// (internal/c23's intcap.go).
 		switch {
-		case fromPtr:
+		case from.isCap():
 			return x
+		case fromPtr:
+			return fmt.Sprintf("c23.PtrToCap(%s)", x)
 		case from.isUnsigned() || from.isFloat() && to.kind == kUIntCap:
 			return fmt.Sprintf("c23.UintToCap(uint64(%s))", x)
 		}
 		return fmt.Sprintf("c23.IntToCap(int64(%s))", x)
 	case to.isInteger():
+		if from.isCap() {
+			return wrapBits(fmt.Sprintf("%s(%s)", goType(to), capValue(x, from)), to)
+		}
 		if fromPtr {
 			return wrapBits(fmt.Sprintf("%s(c23.Addr(%s))", goType(to), x), to)
 		}
@@ -757,21 +760,21 @@ func convertCode(x string, from, to *ctype) string {
 		}
 		return fmt.Sprintf("%s(%s)", goType(to), x)
 	case to.isFloat():
-		if from.kind == kIntCap {
-			return fmt.Sprintf("%s(int(c23.Addr(%s)))", goType(to), x)
-		}
-		if from.kind == kUIntCap {
-			return fmt.Sprintf("%s(c23.Addr(%s))", goType(to), x)
+		if from.isCap() {
+			return fmt.Sprintf("%s(%s)", goType(to), capValue(x, from))
 		}
 		if goType(from) == goType(to) {
 			return x
 		}
 		return fmt.Sprintf("%s(%s)", goType(to), x)
 	case to.isPtr() || to.kind == kNullptr || to.kind == kVaList:
+		if from.isCap() {
+			return fmt.Sprintf("c23.CapToPtr(%s)", x)
+		}
 		if fromPtr {
 			return x
 		}
-		return fmt.Sprintf("c23.FromInt(uintptr(%s))", x)
+		return fmt.Sprintf("c23.IntPtr(uintptr(%s))", x)
 	case to.kind == kStruct:
 		return x
 	}
@@ -929,7 +932,7 @@ func (g *gen) incDec(e *incDec, value bool) string {
 	case t.isPtr():
 		nv = g.ptrAdd(old, t, &intConst{node{tLong, e.p}, 1}, e.op == "--")
 	case t.isCap():
-		nv = fmt.Sprintf("c23.Add(%s, %s1)", old, map[bool]string{true: "-"}[e.op == "--"])
+		nv = capArith(e.op[:1], old, "c23.IntToCap(1)", t)
 	case t.kind == kBool:
 		if e.op == "++" {
 			nv = "uint8(1)"
@@ -1343,8 +1346,18 @@ func directScalar(t *ctype) bool {
 	return false
 }
 
-// capArith is x op y in intcap type t: on the addresses, keeping a
-// capability (internal/c23's intcap.go).
+// capValue is the integer that x, of intcap type t, is: an int for an
+// intptr_t, a uintptr for a uintptr_t.
+func capValue(x string, t *ctype) string {
+	if t.kind == kIntCap {
+		return "c23.CapSintOf(" + x + ")"
+	}
+	return "c23.CapUint(" + x + ")"
+}
+
+// capArith is x op y in intcap type t: of the integers, and a pointer
+// still where one of them is and the result is in its object
+// (internal/c23's intcap.go).
 func capArith(op, x, y string, t *ctype) string {
 	signed := t.kind == kIntCap
 	if op == "<<" || op == ">>" {

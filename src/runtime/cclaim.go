@@ -80,7 +80,7 @@ func cClaimReport() {
 	st := &cClaimStats
 	print("c claims: ", st.claims.Load(), " words claimed, ", st.reclaims.Load(), " claimed again, ",
 		st.narrowed.Load(), " untyped pointers typed, ", st.forged.Load(), " pointers of what was none, ",
-		st.bytes.Load(), " pointers written over with bytes\n")
+		st.bytes.Load(), " pointers written over with bytes, ", cIntPtrs.Load(), " integers that were addresses made pointers\n")
 }
 
 // cTypeID returns the number that stands for the type t in the ids of a
@@ -421,6 +421,54 @@ func c23slow(q, p unsafe.Pointer) bool { return true }
 //go:linkname c23Convert
 func c23Convert(p unsafe.Pointer, elem *_type, n uintptr) {
 	checkptrAlignmentC(p, elem, n)
+}
+
+// cIntPtrs counts the integers that C converted to pointers and that
+// were the addresses of something of the program's: pointers that
+// nothing says the program was given (internal/c23's IntPtr).
+var cIntPtrs atomic.Uint64
+
+// cPoison is the bit that a pointer which may not be used has: no
+// address has it, so a load or a store through the pointer faults.
+const cPoison = (1 << 61) * (goarch.PtrSize / 8)
+
+// c23IntPtr is the conversion of the integer v to a pointer, for C. An
+// integer that is no address of the program's is a pointer that C may
+// keep and compare. One that is an address, of an object of the heap
+// that is allocated, of a stack or of the program's data, is counted,
+// and with GODEBUG=cintptr=1 it is given cPoison.
+//
+//go:linkname c23IntPtr
+//go:nosplit
+func c23IntPtr(v uintptr) unsafe.Pointer {
+	if v < minLegalPointer || v&(cPtrBits|cPoison) != 0 {
+		return unsafe.Pointer(v)
+	}
+	addr := false
+	if s := spanOf(v); s != nil {
+		switch s.state.get() {
+		case mSpanInUse:
+			addr = v >= s.base() && v < s.limit && !s.isFree(s.objIndex(v))
+		case mSpanManual:
+			addr = true // a stack
+		}
+	} else {
+		for _, datap := range activeModules() {
+			if datap.data <= v && v < datap.edata || datap.bss <= v && v < datap.ebss ||
+				datap.noptrdata <= v && v < datap.enoptrdata || datap.noptrbss <= v && v < datap.enoptrbss ||
+				datap.text <= v && v < datap.end {
+				addr = true
+				break
+			}
+		}
+	}
+	if addr {
+		cIntPtrs.Add(1)
+		if debug.cintptr != 0 {
+			return unsafe.Pointer(v | cPoison)
+		}
+	}
+	return unsafe.Pointer(v)
 }
 
 // c23Malloc is malloc for C translated by cmd/cc (internal/c23): size

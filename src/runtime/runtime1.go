@@ -317,6 +317,7 @@ var debug struct {
 	gctrace                  int32
 	invalidptr               int32
 	cclaims                  int32 // gd: print what the claims of C's memory found (cclaim.go)
+	cintptr                  int32 // gd: an integer that is an address and that C converts to a pointer is one that cannot be used
 	madvdontneed             int32 // for Linux; issue 28466
 	scavtrace                int32
 	scheddetail              int32
@@ -383,6 +384,7 @@ var dbgvars = []*dbgVar{
 	{name: "harddecommit", value: &debug.harddecommit},
 	{name: "inittrace", value: &debug.inittrace},
 	{name: "cclaims", value: &debug.cclaims},
+	{name: "cintptr", value: &debug.cintptr},
 	{name: "invalidptr", value: &debug.invalidptr},
 	{name: "madvdontneed", value: &debug.madvdontneed},
 	{name: "panicnil", atomic: &debug.panicnil},

@@ -459,7 +459,7 @@ func (g *gen) tconv(x string, from, to *ctype) string {
 		}
 		// Through internal/c23: an integer that is no address (a
 		// sentinel) is still a pointer C may compare.
-		return g.retype(fmt.Sprintf("c23.FromInt(uintptr(%s))", x), voidPtr, g.gt(to))
+		return g.retype(fmt.Sprintf("c23.IntPtr(uintptr(%s))", x), voidPtr, g.gt(to))
 	case fromP && to.kind == kBool:
 		return fmt.Sprintf("c23.B2U8(%s != nil)", x)
 	case fromP && to.isInteger():
