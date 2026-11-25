@@ -44,10 +44,17 @@ memory (`runtime/checkptr.go`). A check that fails is a fatal error.
   next one, which never gave its address away. This is what C calls an
   exposed address (PNVI-ae). The integer does not keep the object alive:
   once it is freed the integer is the address of nothing exposed.
+  A result that is in nothing the runtime knows, not in the heap, the
+  stack or the data, is refused if every pointer it was computed from
+  is in an object of the heap: it is in none of their objects, and
+  what is there, if anything, is another thread's stack or the
+  runtime's own memory. (A result below the first page is an integer,
+  not an address.)
 - **`unsafe.Add`**: as the arithmetic.
 - **`unsafe.Slice`, `unsafe.String`**: the result is inside one
-  allocation, and the elements of a slice are compatible with what the
-  memory is (below). (What the language says panics still panics, and is not a
+  allocation, which for an object that C's malloc gave ends where C
+  asked for it to (`cc.md`), and the elements of a slice are
+  compatible with what the memory is (below). (What the language says panics still panics, and is not a
   fatal error: `unsafeslicecheckptr` uses the caller's pc.)
 
 ## Compatible types
@@ -126,7 +133,8 @@ Where the type of the memory comes from:
   that the memory was found compatible with, so what `S` and `T`
   disagree on, the memory and `T` do. Bytes say nothing of what they are
   over, and neither does an `unsafe.Pointer` of what the pointer under
-  it points to: those are left to the runtime. This is the only check
+  it points to, nor a pointer to a type of no size (`*struct{}`, C's
+  `void *`): those are left to the runtime. This is the only check
   of the stack and of globals, which have no type at run time.
 - **Generic code** has a type's shape, in which every pointer is a
   `*uint8`. The conversion is given the type itself, from the
