@@ -269,6 +269,13 @@ const (
 	GCSplitCheck2 = "wasm.chk2"
 	GCSplitCheck4 = "wasm.chk4"
 	GCSplitCheck8 = "wasm.chk8"
+	// GCSplitCheckW and the others are those for a store: the bytes
+	// are also not of the data that nothing changes (GCGlobalROEnd).
+	GCSplitCheckW  = "wasm.chkw"
+	GCSplitCheckW1 = "wasm.chkw1"
+	GCSplitCheckW2 = "wasm.chkw2"
+	GCSplitCheckW4 = "wasm.chkw4"
+	GCSplitCheckW8 = "wasm.chkw8"
 
 	// GCGlobalSlots is the global (with split) that holds the array of
 	// the program's data, which covers all of it from address 0, and
@@ -276,8 +283,14 @@ const (
 	// array: a pointer to data is that plus the address.
 	GCGlobalSlots  = 7
 	GCGlobalStatic = 8
+	// GCGlobalROEnd is the global (an i32, with split) that holds the
+	// address where the data that the program may change begins: what
+	// is below it is the data that nothing changes (the descriptors of
+	// types, the bytes of strings, tables), and code that is not the
+	// runtime's stores nothing there (GCSplitCheckW).
+	GCGlobalROEnd = 9
 	// GCSplitGlobals is GCGlobals with split.
-	GCSplitGlobals = 9
+	GCSplitGlobals = 10
 
 	// GCStackRatio is how much of the engine's stack a function may
 	// take for each byte of its frame in linear memory, and

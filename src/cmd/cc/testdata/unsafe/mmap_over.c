@@ -11,4 +11,5 @@ static void ok(void) { printf("OK\n"); exit(0); }
 char victim[16] = "safe";
 
 #include <sys/mman.h>
-int main(void){ char *m = mmap(NULL, 100000, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0); if (m == MAP_FAILED) ok(); vn = 100000 + 8192; m[vn] = 88; unsafe("stored 8192 bytes past a mapping"); }
+#include <unistd.h>
+int main(void){ char *m = mmap(NULL, 100000, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0); if (m == MAP_FAILED) ok(); long pg = sysconf(_SC_PAGESIZE); vn = (100000 + pg - 1) / pg * pg + pg; m[vn] = 88; vn = m[vn]; unsafe("stored a page past a mapping"); }

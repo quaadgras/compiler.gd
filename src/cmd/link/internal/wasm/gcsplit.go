@@ -13,6 +13,7 @@ import (
 	"internal/buildcfg"
 	"os"
 	"sort"
+	"strings"
 )
 
 // Linking for GOWASM=gc,split (stage 15 of doc/gd/wasm-gc.md; see
@@ -101,6 +102,11 @@ var gcSplitHelpers = []string{
 	wasm.GCSplitCheck2,
 	wasm.GCSplitCheck4,
 	wasm.GCSplitCheck8,
+	wasm.GCSplitCheckW,
+	wasm.GCSplitCheckW1,
+	wasm.GCSplitCheckW2,
+	wasm.GCSplitCheckW4,
+	wasm.GCSplitCheckW8,
 	wasm.GCSplitLoadPtr + "c",
 	wasm.GCSplitStorePtr + "c",
 	wasm.GCSplitIntToPtr + "c",
@@ -202,12 +208,33 @@ func (l *gcLinker) writeSplitTypes(w *bytes.Buffer) {
 	w.WriteByte(0x01)
 }
 
+// splitROEnd returns the address where the data that the program may
+// change begins (wasm.GCGlobalROEnd): its variables. What the linker
+// lays out before them is not changed by code that is not the
+// runtime's: the descriptors of types, the bytes of strings, tables.
+func (l *gcLinker) splitROEnd(dataEnd uint64) uint64 {
+	end := dataEnd
+	for _, name := range []string{"runtime.noptrdata", "runtime.data", "runtime.bss", "runtime.noptrbss"} {
+		if s := l.ldr.Lookup(name, 0); s != 0 {
+			if sect := l.ldr.SymSect(s); sect != nil && sect.Length != 0 {
+				end = min(end, sect.Vaddr)
+			}
+		}
+	}
+	return end
+}
+
 // splitDataSlots returns the words of the data that relocations make
 // pointers to data: the elements of the array of data that the start
-// function sets.
-func (l *gcLinker) splitDataSlots(sects []wasmDataSect, end uint64) []uint32 {
+// function sets. A pointer to data that nothing changes (below roEnd)
+// is a pointer into all of that, which is only read: the word alone is
+// listed, in words. A pointer to a variable is to that variable, and
+// its word is listed in exact with how far the address is from the
+// start of the variable, and the size of the variable.
+func (l *gcLinker) splitDataSlots(sects []wasmDataSect, end, roEnd uint64) (words, exact []uint32) {
 	ldr := l.ldr
-	var words []uint32
+	type entry struct{ word, off, lim uint32 }
+	var es []entry
 	for s := loader.Sym(1); s < loader.Sym(ldr.NSym()); s++ {
 		if !ldr.AttrReachable(s) || ldr.SymType(s).IsText() {
 			continue
@@ -237,17 +264,28 @@ func (l *gcLinker) splitDataSlots(sects []wasmDataSect, end uint64) []uint32 {
 			if at%l.ptrSize() != 0 || uint64(at) >= end {
 				continue
 			}
-			words = append(words, uint32(at/l.ptrSize()))
+			word := uint32(at / l.ptrSize())
+			if target := ldr.SymValue(r.Sym()) + r.Add(); target >= 0 && uint64(target) < roEnd {
+				words = append(words, word)
+			} else {
+				es = append(es, entry{word, uint32(r.Add()), uint32(ldr.SymSize(r.Sym()))})
+			}
 		}
 	}
 	sort.Slice(words, func(i, j int) bool { return words[i] < words[j] })
-	return words
+	sort.Slice(es, func(i, j int) bool { return es[i].word < es[j].word })
+	for _, e := range es {
+		exact = append(exact, e.word, e.off, e.lim)
+	}
+	return words, exact
 }
 
 // splitInit returns the body of the start function: it sets the
 // elements of the array of data for the words listed at addr in linear
-// memory (n of them).
-func (l *gcLinker) splitInit(addr, n, dataEnd int64) []byte {
+// memory (n of them, pointers into the data below roEnd), and for those
+// listed after them (exact of them, each with its offset and the size of
+// what it points into).
+func (l *gcLinker) splitInit(addr, n, exact, roEnd int64) []byte {
 	ptr, slots := l.typeIndex(wasm.GCPtr), l.typeIndex(wasm.GCSlots)
 	a := &gcAsm{l: l}
 	// local 0: where in the list; 1: the word; 2: its address
@@ -273,12 +311,45 @@ func (l *gcLinker) splitInit(addr, n, dataEnd int64) []byte {
 	a.get(2)
 	gcGlobalGet(&a.Buffer, wasm.GCGlobalSlots)
 	a.get(2)
-	a.i32(dataEnd)
+	a.i32(roEnd)
 	a.gc(0x00, ptr) // struct.new
 	a.gc(0x0E, slots)
 	a.end()
 	a.get(0)
 	a.i32(4)
+	a.op(0x6A) // i32.add
+	a.set(0)
+	a.br(0)
+	a.end()
+	a.end()
+	// The pointers to variables.
+	a.block()
+	a.loop()
+	a.get(0)
+	a.i32(addr + 4*n + 12*exact)
+	a.op(0x4F) // i32.ge_u
+	a.brIf(1)
+	a.get(0)
+	a.load(0)
+	a.tee(1)
+	a.i32(wasm.GCWordShift(int(l.ptrSize())))
+	a.op(0x74) // i32.shl
+	a.load(0)
+	a.tee(2)
+	a.if_()
+	gcGlobalGet(&a.Buffer, wasm.GCGlobalSlots)
+	a.get(1)
+	a.get(2)
+	gcGlobalGet(&a.Buffer, wasm.GCGlobalSlots)
+	a.get(0)
+	a.load(4)
+	a.get(0)
+	a.load(8)
+	a.gc(0x00, ptr) // struct.new
+	a.gc(0x0E, slots)
+	a.end()
+	a.get(0)
+	a.i32(12)
 	a.op(0x6A) // i32.add
 	a.set(0)
 	a.br(0)
@@ -301,7 +372,7 @@ func (a *gcAsm) splitLocals(kinds string) {
 // splitHelpers returns the functions that split code calls (see
 // gcSplitHelpers). staticEnd is the end of the data, which the array
 // of data covers.
-func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
+func (l *gcLinker) splitHelpers(first int, staticEnd, roEnd int64) []*wasmFunc {
 	ptr, slots := l.typeIndex(wasm.GCPtr), l.typeIndex(wasm.GCSlots)
 	sigs := map[string]string{
 		wasm.GCSplitLoadPtr:  "ri.r",
@@ -321,15 +392,20 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 		wasm.GCSplitCheck2:   "ri.i",
 		wasm.GCSplitCheck4:   "ri.i",
 		wasm.GCSplitCheck8:   "ri.i",
+		wasm.GCSplitCheckW:   "rii.i",
+		wasm.GCSplitCheckW1:  "ri.i",
+		wasm.GCSplitCheckW2:  "ri.i",
+		wasm.GCSplitCheckW4:  "ri.i",
+		wasm.GCSplitCheckW8:  "ri.i",
 	}
 	// The form of a function that checked code calls (see
 	// wasm.GCSplitChecked) is the function with a check before it.
 	for _, name := range []string{wasm.GCSplitLoadPtr, wasm.GCSplitStorePtr, wasm.GCSplitIntToPtr, wasm.GCSplitMove, wasm.GCSplitZero} {
 		sigs[wasm.GCSplitChecked(name)] = sigs[name]
 	}
-	chkWord := wasm.GCSplitCheck4
+	chkWord, chkWordW := wasm.GCSplitCheck4, wasm.GCSplitCheckW4
 	if l.ptrSize() == 8 {
-		chkWord = wasm.GCSplitCheck8
+		chkWord, chkWordW = wasm.GCSplitCheck8, wasm.GCSplitCheckW8
 	}
 	index := func(name string) int {
 		i, _ := l.splitHelperIndex(name)
@@ -351,6 +427,38 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 		a.op(0x49) // i32.lt_u
 		a.op(0x1B) // select
 	}
+	// fault stops the program: a load or a store that is not in what
+	// its pointer points into.
+	fault := func(a *gcAsm) {
+		var f loader.Sym
+		for v := 0; v < 2 && f == 0; v++ {
+			f = l.ldr.Lookup("runtime.splitfault", v)
+		}
+		if f != 0 && l.funcIndex != nil && l.ldr.AttrReachable(f) {
+			// (The runtime says what it is.)
+			a.call(int(l.funcIndex(f)))
+		}
+		a.unreachable()
+	}
+	// slotOff pushes how far the address at local rel from the pointer
+	// in local p is from where element 0 of its array is: the offset,
+	// or for the array of the data, which begins at address 0, the
+	// address (a pointer into the data has the offset in its symbol).
+	slotOff := func(a *gcAsm, p, rel uint32) {
+		a.get(p)
+		get(a, wasm.GCPtrAddr)
+		a.get(rel)
+		a.op(0x6A) // i32.add
+		a.get(p)
+		get(a, wasm.GCPtrOff)
+		a.get(rel)
+		a.op(0x6A)
+		a.get(p)
+		get(a, wasm.GCPtrSlots)
+		gcGlobalGet(&a.Buffer, wasm.GCGlobalSlots)
+		a.op(0xD3) // ref.eq
+		a.op(0x1B) // select
+	}
 	var fns []*wasmFunc
 	for _, name := range l.splitHelperNames() {
 		a := &gcAsm{l: l}
@@ -368,47 +476,58 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 		// inBlock traps unless the n bytes (n < 0: as many as local
 		// nloc) at local rel from the pointer of local p are in what
 		// it points into.
-		inBlock := func(p, rel uint32, n int64, nloc uint32) {
+		inBlock := func(p, rel uint32, n int64, nloc uint32, store bool) {
 			if !checked {
 				return
+			}
+			chk, word := wasm.GCSplitCheck, chkWord
+			if store {
+				chk, word = wasm.GCSplitCheckW, chkWordW
 			}
 			a.get(p)
 			a.get(rel)
 			switch {
 			case n < 0:
 				a.get(nloc)
-				a.call(index(wasm.GCSplitCheck))
+				a.call(index(chk))
 			case n == l.ptrSize():
-				a.call(index(chkWord))
+				a.call(index(word))
 			default:
 				a.i32(n)
-				a.call(index(wasm.GCSplitCheck))
+				a.call(index(chk))
 			}
 			a.op(0x1A) // drop
 		}
 		switch kind {
-		case wasm.GCSplitCheck, wasm.GCSplitCheck1, wasm.GCSplitCheck2, wasm.GCSplitCheck4, wasm.GCSplitCheck8:
+		case wasm.GCSplitCheck, wasm.GCSplitCheck1, wasm.GCSplitCheck2, wasm.GCSplitCheck4, wasm.GCSplitCheck8,
+			wasm.GCSplitCheckW, wasm.GCSplitCheckW1, wasm.GCSplitCheckW2, wasm.GCSplitCheckW4, wasm.GCSplitCheckW8:
 			// The bytes from off+rel on, n of them, end at lim or
 			// before it: in 64 bits, so that nothing wraps. (An
 			// offset that is negative is a large one.)
-			// p 0, rel 1 (, n 2)
-			a.splitLocals("")
+			// p 0, rel 1 (, n 2); of a store, the address
+			store := strings.HasPrefix(kind, wasm.GCSplitCheckW)
+			addr := uint32(strings.Index(sigs[kind], "."))
+			if store {
+				a.splitLocals("i")
+			} else {
+				a.splitLocals("")
+			}
 			a.get(0)
 			get(a, wasm.GCPtrOff)
 			a.get(1)
 			a.op(0x6A) // i32.add
 			a.op(0xAD) // i64.extend_i32_u
 			switch kind {
-			case wasm.GCSplitCheck:
+			case wasm.GCSplitCheck, wasm.GCSplitCheckW:
 				a.get(2)
 				a.op(0xAD)
-			case wasm.GCSplitCheck1:
+			case wasm.GCSplitCheck1, wasm.GCSplitCheckW1:
 				a.op(0x42, 1) // i64.const
-			case wasm.GCSplitCheck2:
+			case wasm.GCSplitCheck2, wasm.GCSplitCheckW2:
 				a.op(0x42, 2)
-			case wasm.GCSplitCheck4:
+			case wasm.GCSplitCheck4, wasm.GCSplitCheckW4:
 				a.op(0x42, 4)
-			case wasm.GCSplitCheck8:
+			case wasm.GCSplitCheck8, wasm.GCSplitCheckW8:
 				a.op(0x42, 8)
 			}
 			a.op(0x7C) // i64.add
@@ -417,21 +536,23 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.op(0xAD)
 			a.op(0x56) // i64.gt_u
 			a.if_()
-			var fault loader.Sym
-			for v := 0; v < 2 && fault == 0; v++ {
-				fault = l.ldr.Lookup("runtime.splitfault", v)
-			}
-			if fault != 0 && l.funcIndex != nil && l.ldr.AttrReachable(fault) {
-				// (The runtime says what it is, and the program
-				// stops.)
-				a.call(int(l.funcIndex(fault)))
-			}
-			a.unreachable()
+			fault(a)
 			a.end()
 			a.get(0)
 			get(a, wasm.GCPtrAddr)
 			a.get(1)
 			a.op(0x6A)
+			if store {
+				// Not in the data that nothing changes. (A store
+				// of no bytes, at the end of it, is none.)
+				a.tee(addr)
+				a.i32(roEnd)
+				a.op(0x49) // i32.lt_u
+				a.if_()
+				fault(a)
+				a.end()
+				a.get(addr)
+			}
 			a.end()
 		case wasm.GCSplitLoadPtr:
 			// The element of the array, if there is one and its
@@ -439,7 +560,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			// memory, made a pointer (it was written as an integer).
 			// p 0, rel 1; arr 2, i 3, r 4, addr 5
 			a.splitLocals("airi")
-			inBlock(0, 1, l.ptrSize(), 0)
+			inBlock(0, 1, l.ptrSize(), 0, false)
 			a.get(0)
 			get(a, wasm.GCPtrAddr)
 			a.get(1)
@@ -451,10 +572,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.tee(2)
 			isNull(a)
 			a.brIf(0)
-			a.get(0)
-			get(a, wasm.GCPtrOff)
-			a.get(1)
-			a.op(0x6A)
+			slotOff(a, 0, 1)
 			a.toSlot()
 			a.tee(3)
 			a.get(2)
@@ -483,7 +601,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 		case wasm.GCSplitStorePtr:
 			// p 0, rel 1, v 2; arr 3, i 4
 			a.splitLocals("ai")
-			inBlock(0, 1, l.ptrSize(), 0)
+			inBlock(0, 1, l.ptrSize(), 0, true)
 			a.get(0)
 			get(a, wasm.GCPtrAddr)
 			a.get(1)
@@ -524,10 +642,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			check()
 			ret(a)
 			a.end()
-			a.get(0)
-			get(a, wasm.GCPtrOff)
-			a.get(1)
-			a.op(0x6A)
+			slotOff(a, 0, 1)
 			a.toSlot()
 			a.tee(4)
 			a.get(3)
@@ -644,8 +759,8 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 		case wasm.GCSplitMove:
 			// d 0, drel 1, s 2, srel 3, n 4; da 5, sa 6, di 7, si 8, cnt 9, first 10, k 11
 			a.splitLocals("aaiiiii")
-			inBlock(0, 1, -1, 4)
-			inBlock(2, 3, -1, 4)
+			inBlock(0, 1, -1, 4, true)
+			inBlock(2, 3, -1, 4, false)
 			a.get(0)
 			get(a, wasm.GCPtrAddr)
 			a.get(1)
@@ -663,10 +778,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.if_()
 			ret(a)
 			a.end()
-			a.get(0)
-			get(a, wasm.GCPtrOff)
-			a.get(1)
-			a.op(0x6A)
+			slotOff(a, 0, 1)
 			a.tee(7)
 			a.toSlotUp()
 			a.set(10)
@@ -690,10 +802,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.tee(6)
 			isNull(a)
 			a.brIf(0)
-			a.get(2)
-			get(a, wasm.GCPtrOff)
-			a.get(3)
-			a.op(0x6A)
+			slotOff(a, 2, 3)
 			a.tee(8)
 			a.get(7)
 			a.op(0x73) // i32.xor
@@ -745,7 +854,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 		case wasm.GCSplitZero:
 			// p 0, rel 1, n 2; arr 3, first 4, cnt 5
 			a.splitLocals("aii")
-			inBlock(0, 1, -1, 2)
+			inBlock(0, 1, -1, 2, true)
 			a.get(0)
 			get(a, wasm.GCPtrAddr)
 			a.get(1)
@@ -760,10 +869,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.if_()
 			ret(a)
 			a.end()
-			a.get(0)
-			get(a, wasm.GCPtrOff)
-			a.get(1)
-			a.op(0x6A)
+			slotOff(a, 0, 1)
 			a.tee(4)
 			a.get(2)
 			a.op(0x6A)
@@ -843,7 +949,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 // splitGlobals writes the globals of split: those of wasm.GCGlobals,
 // the array of data and the pointer to it, and a pointer to each data
 // symbol that the code uses as one.
-func (l *gcLinker) splitGlobals(w *bytes.Buffer, stackTop, dataEnd uint64) {
+func (l *gcLinker) splitGlobals(w *bytes.Buffer, stackTop, dataEnd, roEnd uint64) {
 	ptr, slots := l.typeIndex(wasm.GCPtr), l.typeIndex(wasm.GCSlots)
 	writeUleb128(w, uint64(wasm.GCSplitGlobals+len(l.globals)))
 	for i := 0; i < wasm.GCSplitGlobals; i++ {
@@ -867,6 +973,9 @@ func (l *gcLinker) splitGlobals(w *bytes.Buffer, stackTop, dataEnd uint64) {
 			writeI32Const(w, 0)
 			writeI32Const(w, int32(dataEnd))
 			gcOp(w, 0x00, ptr) // struct.new
+		case wasm.GCGlobalROEnd:
+			w.Write([]byte{wasm.GCTypeI32, 0x00})
+			writeI32Const(w, int32(roEnd))
 		default:
 			w.Write([]byte{wasm.GCTypeI32, 0x01})
 			switch i {
@@ -886,14 +995,16 @@ func (l *gcLinker) splitGlobals(w *bytes.Buffer, stackTop, dataEnd uint64) {
 		writeSleb128(w, int64(ptr))
 		w.WriteByte(0x00)
 		writeI32Const(w, int32(addr))
+		// A pointer to a symbol of the data is to that symbol: from
+		// its start, of its size. (One to a function is to nothing.)
 		lim := int32(0)
 		if !l.ldr.SymType(s).IsText() && addr >= 0 && uint64(addr) < dataEnd {
 			gcGlobalGet(w, wasm.GCGlobalSlots)
-			lim = int32(dataEnd)
+			lim = int32(l.ldr.SymSize(s))
 		} else {
 			w.Write([]byte{0xD0, 0x71})
 		}
-		writeI32Const(w, int32(addr))
+		writeI32Const(w, 0)
 		writeI32Const(w, lim)
 		gcOp(w, 0x00, ptr)
 		w.WriteByte(0x0b)

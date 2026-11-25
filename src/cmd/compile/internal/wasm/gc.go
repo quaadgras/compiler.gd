@@ -108,6 +108,7 @@ type gcGen struct {
 	fptr                               int32               // split: the local of the pointer to the frame
 	checked                            bool                // split: what is loaded and stored through a pointer is in what it points into (gcsplit.go)
 	chkRange, chkDone                  map[string][2]int64 // split: see splitRanges
+	chkStore                           map[string]bool     // split: see splitRanges
 	chkR, chkI                         int32               // split: the locals of a check that is not a call, or -1
 	inLoop                             map[ssa.ID]bool     // split: the blocks that are in a loop
 	hot                                bool                // split: the block that is generated is in a loop
@@ -818,9 +819,8 @@ func (g *gcGen) onStack(v *ssa.Value, extend bool) {
 		g.prog(wasm.AI32WrapI64)
 		g.br(wasm.ABrIf, blk, nil)
 		g.prog(wasm.ADrop)
-		a := g.spResolve(v.Args[0])
-		g.spPushPtrRel(a)
-		g.helper(g.splitHelperAt(wasm.GCSplitLoadPtr, a))
+		c := g.spPushPtrAccess(g.spResolve(v.Args[0]), int64(types.PtrSize), false)
+		g.helper(accessHelper(wasm.GCSplitLoadPtr, c))
 		g.prog(wasm.AEnd)
 
 	case ssa.OpCopy, ssa.OpWasmLoweredConvert, ssa.OpConvert:
