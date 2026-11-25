@@ -23,6 +23,11 @@ func main() {
 	s := string(make([]byte, 8))
 	h := (*reflect.StringHeader)(launder(unsafe.Pointer(&s)))
 	h.Len = 1 << 20
+	if len(s) == 8 {
+		// (Where a short string is its bytes and no pointer, what
+		// was written is among them.)
+		ok()
+	}
 	n := 0
 	for i := 0; i < len(s); i++ {
 		n += int(s[i])

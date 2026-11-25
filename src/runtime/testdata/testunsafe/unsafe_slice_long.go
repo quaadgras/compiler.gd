@@ -18,6 +18,13 @@ func ok()                    { fmt.Println("OK"); os.Exit(0) }
 
 var _ = vn
 
+// idx returns vn, where the compiler does not see that it does: what is
+// loaded at an index of it is loaded, and what was stored there is not a
+// store that nothing reads.
+//
+//go:noinline
+func idx() int { return vn }
+
 func main() {
 	x := new([8]byte)
 	vn = 4096
@@ -25,5 +32,6 @@ func main() {
 	for i := range s {
 		s[i] = 88
 	}
+	vn = int(s[idx()-1])
 	unsafeDone("unsafe.Slice of 4096 bytes over 8")
 }
