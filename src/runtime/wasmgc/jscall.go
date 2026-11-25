@@ -149,3 +149,13 @@ func jscallbackdone() {
 func jsIsLinear(p unsafe.Pointer) bool {
 	return trylinaddr(p) != 0
 }
+
+// syscall_js_hostBytes stops the program unless the n bytes at p are in
+// what p points into: syscall/js gives the host their address.
+//
+//go:linkname syscall_js_hostBytes syscall/js.hostBytes
+func syscall_js_hostBytes(p unsafe.Pointer, n int) {
+	if splitMode && n > 0 {
+		splitcheck(p, uintptr(n))
+	}
+}

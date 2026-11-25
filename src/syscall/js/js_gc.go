@@ -285,8 +285,16 @@ func str(s string) (unsafe.Pointer, int) {
 	if !isLinear(p) {
 		p = unsafe.Pointer(&[]byte(s)[0])
 	}
+	hostBytes(p, len(s))
 	return p, len(s)
 }
+
+// hostBytes stops the program unless the n bytes at p are in what p
+// points into: the host is given an address and a length, and reads or
+// writes there with no pointer to ask. (In the runtime. A slice or a
+// string of the program's is what its words say, which with package
+// unsafe or C in the program may be more than is there.)
+func hostBytes(p unsafe.Pointer, n int)
 
 // isLinear reports whether p points into linear memory, which the host
 // reads and writes: with GOWASM=gc, a []byte that new or a composite
@@ -296,7 +304,11 @@ func isLinear(p unsafe.Pointer) bool
 
 // linear returns b, or a copy of it in linear memory (see isLinear).
 func linear(b []byte) []byte {
-	if len(b) == 0 || isLinear(unsafe.Pointer(&b[0])) {
+	if len(b) == 0 {
+		return b
+	}
+	if isLinear(unsafe.Pointer(&b[0])) {
+		hostBytes(unsafe.Pointer(&b[0]), len(b))
 		return b
 	}
 	return append(make([]byte, 0, len(b)), b...)
