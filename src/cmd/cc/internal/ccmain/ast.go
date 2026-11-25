@@ -177,6 +177,9 @@ type initItem struct {
 type initializer struct {
 	items  []initItem
 	scalar expr // for a scalar not in memory
+	// The member that each union of the object is initialized as, by
+	// the union's offset: the last, if the initializer names several.
+	unions map[int64]*field
 }
 
 type storage uint8

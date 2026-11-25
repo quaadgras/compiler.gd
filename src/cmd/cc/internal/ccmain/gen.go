@@ -80,6 +80,9 @@ type pkgGen struct {
 // gen generates one function, or file-scope code, of a unit.
 type gen struct {
 	*pkgGen
+	// The member that each union of the object being initialized is
+	// initialized as, by offset (initializer.unions): for tat.
+	initUnion map[int64]*field
 	u     *unit
 	unitN int
 	out   *strings.Builder

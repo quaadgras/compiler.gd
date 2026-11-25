@@ -875,14 +875,13 @@ func (r *record) layout() {
 const unionIfaceSize = 32
 
 // unionPtr reports whether r is a union that is laid out as its bytes
-// and one Go interface value for its pointers (doc/gd/cc.md, "Unions"):
-// one that has a pointer for a member, and whose other members have no
-// pointer in them. A member that is a pointer is then never the same
-// memory as one that is an integer, so neither can be made of the
-// other, and the interface value says of what type the pointer that it
-// holds is. A union that has a struct or an array with pointers for a
-// member is not so: the address of such a member is the address of all
-// of it.
+// and one Go interface value for what of it has pointers (doc/gd/cc.md,
+// "Unions"): one that has a member with a pointer. A member with no
+// pointer is in the bytes. A member that is a pointer is the pointer
+// that the interface value holds, and any other that has one is an
+// object of its own that the value points to (internal/c23's UnionPtr
+// and UnionBox). So a pointer is never the same memory as an integer,
+// and neither can be made of the other.
 func (r *record) unionPtr() bool {
 	if !r.union || r.packed > 0 || target.ptrSize != 8 {
 		return false
@@ -898,10 +897,8 @@ func (r *record) unionPtr() bool {
 		switch t := f.t; {
 		case f.bits >= 0 || f.packed || t.q&qAtomic != 0 || t.align > 8:
 			return false
-		case t.kind == kPtr || t.kind == kNullptr:
-			ptr = true
 		case hasPointers(t):
-			return false
+			ptr = true
 		}
 	}
 	return ptr

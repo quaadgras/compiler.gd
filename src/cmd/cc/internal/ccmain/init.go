@@ -62,7 +62,7 @@ func (p *parser) initializer(sym *symbol) *initializer {
 	if sym.t.isScalar() && len(ip.items) == 0 {
 		return &initializer{scalar: p.convert(&intConst{node{tInt, p.here()}, 0}, sym.t)}
 	}
-	return &initializer{items: ip.items}
+	return &initializer{items: ip.items, unions: ip.unions}
 }
 
 // initFor is the initializer of a t from the value e.

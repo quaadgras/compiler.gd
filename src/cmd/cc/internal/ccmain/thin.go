@@ -216,10 +216,10 @@ func (g *gen) tlv1(e expr, forAddr bool) lval {
 				}
 			}
 		}
-		if xt.rec.uptr && (e.t.kind == kPtr || e.t.kind == kNullptr) {
-			// A union's member that is a pointer: in the union's
+		if xt.rec.uptr && hasPointers(e.t) {
+			// A union's member that has a pointer: in the union's
 			// interface value.
-			return lval{x: g.unionPtr(base, e.t), t: e.t}
+			return lval{x: g.unionHeld(base, e.t), t: e.t}
 		}
 		// A union's member, or one of a record Go sees as bytes: at its
 		// offset.
@@ -344,6 +344,10 @@ func (g *gen) tstore(l lval, v string, c expr) {
 	case l.t.kind == kStruct || l.t.kind == kArray:
 		if v != taddr(l.x) {
 			g.p("%s = %s", l.x, star(v))
+			if hasUnionPtr(l.t) {
+				g.tbind(&l)
+				g.unionClones(l.x, l.t)
+			}
 		}
 		return
 	case memValue(l.t):
@@ -477,6 +481,9 @@ func (g *gen) tcast(e *cast) string {
 			if code, ok := g.tallocCall(c, to); ok {
 				return code
 			}
+		}
+		if code, ok := g.unionCast(e.x, to); ok {
+			return code
 		}
 	}
 	x := g.rv(e.x)
@@ -789,11 +796,149 @@ func (g *gen) tcompound(e *compoundLit) string {
 	return n
 }
 
-// unionPtr is the member of type t, a pointer, of the union u, whose
-// pointers are in a Go interface value (types.go's unionPtr): the
-// pointer that the value holds, as one of t.
-func (g *gen) unionPtr(u string, t *ctype) string {
-	return fmt.Sprintf("(*c23.UnionPtr[%s](&%s.p))", g.mirror(t), u)
+// unionHeld is the member of type t, which has a pointer, of the union
+// u, whose pointers are in a Go interface value (types.go's unionPtr):
+// the pointer that the value holds, if t is one, and otherwise the
+// object that it points to (internal/c23's UnionPtr and UnionBox).
+func (g *gen) unionHeld(u string, t *ctype) string {
+	if t.kind == kPtr || t.kind == kNullptr {
+		return fmt.Sprintf("(*c23.UnionPtr[%s](&%s.p))", g.mirror(t), u)
+	}
+	return fmt.Sprintf("(*c23.UnionBox[%s](&%s.p))", g.mirror(t), u)
+}
+
+// unionCast is the cast to the pointer type to of the address of the
+// bytes of a union that has an interface value for its pointers, if e
+// is one and to points to a type with pointers: C uses a union's bytes
+// for a value that is none of its members (Godot's Variant keeps a
+// String, an Array, a Callable in an array of bytes), and a pointer in
+// those bytes would be one that nothing sees. The value is in the
+// interface value, where a member with pointers is: itself, if it is
+// one pointer, and otherwise in an object of its own.
+func (g *gen) unionCast(e expr, to *ctype) (string, bool) {
+	t := to.elem
+	if t == nil || !to.isPtr() || !t.isComplete() || t.kind == kVoid || t.kind == kFunc || !hasPointers(t) {
+		return "", false
+	}
+	// Through casts to other pointer types, to the address itself.
+	for {
+		c, ok := e.(*cast)
+		if !ok || !c.t.isPtr() || !c.x.ty().isPtr() {
+			break
+		}
+		e = c.x
+	}
+	var of expr
+	switch e := e.(type) {
+	case *decay:
+		of = e.x
+	case *addrOf:
+		of = e.x
+	}
+	if of == nil || !isLvalue(of) {
+		return "", false
+	}
+	var u string
+	if m, ok := of.(*member); ok && m.f.bits < 0 && !hasPointers(m.t) {
+		// A member with no pointer: the bytes.
+		if xt := m.x.ty(); xt.kind != kStruct || !xt.rec.uptr || !isLvalue(m.x) {
+			return "", false
+		}
+		g.mirror(m.x.ty())
+		u = g.tlv(m.x, true).x
+	} else if ot := of.ty(); ot.kind == kStruct && ot.rec.uptr {
+		// The union itself.
+		g.mirror(ot)
+		u = g.tlv(of, true).x
+	} else {
+		return "", false
+	}
+	var p string
+	switch {
+	case t.kind == kPtr || t.kind == kNullptr:
+		p = fmt.Sprintf("c23.UnionPtr[%s](&%s.p)", g.mirror(t), u)
+	case onePointer(t):
+		p = fmt.Sprintf("c23.UnionVal[%s](&%s.p)", g.mirror(t), u)
+	default:
+		p = fmt.Sprintf("c23.UnionBox[%s](&%s.p)", g.mirror(t), u)
+	}
+	return g.retype(p, "*"+g.mirror(t), g.gt(to)), true
+}
+
+// onePointer reports whether t is a struct that is one pointer and
+// nothing else, as Go lays it out: what an interface value holds in its
+// own pointer.
+func onePointer(t *ctype) bool {
+	for t.kind == kStruct && t.rec.complete && !t.rec.union && !t.rec.bytes && t.sizeof() == target.ptrSize {
+		var only *field
+		for _, f := range t.rec.fields {
+			if f.bits >= 0 || f.t.sizeof() == 0 {
+				return false
+			}
+			if only != nil {
+				return false
+			}
+			only = f
+		}
+		if only == nil {
+			return false
+		}
+		if only.t.kind == kPtr {
+			return true
+		}
+		t = only.t
+	}
+	return false
+}
+
+// unionClones gives the unions of x, an object of type t that was
+// copied whole from another, boxes of their own for the members that
+// are in one (internal/c23's UnionClone).
+func (g *gen) unionClones(x string, t *ctype) {
+	switch {
+	case t.kind == kArray && t.n > 0 && !t.isVLA() && hasUnionPtr(t.elem):
+		i := g.tmp("int")
+		g.p("for %s = 0; %s < %d; %s++ {", i, i, t.n, i)
+		g.unionClones(fmt.Sprintf("%s[%s]", x, i), t.elem)
+		g.p("}")
+	case t.kind == kStruct && t.rec.complete:
+		g.mirror(t)
+		if t.rec.uptr {
+			g.p("c23.UnionClone(&%s.p)", x)
+			return
+		}
+		if t.rec.bytes || t.rec.union {
+			return
+		}
+		for i, f := range t.rec.fields {
+			if f.bits < 0 && hasUnionPtr(f.t) {
+				g.unionClones(x+"."+g.fieldName(f, i), f.t)
+			}
+		}
+	}
+}
+
+// hasUnionPtr reports whether a value of type t has in it, where Go
+// has a field or an element for it, a union that has an interface value
+// for its pointers.
+func hasUnionPtr(t *ctype) bool {
+	switch {
+	case t.kind == kArray:
+		return t.n > 0 && hasUnionPtr(t.elem)
+	case t.kind == kStruct && t.rec.complete:
+		if t.rec.uptr {
+			return true
+		}
+		if t.rec.union {
+			return false
+		}
+		for _, f := range t.rec.fields {
+			if f.bits < 0 && hasUnionPtr(f.t) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // tat is the object of type ft at the offset off of x, an object of type
@@ -816,8 +961,17 @@ func (g *gen) tat(x string, t *ctype, off int64, ft *ctype) string {
 			continue
 		case t.kind == kStruct && t.rec.complete:
 			g.mirror(t)
-			if t.rec.uptr && off == 0 && (ft.kind == kPtr || ft.kind == kNullptr) {
-				return g.unionPtr(x, ft)
+			if t.rec.uptr {
+				// What an initializer gives a union with
+				// pointers: its member that is being
+				// initialized, if that has one.
+				if f := g.initUnion[origOff-off]; f != nil && hasPointers(f.t) {
+					x, t = g.unionHeld(x, f.t), f.t
+					continue
+				}
+				if off == 0 && hasPointers(ft) {
+					return g.unionHeld(x, ft)
+				}
 			}
 			if t.rec.bytes || t.rec.union {
 				break
@@ -844,6 +998,8 @@ func (g *gen) tat(x string, t *ctype, off int64, ft *ctype) string {
 // tinitObject stores an initializer into the object x of type t, which
 // is zero.
 func (g *gen) tinitObject(x string, t *ctype, in *initializer) {
+	defer func(m map[int64]*field) { g.initUnion = m }(g.initUnion)
+	g.initUnion = in.unions
 	if in.scalar != nil {
 		g.tstore(lval{x: x, t: t}, g.rv(in.scalar), in.scalar)
 		return

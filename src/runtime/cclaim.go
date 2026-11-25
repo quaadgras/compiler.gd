@@ -390,6 +390,15 @@ func c23Convert(p unsafe.Pointer, elem *_type, n uintptr) {
 	checkptrAlignmentC(p, elem, n)
 }
 
+// c23New and c23TypedMove are for the box of a union's member
+// (internal/c23's UnionClone): a new object of typ, and a copy of one.
+//
+//go:linkname c23New
+func c23New(typ *_type) unsafe.Pointer { return mallocgc(typ.Size_, typ, true) }
+
+//go:linkname c23TypedMove
+func c23TypedMove(typ *_type, dst, src unsafe.Pointer) { typedmemmove(typ, dst, src) }
+
 // c23Malloc is malloc for C translated by cmd/cc (internal/c23): size
 // bytes, zeroed. If typ is not nil the object is for values of typ: the
 // words of the values that fit in it are claimed for what typ has
