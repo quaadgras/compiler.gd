@@ -12,7 +12,6 @@ attribute
 autotype
 bitfield
 builtin
-cast
 commonsym
 compat
 complit

@@ -423,6 +423,41 @@ func c23Convert(p unsafe.Pointer, elem *_type, n uintptr) {
 	checkptrAlignmentC(p, elem, n)
 }
 
+// c23InObject reports whether r is an address in what p points into, or
+// at its end: the object of the heap that p is in, as far as it was
+// asked for if it is one of C's; the goroutine's stack; or the section
+// of the program's data that p is in. It is for arithmetic on an
+// intptr_t that is a pointer, whose result is a pointer still if it
+// stays there (internal/c23's intcap.go).
+//
+//go:linkname c23InObject
+func c23InObject(p, r uintptr) bool {
+	if gp := getg(); gp.stack.lo <= p && p < gp.stack.hi {
+		return gp.stack.lo <= r && r <= gp.stack.hi
+	}
+	if s := spanOfHeap(p); s != nil {
+		i := s.objIndex(p)
+		base := s.base() + i*s.elemsize
+		size := s.elemsize
+		if s.spanclass.c() {
+			size = s.cSizeOf(i)
+		}
+		return r-base <= size
+	}
+	for _, datap := range activeModules() {
+		for _, sec := range [...][2]uintptr{
+			{datap.data, datap.edata}, {datap.bss, datap.ebss},
+			{datap.noptrdata, datap.enoptrdata}, {datap.noptrbss, datap.enoptrbss},
+			{datap.types, datap.etypes}, {datap.rodata, datap.etypes},
+		} {
+			if sec[0] <= p && p < sec[1] {
+				return sec[0] <= r && r <= sec[1]
+			}
+		}
+	}
+	return false
+}
+
 // cIntPtrs counts the integers that C converted to pointers and that
 // were the addresses of something of the program's: pointers that
 // nothing says the program was given (internal/c23's IntPtr).
@@ -436,7 +471,7 @@ const cPoison = (1 << 61) * (goarch.PtrSize / 8)
 // integer that is no address of the program's is a pointer that C may
 // keep and compare. One that is an address, of an object of the heap
 // that is allocated, of a stack or of the program's data, is counted,
-// and with GODEBUG=cintptr=1 it is given cPoison.
+// and is given cPoison, unless GODEBUG=cintptr=0.
 //
 //go:linkname c23IntPtr
 //go:nosplit

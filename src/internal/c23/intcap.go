@@ -76,9 +76,9 @@ func CapToPtr(x *Void) *Void {
 
 // IntPtr converts an integer to a pointer. The pointer is one that C may
 // keep and compare: (void *)1, a handler's SIG_IGN. An integer that is
-// the address of something of the program's is counted, and with
-// GODEBUG=cintptr=1 is a pointer that cannot be used: nothing says that
-// the program was given that address.
+// the address of something of the program's is a pointer that cannot be
+// used, one that faults: nothing says that the program was given that
+// address. (GODEBUG=cintptr=0 lets it be, and it is counted.)
 func IntPtr(v uintptr) *Void { return (*Void)(intPtr(v)) }
 
 //go:linkname intPtr runtime.c23IntPtr
@@ -99,11 +99,17 @@ func capOf(r uintptr, x, y *Void) *Void {
 	if b&intTag != 0 {
 		p = b
 	}
-	if base, size := object(unsafe.Pointer(p &^ intTag)); base != nil && r-uintptr(base) <= size {
+	if inObject(p&^intTag, r) {
 		return FromInt(r | intTag)
 	}
 	return FromInt(r &^ intTag)
 }
+
+// inObject reports whether r is an address in what p points into, or at
+// its end.
+//
+//go:linkname inObject runtime.c23InObject
+func inObject(p, r uintptr) bool
 
 // CapArith is x op y ('+', '-', '*', '/', '%', '&', '|', '^'), signed if
 // s.

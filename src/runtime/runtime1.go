@@ -317,7 +317,7 @@ var debug struct {
 	gctrace                  int32
 	invalidptr               int32
 	cclaims                  int32 // gd: print what the claims of C's memory found (cclaim.go)
-	cintptr                  int32 // gd: an integer that is an address and that C converts to a pointer is one that cannot be used
+	cintptr                  int32 // gd: an integer that is an address and that C converts to a pointer is one that cannot be used (the default; 0: it is only counted)
 	madvdontneed             int32 // for Linux; issue 28466
 	scavtrace                int32
 	scheddetail              int32
@@ -407,6 +407,7 @@ func parseRuntimeDebugVars(godebug string) {
 	// defaults
 	debug.cgocheck = 1
 	debug.invalidptr = 1
+	debug.cintptr = 1 // gd: an integer that is an address is not a pointer of C's (cclaim.go's c23IntPtr)
 	debug.adaptivestackstart = 1 // set this to 0 to turn larger initial goroutine stacks off
 	debug.collectgoroutines = 1  // set this to 0 to keep the goroutines that are blocked forever
 	if GOOS == "linux" {

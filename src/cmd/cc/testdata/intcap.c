@@ -57,8 +57,10 @@ int main(void) {
 	us[1]++;
 	us[1]--;
 	uintptr_t w = us[2];
-	w <<= 1;
-	w >>= 1;
+	uintptr_t sh = 6; // (a shift of one that is a pointer gives an integer: of an integer here)
+	sh <<= 1;
+	sh >>= 1;
+	w += sh - 6;
 	printf("array %d %d %d\n", *(int *)us[0], *(int *)us[1], *(int *)w);
 
 	// Hashing, switch, truth, plain integers.
