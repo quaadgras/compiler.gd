@@ -88,7 +88,12 @@ func Compile(f *Func) {
 			runtime.ReadMemStats(&mStart)
 		}
 
-		if check && !f.scheduled {
+		// (Not again before the pass that Go does not have: what a test
+		// of the compiler's diagnostics sees then depends on how many
+		// times the values were shuffled before, as test/known_bits.go
+		// does. The pass has the order that the one before it was
+		// given.)
+		if check && !f.scheduled && p.name != "c headers" {
 			// Test that we don't depend on the value order, by randomizing
 			// the order of values in each block. See issue 18169.
 			for _, b := range f.Blocks {
