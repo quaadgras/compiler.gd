@@ -76,7 +76,11 @@ func Fputc(c int32, f *c23.Void) int32 {
 }
 
 func Fwrite(p *c23.Void, size, n uint64, f *c23.Void) uint64 {
-	if size == 0 || !c23.FileOf(f).Write(c23.BytesAt(p, uintptr(size*n))) {
+	if size == 0 || n == 0 {
+		return 0
+	}
+	fl := c23.FileOf(f)
+	if !fl.Write(c23.BytesAt(c23.Array(p, n, size), uintptr(size*n))) {
 		return 0
 	}
 	return n
@@ -135,7 +139,7 @@ func Fread(p *c23.Void, size, n uint64, f *c23.Void) uint64 {
 	if !fl.Readable() {
 		return 0
 	}
-	b := c23.Writable(p, uintptr(size*n))
+	b := c23.Writable(c23.Array(p, n, size), uintptr(size*n))
 	k := 0
 	for k < len(b) && len(fl.Unget) > 0 {
 		b[k] = byte(fl.Getc())

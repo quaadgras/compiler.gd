@@ -56,7 +56,15 @@ func Memcmp(a, b *Void, n uint64) int32 {
 
 // stdlib.h
 
-func Calloc(n, size uint64) *Void { return Malloc(n * size) }
+// Calloc is calloc: NULL if n objects of size bytes are more than an
+// object can be.
+func Calloc(n, size uint64) *Void {
+	if size != 0 && n > uint64(^uintptr(0)>>1)/size {
+		SetErrno(ENOMEM)
+		return nil
+	}
+	return Malloc(n * size)
+}
 
 // Realloc is realloc: untyped memory, with what p's object holds. p is
 // NULL or what malloc returned (checkRealloc).
