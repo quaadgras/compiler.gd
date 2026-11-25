@@ -2321,6 +2321,12 @@ func CClaimCounts() (claims, reclaims, narrowed, forged, bytes uint64) {
 	return st.claims.Load(), st.reclaims.Load(), st.narrowed.Load(), st.forged.Load(), st.bytes.Load()
 }
 
+// CTag returns p with the bit that a pointer of C's to a union has, and
+// CUntag takes it off.
+func CTag(p unsafe.Pointer) unsafe.Pointer { return unsafe.Pointer(uintptr(p) | cPtrTag) }
+
+func CUntag(p unsafe.Pointer) unsafe.Pointer { return unsafe.Pointer(uintptr(p) &^ cPtrTag) }
+
 func CUsable(p unsafe.Pointer) (uintptr, bool) { return c23Usable(p) }
 
 func CMemmove(dst, src unsafe.Pointer, n uintptr) { c23Memmove(dst, src, n) }

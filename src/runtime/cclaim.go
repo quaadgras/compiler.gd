@@ -44,6 +44,15 @@ import (
 // plan is that such a word holds bytes and is skipped, once every way
 // that a pointer gets into C's memory claims the word for it.
 
+// cPtrTag is the bit of a pointer of C's with no type (void *, char *)
+// that says that it is to a union with pointers, or to the value of one
+// (doc/gd/cc.md, "Unions"): compiled code and internal/c23 take it off
+// before they use the pointer, and look at the union where it matters.
+// Such a pointer is in words that the collector and the stack's copier
+// look at as at any pointer, so they take the bit off too: no address
+// has it.
+const cPtrTag = (1 << 63) * (goarch.PtrSize / 8)
+
 // cClaimStats counts what the claims of C's memory found, for
 // GODEBUG=cclaims=1, which prints them when the program exits.
 var cClaimStats struct {

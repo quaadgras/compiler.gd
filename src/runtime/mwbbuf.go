@@ -238,6 +238,9 @@ func wbBufFlush1(pp *p) {
 			continue
 		}
 		if cSpansUsed {
+			// (A pointer of C's to a union has a bit that no
+			// address has: cclaim.go's cPtrTag.)
+			ptr &^= cPtrTag
 			// What was in a word of C's, or is stored in one,
 			// may be an integer, and an integer may be the
 			// address of an object that is free: it is a

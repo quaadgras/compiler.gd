@@ -573,3 +573,66 @@ func TestCSpanHeader(t *testing.T) {
 	runtime.KeepAlive(p)
 	runtime.KeepAlive(g)
 }
+
+type cTagHolder struct {
+	p    unsafe.Pointer
+	next *cTagHolder
+}
+
+//go:noinline
+func cTagGrow(n int, p unsafe.Pointer) unsafe.Pointer {
+	var pad [512]byte
+	if n > 0 {
+		q := cTagGrow(n-1, p)
+		runtime.KeepAlive(&pad)
+		return q
+	}
+	return p
+}
+
+// TestCSpanTag keeps objects alive from pointers that have the bit of a
+// pointer of C's to a union, and nothing else: in an object of Go's, in
+// a word of C's, in a variable of the stack, which moves, and to a
+// variable of the stack.
+func TestCSpanTag(t *testing.T) {
+	const n = 500
+	var list *cTagHolder
+	raw := runtime.MallocC(n * 8)
+	for i := range n {
+		list = &cTagHolder{p: runtime.CTag(unsafe.Pointer(newLeaf(i))), next: list}
+		*(*unsafe.Pointer)(unsafe.Add(raw, i*8)) = runtime.CTag(unsafe.Pointer(newLeaf(1000 + i)))
+	}
+	local := runtime.CTag(unsafe.Pointer(newLeaf(-7)))
+	var onStack cLeaf
+	onStack.key, onStack.self = -9, &onStack
+	toStack := runtime.CTag(unsafe.Pointer(&onStack))
+	done := make(chan bool)
+	go func() {
+		// As the collector marks: the barrier sees them too.
+		for i := range n {
+			*(*unsafe.Pointer)(unsafe.Add(raw, i*8)) = runtime.CTag(unsafe.Pointer(newLeaf(1000 + i)))
+			if i%50 == 0 {
+				runtime.Gosched()
+			}
+		}
+		done <- true
+	}()
+	for range 4 {
+		cChurn()
+	}
+	<-done
+	cChurn()
+	local = cTagGrow(200, local) // the stack moves
+	cChurn()
+	i := n
+	for h := list; h != nil; h = h.next {
+		i--
+		(*cLeaf)(runtime.CUntag(h.p)).check(t, i)
+		(*cLeaf)(runtime.CUntag(*(*unsafe.Pointer)(unsafe.Add(raw, i*8)))).check(t, 1000+i)
+	}
+	(*cLeaf)(runtime.CUntag(local)).check(t, -7)
+	if got := (*cLeaf)(runtime.CUntag(toStack)); got != &onStack || got.key != -9 {
+		t.Errorf("a pointer to a variable of the stack did not move with it: %p, %p", got, &onStack)
+	}
+	runtime.KeepAlive(raw)
+}
