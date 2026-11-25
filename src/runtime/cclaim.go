@@ -790,14 +790,9 @@ func c23IntPtr(v uintptr) unsafe.Pointer {
 			addr = true // a stack
 		}
 	} else {
-		for _, datap := range activeModules() {
-			if datap.data <= v && v < datap.edata || datap.bss <= v && v < datap.ebss ||
-				datap.noptrdata <= v && v < datap.enoptrdata || datap.noptrbss <= v && v < datap.enoptrbss ||
-				datap.text <= v && v < datap.end {
-				addr = true
-				break
-			}
-		}
+		// The program's own code and data, and what the runtime
+		// keeps for itself (rtmem.go).
+		addr = rtMemOwned(v)
 	}
 	if addr {
 		cIntPtrs.Add(1)

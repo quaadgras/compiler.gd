@@ -2325,6 +2325,11 @@ func CClaimCounts() (claims, reclaims, narrowed, forged, bytes uint64) {
 
 // CTag returns p with the bit that a pointer of C's to a union has, and
 // CUntag takes it off.
+// CLoad32 loads the uint32 at a, an address of the runtime's own memory
+// that c23Header gave: where the classes of a span's words are, which
+// no pointer of the program's is to.
+func CLoad32(a uintptr) uint32 { return *(*uint32)(unsafe.Pointer(a)) }
+
 // SetCReclaim sets GODEBUG's creclaim, with which memory of C's that is
 // claimed again is counted and the program goes on, and returns what it
 // was.

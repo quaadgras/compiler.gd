@@ -570,7 +570,7 @@ func TestCSpanHeader(t *testing.T) {
 	}
 	class := func(off uintptr) uint32 {
 		w := (off + b8) >> sh
-		return *(*uint32)(unsafe.Pointer(bits + w/16*4)) >> (w % 16 * 2) & 3
+		return runtime.CLoad32(bits+w/16*4) >> (w % 16 * 2) & 3
 	}
 	if c := class(16); c != 0 {
 		t.Errorf("C: a word of malloc's has class %d", c)

@@ -258,7 +258,7 @@ func checkptrArithmeticC(p unsafe.Pointer, originals []unsafe.Pointer) unsafe.Po
 		}
 	}
 	if !known {
-		if _, _, kind := cObjectOf(a); kind == cObjNone {
+		if _, _, kind := cObjectOf(a); kind == cObjNone && !rtMemOwned(a) {
 			for _, original := range originals {
 				if uintptr(original) >= minLegalPointer {
 					// Memory that is not Go's.
@@ -845,6 +845,12 @@ func checkptrArithmetic(p unsafe.Pointer, originals []unsafe.Pointer) {
 				if left {
 					throw("checkptr: pointer arithmetic result is outside the object it was computed from")
 				}
+			}
+			// What is left is memory that is not Go's, which the
+			// system gave the program: not what the runtime
+			// keeps for itself (rtmem.go).
+			if uintptr(p) >= minLegalPointer && rtMemOwned(uintptr(p)) {
+				throw("checkptr: pointer is to memory of the runtime's own")
 			}
 			return
 		case varFound:
