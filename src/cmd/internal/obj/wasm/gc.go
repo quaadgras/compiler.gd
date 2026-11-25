@@ -255,6 +255,12 @@ const (
 	GCSplitZero     = "wasm.szero"    // (p, rel i32, n i32): zero n bytes and their pointers
 	GCSplitNew      = "wasm.snew"     // (addr i32, nslots i32, size i32) ptr: a pointer to a new block of size bytes
 	GCSplitStrLen   = "wasm.strlen"   // (a, b i64) i64: the length of the string of wasm32 whose A and B these are (with 4-byte words only)
+	// GCSplitLoadTab (p, rel i32) ptr is GCSplitLoadPtr's checked form
+	// for the word of an interface that holds its type or its table:
+	// the pointer that was stored there, or nil for a word of zero. A
+	// word that a program wrote something else over is not one that an
+	// interface is loaded from: the program stops.
+	GCSplitLoadTab = "wasm.loadtabc"
 
 	// What code that is not the runtime's loads and stores through a
 	// pointer is in what the pointer points into: GCSplitCheck (p, rel

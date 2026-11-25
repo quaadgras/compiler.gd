@@ -722,6 +722,11 @@ func (g *gcGen) splitLoad(v *ssa.Value) {
 	t := spScalar(v.Type)
 	if g.wtype(v.Type) == 'r' {
 		c := g.spPushPtrAccess(a, int64(types.PtrSize), false)
+		if c && v.Type == g.f.Config.Types.ITab {
+			// The word of an interface that holds its type.
+			g.helper(wasm.GCSplitLoadTab)
+			return
+		}
 		g.helper(accessHelper(wasm.GCSplitLoadPtr, c))
 		return
 	}

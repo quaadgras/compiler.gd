@@ -108,6 +108,7 @@ var gcSplitHelpers = []string{
 	wasm.GCSplitCheckW4,
 	wasm.GCSplitCheckW8,
 	wasm.GCSplitLoadPtr + "c",
+	wasm.GCSplitLoadTab,
 	wasm.GCSplitStorePtr + "c",
 	wasm.GCSplitIntToPtr + "c",
 	wasm.GCSplitMove + "c",
@@ -403,6 +404,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd, roEnd int64) []*wasmFunc {
 	for _, name := range []string{wasm.GCSplitLoadPtr, wasm.GCSplitStorePtr, wasm.GCSplitIntToPtr, wasm.GCSplitMove, wasm.GCSplitZero} {
 		sigs[wasm.GCSplitChecked(name)] = sigs[name]
 	}
+	sigs[wasm.GCSplitLoadTab] = sigs[wasm.GCSplitLoadPtr]
 	chkWord, chkWordW := wasm.GCSplitCheck4, wasm.GCSplitCheckW4
 	if l.ptrSize() == 8 {
 		chkWord, chkWordW = wasm.GCSplitCheck8, wasm.GCSplitCheckW8
@@ -469,6 +471,10 @@ func (l *gcLinker) splitHelpers(first int, staticEnd, roEnd int64) []*wasmFunc {
 		kind := name
 		if _, ok := sigs[name[:len(name)-1]]; ok && name[len(name)-1] == 'c' && name != wasm.GCSplitCheck {
 			checked, kind = true, name[:len(name)-1]
+		}
+		tab := name == wasm.GCSplitLoadTab
+		if tab {
+			checked, kind = true, wasm.GCSplitLoadPtr
 		}
 		intToPtr := index(wasm.GCSplitIntToPtr)
 		if checked {
@@ -597,6 +603,18 @@ func (l *gcLinker) splitHelpers(first int, staticEnd, roEnd int64) []*wasmFunc {
 			a.end()
 			a.get(5)
 			a.loadWord(0)
+			if tab {
+				// No pointer was stored there: nil if the word is
+				// zero, and otherwise not the word of an interface.
+				a.op(0x50) // i64.eqz
+				a.op(0x45) // i32.eqz
+				a.if_()
+				fault(a)
+				a.end()
+				refNull(a)
+				a.end()
+				break
+			}
 			a.call(intToPtr)
 			a.end()
 		case wasm.GCSplitStorePtr:

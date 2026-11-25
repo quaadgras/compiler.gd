@@ -885,42 +885,53 @@ made of:
 
 What this costs, measured with node 24 (`GOWASMGC_NOBOUNDS=1` at build
 time leaves the checks out, for comparing): an `fmt` hello world is
-416 KB where it was 407; a program of loops over lists, slices, maps
-and strings runs between as fast and a fifth slower. A check is a call
+426 KB where it was 407; a program of loops over lists, slices, maps
+and strings runs between as fast and a third slower (a map, Sprintf:
+what is mostly the runtime's). A check is a call
 of five bytes where there was a `struct.get` of four, so the size is
 mostly the checks of loops, which are instructions: the engine does not
 always expand the call, and a loop that updates an array of structs was
 twenty times slower with calls.
 
-`go test cmd/cc -run TestUnsafe` is of native code. The same programs
-with `GOOS=js`: of 187, 165 stop and 22 end with nothing done that was
+The programs of `go test cmd/cc -run TestUnsafe` with `GOOS=js`: of 187, 165 stop and 22 end with nothing done that was
 not theirs to do (`free` of a pointer into the stack, which does
 nothing; an integer that C made a pointer of and never used). And of
-the 31 programs of Go's (`runtime/testdata/testunsafe`), 29 stop and 2
-do nothing.
+the 32 programs of Go's (`runtime/testdata/testunsafe`), 30 stop and 2
+do nothing. Both tests run so with `GOOS=js GOARCH=wasm` in the
+environment of the test binary, as the suites do.
+
+- **The runtime is checked as the program is.** It is given pointers by
+  the program, and sizes by the types that the program says its values
+  have: its loads, stores, copies, hashes and comparisons are of bytes
+  in what the pointers point into. What it has as integers (the blocks
+  of the allocator, the stacks) it loads and stores as integers, and
+  the one conversion of an integer to a pointer that it makes is of an
+  address of the data that the linker laid out (`runtime.staticptr`).
+- **The word of an interface that holds its type is a pointer**, in
+  memory as in a register, and is loaded as the pointer that was stored
+  there or not at all: a program that wrote something else over it
+  stops where the interface is loaded (`wasm.loadtabc`). So no type is
+  made of an integer, which the address of a descriptor would otherwise
+  be.
 
 What it does not do:
 
-- **The runtime is not checked**, and believes what types say: a
-  program that makes an interface of a type and of a pointer to less
-  memory than the type has, by copying the two words from two others,
-  has a value that the runtime copies by the type's size. (Code that is
-  not the runtime's stops at the first load past the end.) The runtime's
-  copies for the program are checked (`runtime.c23Memmove`); its maps,
-  channels and reflection are not yet.
+- **Nothing is typed.** A program that copies the type of one interface
+  and the value of another into a third, as the pointers that they are,
+  has a value of a type that it is not; a pointer to a struct that is
+  larger than what it points into is refused nothing until a field past
+  the end is loaded. What is loaded and stored is still inside what the
+  pointers point into, in the program's code and in the runtime's.
 - **A pointer with no size compares equal to the one that has the same
-  address**, as C wants of `(void *)n == p`. So a type assertion on an
-  interface whose type word a program overwrote with the address of
-  another type succeeds; the value is then used as that type, inside
-  what its own pointer points into.
-- **Nothing is typed**: a pointer to a struct that is larger than what
-  it points into is refused nothing until a field past the end is
-  loaded, and the fields before it are loaded and stored.
+  address**, as C wants of `(void *)n == p`.
 - **The compiler takes a pointer to an integer and a pointer to a
   pointer for pointers to different memory**, as Go's is entitled to.
   C that stores an integer over a pointer and loads the pointer may get
   the pointer that was there, from before the store: a pointer that it
   had, not one that it made.
+- **The functions of the runtime that take the start of an allocation**
+  (`runtime.AddCleanup`, `SetFinalizer`, `weak.Make`) believe that they
+  were given one.
 - The host's functions are given addresses, and are trusted with them.
   `//go:nocheckptr`, `//go:linkname` and assembly are outside, as they
   are elsewhere.

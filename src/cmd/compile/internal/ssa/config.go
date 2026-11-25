@@ -163,7 +163,13 @@ func (t *Types) SetTypPtrs() {
 	t.BytePtr = types.NewPtr(types.Types[types.TUINT8])
 	t.ITab = t.Uintptr
 	if buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.Split {
-		t.ITab = t.BytePtr
+		// (A pointer type that nothing else in the SSA has, so that
+		// the load of such a word is known for one: what it loads is
+		// the pointer that was stored there or nothing, and never a
+		// pointer made of the integer that a program wrote over it,
+		// which would compare equal to the address of a type. See
+		// wasm.GCSplitLoadTab.)
+		t.ITab = types.NewPtr(types.NewArray(types.Types[types.TUINT8], 0))
 	}
 	t.Int32Ptr = types.NewPtr(types.Types[types.TINT32])
 	t.UInt32Ptr = types.NewPtr(types.Types[types.TUINT32])

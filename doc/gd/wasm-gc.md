@@ -2700,9 +2700,27 @@ of that.
   at an address that it has as an integer (`GOWASMGC_NOTES=1` when
   compiling says if any does).
 
+- **The runtime is checked too.** It is given pointers by the program
+  and sizes by the types that the program says its values have. It was
+  four functions away from running so: the walks of the itabs and of
+  the descriptors that the linker laid out, the names and types by
+  their offsets, and the size in a function value of an equality or a
+  hash, which make a pointer of an address of the data and do so now
+  with `runtime.staticptr`, the one function of the runtime that does.
+  Where the runtime loads and stores by an address (`linaddr`: a hash,
+  a comparison, the bytes of a string) it asks first
+  (`runtime.splitcheck`).
+- **An interface is not loaded from a word that something else was
+  written over** (`wasm.loadtabc`): the word that holds the type is the
+  pointer that was stored there, nil for zero, or the program stops.
+  The SSA has a type of its own for that word (`*[0]uint8`), so that
+  the load is known for one.
+
 `GOWASMGC_NOBOUNDS=1` when compiling leaves the checks out, for
-measuring them. An `fmt` hello world: 407,405 bytes without, 416,421
-with. A program of loops (node 24, ms):
+measuring them, and `GOWASMGC_TRAP=1` (compiling and linking) leaves
+out the runtime's message, so that the engine says where a program
+stopped. An `fmt` hello world: 407,405 bytes without, 425,942
+with (416,421 with the runtime's code left unchecked). A program of loops (node 24, ms):
 
 |                           | no checks | checks |
 |---------------------------|----------:|-------:|
@@ -2711,8 +2729,8 @@ with. A program of loops (node 24, ms):
 | 100,000 structs, four fields updated, 100 times | 5.7 | 6.6 |
 | sort.Ints of 200,000      | 13.3 | 14.7 |
 | strings.Fields and Repeat | 20.3 | 21.1 |
-| a map of 5,000 keys, 200,000 updates | 17.9 | 19.2 |
-| Sprintf, 50,000 times     | 51.5 | 59.1 |
+| a map of 5,000 keys, 200,000 updates | 17.9 | 23.3 |
+| Sprintf, 50,000 times     | 51.5 | 69.6 |
 
 The tests of std pass with them as without (255 packages under node;
 `runtime/debug`'s TestStack fails in both). C that cmd/cc compiles runs
