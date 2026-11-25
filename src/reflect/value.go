@@ -2669,7 +2669,7 @@ func (v Value) Pointer() uintptr {
 		}
 		fallthrough
 	case Chan, Map, UnsafePointer:
-		return uintptr(v.pointer())
+		return exposed(v.pointer())
 	case Func:
 		if v.flag&flagMethod != 0 {
 			// As the doc comment says, the returned pointer is an
@@ -2688,13 +2688,22 @@ func (v Value) Pointer() uintptr {
 		}
 		return uintptr(p)
 	case Slice:
-		return uintptr(unsafeheader.ReadSlice(v.dataPtr()).Data)
+		return exposed(unsafeheader.ReadSlice(v.dataPtr()).Data)
 	case String:
 		// gd: the bytes of an inline string are copied to the heap
 		// (unsafe.StringData).
-		return uintptr(unsafe.Pointer(unsafe.StringData(*(*string)(v.dataPtr()))))
+		return exposed(unsafe.Pointer(unsafe.StringData(*(*string)(v.dataPtr()))))
 	}
 	panic(&ValueError{"reflect.Value.Pointer", v.kind()})
+}
+
+// exposed returns p as an integer that the program is given, and may
+// make a pointer of again: what p points into is exposed for it, as it
+// is where compiled code keeps such an integer (runtime.exposeptr; this
+// package's own conversions are not looked at).
+func exposed(p unsafe.Pointer) uintptr {
+	exposeptr(p)
+	return uintptr(p)
 }
 
 // Recv receives and returns a value from the channel v.
@@ -3241,7 +3250,7 @@ func (v Value) UnsafeAddr() uintptr {
 		p = unsafe.Pointer(&v.inline)
 	}
 	escapes(p) // The compiler loses track as it converts to uintptr. Force escape.
-	return uintptr(p)
+	return exposed(p)
 }
 
 // UnsafePointer returns v's value as a [unsafe.Pointer].

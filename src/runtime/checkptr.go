@@ -966,6 +966,7 @@ func checkptrAllVars(originals []unsafe.Pointer) bool {
 // are nosplit for the same reason). So it is nosplit, and marks on the
 // system stack.
 //
+//go:linkname exposeptr
 //go:nosplit
 func exposeptr(p unsafe.Pointer) {
 	if p == nil {
