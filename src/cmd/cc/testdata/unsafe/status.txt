@@ -1,8 +1,0 @@
-global_conv
-global_over corrupts
-global_over_local corrupts
-memset_global
-stack_over_frame corrupts
-stack_over_local
-strlen_literal
-strlit_over

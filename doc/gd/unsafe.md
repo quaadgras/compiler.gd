@@ -10,10 +10,13 @@ unsafe's six patterns); the fork checks them in every build.
 > what the memory is (below, "Compatible types": the first step of the
 > plan for memory-safe `unsafe`, 2026-11-25); and an integer that
 > was kept (a `uintptr` field, an argument of a callback, which C-style
-> APIs have) is a pointer again if its object is exposed. Not yet: the
-> integer keeping its object alive, bounds of stack objects and globals,
-> exact sizes in the heap (an object's bound is its size class,
-> but for what C's malloc gave: `cc.md`), and the rest of that plan.
+> APIs have) is a pointer again if its object is exposed; and a variable
+> of the stack, and one of the program's data, is an allocation with its
+> own bounds and its type, as an object of the heap is (below, "The
+> variables of the stack and of the data", 2026-11-26). Not yet: the
+> integer keeping its object alive, exact sizes in the heap (an object's
+> bound is its size class, but for what C's malloc gave: `cc.md`), and
+> the rest of that plan.
 
 ## What is checked
 
@@ -30,7 +33,9 @@ memory (`runtime/checkptr.go`). A check that fails is a fatal error.
   (below).
 - **`unsafe.Pointer(u)`**, `u` a `uintptr` (`checkptrArithmetic`): if the
   result is in a heap object, one of the pointers the expression was
-  computed from is in the same object, or the object is *exposed*.
+  computed from is in the same object, or the object is *exposed*. If
+  it is in the stack or in the program's data, one of them is in the
+  same variable, and the result is in the variable or at its end.
 
   An object is exposed when the program makes an integer of its address
   and keeps it: compiled code calls `runtime.exposeptr` where it converts
@@ -134,8 +139,12 @@ Where the type of the memory comes from:
   disagree on, the memory and `T` do. Bytes say nothing of what they are
   over, and neither does an `unsafe.Pointer` of what the pointer under
   it points to, nor a pointer to a type of no size (`*struct{}`, C's
-  `void *`): those are left to the runtime. This is the only check
-  of the stack and of globals, which have no type at run time.
+  `void *`): those are left to the runtime.
+- **A variable of the stack, or of the program's data**, has the type
+  it was declared with, which the runtime finds from where it is
+  (below, "The variables of the stack and of the data"), and compares
+  `T` with as with the type of an object of the heap. A variable with
+  no Go type, as the bytes of a string are, has no pointer.
 - **Generic code** has a type's shape, in which every pointer is a
   `*uint8`. The conversion is given the type itself, from the
   dictionary (`ir.ConvExpr.PtrRType`), and the compiler compares nothing
@@ -271,8 +280,172 @@ is how code made a slice of a pointer before `unsafe.Slice`.
   with nothing in the expression that it came from** is a pointer if
   the address is of an object whose address the program took as an
   integer ("exposed", below), or of nothing that the checks know.
-- **The stack and globals through a plain `unsafe.Pointer`** have no
-  type at run time: only what the compiler knows is compared.
+
+## The variables of the stack and of the data
+
+An object of the heap has its bounds and its type in its span. A
+variable of a stack frame, and one of the program's data, had neither:
+the stack was one allocation to these checks, and so was each of data
+and bss, so that arithmetic on a pointer to one local reached every
+other slot of the stack, return addresses with them, and a pointer to a
+`long` could be converted to a `**byte` on its way through an
+`unsafe.Pointer`. They have both now, in two tables.
+
+- **A function has the variables of its frame**, as a funcdata
+  (`FUNCDATA_StackVars`; `cmd/compile/internal/liveness`,
+  `emitStackVars`): a record of 8 bytes for each, its offset in the
+  frame, from `varp` if it is negative and from `argp` otherwise, as a
+  stack object's, and its type, as the offset of the descriptor in the
+  module's types. The size is the type's. It has every variable with a
+  slot in the frame whose address is taken, which are the ones that a
+  pointer can be to, and every one that has pointers: named variables,
+  parameters and results, with the slots that the parameters passed in
+  registers are spilled to, the compiler's temporaries, and the slots
+  that values in registers are spilled to, each of which is for values
+  of one type. `-d=stackvars=1` leaves out the ones whose address is not
+  taken, and `=0` writes no table.
+- **Which functions.** Every one but those of the runtime's packages
+  and the equality and hash functions that the compiler writes for a
+  type (`ir.StackVars`), whether its package is checked or not: a
+  pointer to a variable of a package that is not checked (reflect,
+  `internal/c23`, one compiled with `-d=checkptr=0`) is given to code
+  that is. It goes by the function's own package, so that the instance
+  of a generic function is the same in every package that has a copy
+  of it.
+- **A module has the symbols of its data**, sorted by address
+  (`runtime.datavars`; `cmd/link/internal/ld/datavars.go`): each symbol
+  of data, bss, noptrdata and noptrbss, and of the read-only data that
+  Go code can have a pointer to, which is the bytes of strings and
+  read-only variables, and not type descriptors, method tables or what
+  the tables of functions are in. An entry is 8 bytes: the symbol's
+  offset from the start of its section, and the offset of its type's
+  descriptor, or its size if it has no Go type. The type is the one the
+  object file has for the symbol, which the linker did not keep for
+  anything but debugging information; it keeps the descriptor now, but
+  not for the variables of the runtime's own packages, whose types
+  nothing else asks for and which would be several times the table.
+  The bits that the collector has for a type are in the table as bytes,
+  since the bytes of a string are in such a symbol when they are the
+  same bytes: symbols named by what they hold are one symbol. The
+  counters of a coverage build are one variable, which is how their
+  runtime reads them. `-ldflags=-datavars=false` leaves the table out.
+- **Nothing follows a variable at once.** The compiler leaves a byte
+  between a variable of a frame whose address is taken and the next
+  one, and the linker a byte after each symbol of the table, as an
+  object of C's on the heap has one (`cc.md`). So the address after a
+  variable, which C may make a pointer of and the check of arithmetic
+  allows, is in no variable: it is not also a pointer to the start of
+  another, which would be let through as that one.
+- **The lookup** (`runtime/stackvar.go`, `runtime/datavar.go`). An
+  address of the data is found by a binary search of the module's
+  table. An address of the stack is in the frame of some caller of the
+  check: the stack is unwound from the check to the frame that the
+  address is in, on the system stack, and the address is looked up in
+  the table of that frame's function, which is the function that is
+  compiled, with what is inlined in it. On amd64 the frame is found
+  first by the frame pointers that the frames save, two loads for each
+  frame between; the function is the one that the frame's callee
+  returns to; and what is found is kept only if the frame is where the
+  function's frame size says it is, since a frame that saves no frame
+  pointer is not seen that way. The P keeps the last four variables
+  that were found, so a loop that steps a pointer through a variable
+  finds it again with no call.
+- **The checks.** Arithmetic gives a pointer into the variable that one
+  of its operands is in, or to its end (`checkptrArithmetic`).
+  `(*T)(p)` is in the variable whole, and `T` is compatible with the
+  variable's type, as with an object's (`checkptrAlignVar`); so are the
+  elements of `unsafe.Slice`, and bytes that are kept
+  (`checkptrViewKept`). `unsafe.Slice` and `unsafe.String` do not go
+  past the variable.
+- **What is in no variable that is known**: the frame of a function of
+  the runtime's or of assembly, the space between two variables, the
+  slot of a variable without pointers whose address is not taken, the
+  saved registers and return addresses. Arithmetic gives no pointer to
+  such an address, but for one that an operand already is, and for the
+  end of the variable that an operand is in. A conversion of a pointer
+  to one is not checked: nothing is known of it.
+
+Measured on amd64, the size of `cmd/go` and of a program that prints a
+line, as `go build` leaves them, each row with what the rows above it
+have:
+
+| | `cmd/go` | hello |
+| --- | ---: | ---: |
+| before | 105,141,289 | 2,727,476 |
+| the checks themselves, and no table | 105,208,973 | 2,746,105 |
+| the variables of frames whose address is taken (`-d=stackvars=1`) | 106,187,017, +0.9% | 2,759,030, +0.5% |
+| and those that have pointers | 107,663,653, +2.3% | 2,771,502, +0.9% |
+| the symbols of the data, their types, the byte after each | 108,654,869, +0.9% | 2,817,420, +1.7% |
+
+In all 3.3% for both. The table of the data is 597,772 bytes of
+`cmd/go`'s 991,216, for 74,718 symbols, most of them the bytes of
+strings; the rest is the descriptors that are kept and the bytes
+between.
+
+The checks, in a function that is given a `*byte` to an array of 64
+bytes and stores in each through `unsafe.Add`, which is two checks for
+a byte, and in one that converts an `unsafe.Pointer` to a `*uint64`
+that is kept (ns for each byte, and for each conversion):
+
+| What is pointed to | before | after |
+| --- | ---: | ---: |
+| a byte of an array of the caller's frame | 10.7 | 35.6 |
+| the same, from 8 frames further down | 10.8 | 55.8 |
+| a byte of a global array | 20.3 | 25.0 |
+| a byte of an object of the heap | 14.4 | 14.5 |
+| a `uint64` of the caller's frame | 3.1 | 15.7 |
+| a global `uint64` | 7.0 | 11.1 |
+| a `uint64` of the heap | 11.4 | 12.1 |
+
+That is with the variable found again among the last four of the P.
+One that is not costs about 60 ns in a frame of the stack, whatever
+the number of frames between; where the stack is unwound, about 110 ns
+and 50 ns more for each frame between; and about 30 ns in the data.
+
+### What this does not close
+
+- **A frame of the runtime's, or of assembly**, has no table.
+- **A parameter or a result that is in the frame of the caller** has no
+  byte after it: where it is, is the calling convention's. The end of
+  one whose address is taken is the start of the next, if that one is
+  in the table too.
+- **A variable without pointers whose address is not taken** is not in
+  the table: no pointer is to it, and arithmetic gives none.
+- **The variables that share a slot** (the compiler's `mergelocals`)
+  are variables whose address is not taken. Such a slot is in the table
+  if they are of one type.
+- **A variable of the runtime's own data** has its size and no type.
+- **A view of bytes that is only loaded through** (`checkptrView`) is
+  not compared with the type of a variable, as it is with an object's:
+  a string, a slice or an interface of a variable can be read in part
+  through one. And a view of bytes is as long as its type says, in a
+  variable as in an object: `(*[1<<30]byte)(p)` is a type that is
+  longer than what it is over, and an index in it is not checked
+  against the variable. (In a package that is C translated by cmd/cc
+  it is: `cc.md`.)
+- **arm64 and the others** unwind the stack for each address of it:
+  only amd64 follows the saved frame pointers, and remembers the
+  variables of the stack that it found.
+
+What the standard library, the tools and their tests had:
+
+- The adapter that the compiler writes for a method of a value that an
+  interface holds inline (`noder`'s `ifaceAdapter`) converts the words
+  of the value, in a temporary of its own, to the value's type. The
+  runtime has the type of the temporary now and would refuse the
+  conversion; it is the compiler's own, and is not checked.
+- `crypto/internal/fips140/check` hashes whole sections of the program,
+  which are many variables, through `unsafe.Slice`: the function that
+  makes the slice is `//go:nocheckptr`.
+- Two tests do on purpose what the checks stop.
+  `runtime/slicetear_test.go` makes a slice whose capacity is more than
+  its array's, to have a capacity of 2^32, and the runtime's
+  `BadTraceback` test program writes over its own return address by
+  arithmetic on the address of its argument: both are
+  `//go:nocheckptr`.
+- `cmd/link`'s `TestDeadcode` has that a live variable does not make
+  its type's descriptor live: that is so with `-datavars=false`, and
+  the reverse otherwise.
 
 ## Views of strings, slices and interfaces
 
@@ -405,9 +578,10 @@ and for http ClientServer, within their spread of runs, and +0.2% for json.
 
 ### Known gaps
 
-- **The stack and globals through a plain `unsafe.Pointer`**: they have no
-  recorded type here. A pointer whose source the compiler can see is
-  checked; one that came through a parameter or a field is not.
+- **The stack and globals through a plain `unsafe.Pointer`** have their
+  types now (above, "The variables of the stack and of the data"), and
+  a conversion is compared with them, but for a view of bytes that is
+  only loaded through.
 - A pointer of static type `*U` is taken to point to a `U`, so a `*byte`
   that really points into a string is only caught by the runtime check. The
   reverse rejects valid code: plain memory converted to `*string`, passed
@@ -471,9 +645,12 @@ is only as safe as they say if nothing in it is outside them:
 - What the gaps of "Compatible types" list: the types of a small
   object's pointers, stores through an `unsafe.Pointer` over a typed
   pointer, and bytes written over a pointer.
-- A pointer one past the end of an object is, to these checks, a pointer
-  to the next object.
-- The stack is one allocation, and so is each of data and bss.
+- A pointer one past the end of an object of the heap is, to these
+  checks, a pointer to the next object. (The end of a variable of the
+  stack or of the data is in no variable.)
+- What "The variables of the stack and of the data" lists: the frames
+  of the runtime and of assembly, and what is between the variables of
+  a frame.
 
 - An integer that outlives its object and is then the address of
   another exposed object is a pointer to that one.
@@ -499,7 +676,9 @@ the type its object was allocated with, and memory outside the heap.
 `runtime/checkptr_test.go`, with `CheckPtrPointers*` for the check of
 pointers, `TestCheckPtrCompat` for compatible types
 (`testprog/checkptr_compat.go`: what must pass and what must stop, for
-objects with a type, with a bitmap and for what the compiler knows) and
+objects with a type, with a bitmap and for what the compiler knows),
+`TestCheckPtrVars` for the variables of the stack and of the data
+(`testprog/checkptr_vars.go`) and
 `TestCheckPtrViews` for views (`testprog/checkptr_whole.go`),
 `runtime/mwholebits_test.go` for the bitmap;
 the standard library's tests pass with the checks on. Six tests of

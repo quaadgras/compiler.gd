@@ -149,16 +149,21 @@ made of that one by an offset or an index
   is first checked, if more checks follow. A root that is checked once
   is not looked up: its check is the runtime's call, as before. A root
   that is the address of a variable of the frame needs no lookup: its
-  size is known.
+  size is known, and whether it has pointers.
 - **The checks.** A pointer made by arithmetic is in its root's object,
   or at its end. A conversion to `*T` is to a pointer in an object of
-  C's, or `T` is in the stack, the data or the bss whole (for types of
-  4096 bytes or less), and the pointer is aligned; and in an object of
-  C's the words are claimed for what `T` has there (below, "The memory
-  that malloc gives"): bytes need no look, a type of 16 words or less
-  with no pointer and a `void *` are a look at the classes of the
-  words, which the header gives, and any other type, a pointer of a
-  type or a struct that has one, is the runtime's.
+  C's, or in a variable of the stack or of the data, or at its end, and
+  the pointer is aligned; and in an object of C's the words are claimed
+  for what `T` has there (below, "The memory that malloc gives"): bytes
+  need no look, a type of 16 words or less with no pointer and a `void
+  *` are a look at the classes of the words, which the header gives,
+  and any other type, a pointer of a type or a struct that has one, is
+  the runtime's. A variable has a type and no claims. For one without
+  pointers the header gives classes that say so
+  (`runtime.c23HeaderVar`), placed so that a type of 16 words or less
+  with no pointer is let through where it is in the variable's whole
+  words, and for one with pointers classes that let nothing through
+  but bytes: the runtime compares the type with the variable's.
 - **What fails a comparison** is the runtime's call, which makes the
   whole check and says what it finds; the comparison only lets through
   what the call would have.
@@ -203,6 +208,14 @@ Where C and Go's rules for pointers disagree:
   byte too (`runtime.materializeToHeapC`, `maybeInPlaceC`). `new T[n]`
   of a class with a destructor keeps n in front of the array, as other
   compilers do, in memory that is allocated as bytes.
+  A variable of the stack, and one of the program's data, is an
+  allocation of its own to these checks, with its type (`unsafe.md`,
+  "The variables of the stack and of the data"): the compiler writes
+  where the variables of each frame are, and the linker where the
+  symbols of the data are, and each has a byte after it too, so that
+  the pointer to its end is the address of nothing else. A conversion
+  in a variable is to a type that is in it whole and is compatible
+  with the variable's type, as in an object of Go's.
   A pointer that arithmetic takes out of its object, before it or past
   its end, stops the program: for what malloc gave, the end is where C
   asked for it, not where the allocator's slot ends. A result that is

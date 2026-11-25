@@ -370,6 +370,13 @@ func compatWords(m, v *_type, view bool, seen *compatSeen) bool {
 //
 // If c is set the conversion is one of a package of C's (compatLeaves).
 func checkptrCompat(typ *_type, tbase, limit, p uintptr, elem *_type, size uintptr, load, c bool) {
+	checkptrCompatMem(typ, tbase, limit, p, elem, size, load, c, c && cObjectIsC(typ))
+}
+
+// checkptrCompatMem is checkptrCompat, with cmem set if the memory is
+// C's own: an object that C allocated, or a variable, which a
+// conversion of C's is taken to be in a variable of C's.
+func checkptrCompatMem(typ *_type, tbase, limit, p uintptr, elem *_type, size uintptr, load, c, cmem bool) {
 	if size == 0 || p < tbase || p >= limit {
 		return
 	}
@@ -388,7 +395,7 @@ func checkptrCompat(typ *_type, tbase, limit, p uintptr, elem *_type, size uintp
 	var seen compatSeen
 	seen.c = c
 	seen.direct = load || cDirect(elem, c)
-	seen.cmem = c && cObjectIsC(typ)
+	seen.cmem = cmem
 	for w := lo &^ (word - 1); w < lo+size; w += word {
 		mo := w % typ.Size_
 		mp := compatMaskBit(typ, mmask, mo)

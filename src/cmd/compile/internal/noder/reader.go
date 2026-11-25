@@ -4459,6 +4459,10 @@ func ifaceAdapter(gd *base.Invocation, typ *types.Type, method *types.Field, tar
 	recv := typecheck.TempAt(gd, pos, fn, typ)
 	cast := ir.NewConvExpr(gd, pos, ir.OCONV, types.NewPtr(typ),
 		ir.NewConvExpr(gd, pos, ir.OCONV, unsafePtr, ir.NewAddrExpr(gd, pos, stage)))
+	// (The payload's words are T's by construction: the conversion
+	// is the compiler's own, and the runtime, which has the type of
+	// the temporary, is not asked: doc/gd/unsafe.md.)
+	cast.SetCheckPtr(true)
 	fn.Body.Append(ir.NewAssignStmt(gd, pos, recv, ir.NewStarExpr(gd, pos, cast)))
 
 	// Forward the method's own params, minus outBufs (re-added by

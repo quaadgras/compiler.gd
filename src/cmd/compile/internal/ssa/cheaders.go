@@ -77,7 +77,7 @@ func CSlowAux(check int, alignMask, size int64) int64 {
 // check is the call that it was before.
 //
 // A root that is the address of a variable of the frame needs no call:
-// its size is known here.
+// its size is known here, and whether it has pointers.
 //
 // This runs before anything has moved the blocks that ssagen made: a
 // C23Slow is the last thing its block does before it branches on it,
@@ -406,11 +406,15 @@ func cheaders(f *Func) {
 			in := b.NewValue2(pos, OpSub64, uintptrT, b.NewValue1(pos, OpZeroExt8to64, uintptrT, b.NewValue1(pos, OpCvtBoolToUint8, f.Config.Types.UInt8, out)), f.ConstInt64(uintptrT, 1))
 			w = b.NewValue2(pos, OpAnd64, uintptrT, w, in)
 			at := b.NewValue2(pos, OpAdd64, uintptrT, result(h, 5), b.NewValue2(pos, OpLsh64x64, uintptrT, b.NewValue2(pos, OpRsh64Ux64, uintptrT, w, f.ConstInt64(uintptrT, 4)), f.ConstInt64(uintptrT, 2)))
-			if check == CSlowStorePtr {
-				// (What is not C's has the classes for this
-				// store in the uint32 after.)
-				at = b.NewValue2(pos, OpAdd64, uintptrT, at, b.NewValue2(pos, OpAnd64, uintptrT, b.NewValue2(pos, OpRsh64Ux64, uintptrT, result(h, 4), f.ConstInt64(uintptrT, 3)), f.ConstInt64(uintptrT, 4)))
+			// (What is not C's has the classes for a store of a
+			// pointer in the uint32 after, and those for a store
+			// of bytes in the one after that: runtime's
+			// cStoreFree.)
+			other := b.NewValue2(pos, OpAnd64, uintptrT, b.NewValue2(pos, OpRsh64Ux64, uintptrT, result(h, 4), f.ConstInt64(uintptrT, 3)), f.ConstInt64(uintptrT, 4))
+			if check == CSlowStoreByte {
+				other = b.NewValue2(pos, OpLsh64x64, uintptrT, other, f.ConstInt64(uintptrT, 1))
 			}
+			at = b.NewValue2(pos, OpAdd64, uintptrT, at, other)
 			lo := b.NewValue2(pos, OpLoad, u32T, b.NewValue2(pos, OpConvert, u32T.PtrTo(), at, mem), mem)
 			both := b.NewValue1(pos, OpZeroExt32to64, u64T, lo)
 			if check == CSlowStoreByte && size > 1 {
@@ -484,13 +488,20 @@ func cSlowAlways(v *Value) {
 // cSlowVariable makes v, a C23Slow whose root r is the address of a
 // variable of the frame, a comparison with the variable's size: a
 // pointer into the variable or to its end is one that the runtime
-// would let through, as it lets through every pointer into the stack
-// that is made of another.
+// would let through, which knows where the variables of a frame are
+// (runtime/stackvar.go).
+//
+// A conversion is to a type that is in the variable whole, which is all
+// that is asked of bytes, and of a type without pointers if the
+// variable has none. Any other is compared with the variable's type by
+// the runtime, as the conversion to a type that does not fit is, which
+// a pointer to the variable's end may be converted to.
 func cSlowVariable(f *Func, v, r *Value) {
 	b, pos, mem := v.Block, v.Pos, v.Args[2]
 	uintptrT := f.Config.Types.Uintptr
 	boolT := f.Config.Types.Bool
-	varSize := r.Aux.(*ir.Name).Type().Size()
+	varType := r.Aux.(*ir.Name).Type()
+	varSize := varType.Size()
 	mask, size := v.AuxInt>>8&0xff, v.AuxInt>>16
 	q := b.NewValue2(pos, OpConvert, uintptrT, v.Args[0], mem)
 	off := b.NewValue2(pos, OpSub64, uintptrT, q, b.NewValue2(pos, OpConvert, uintptrT, r, mem))
@@ -499,10 +510,9 @@ func cSlowVariable(f *Func, v, r *Value) {
 		v.reset(OpLeq64U)
 		v.AddArg2(f.ConstInt64(uintptrT, varSize), off)
 	case CSlowConv, CSlowConvScalar, CSlowConvUntyped, CSlowConvClaim:
-		// (Not past the end of the variable, where the runtime
-		// asks only that it is in the stack. A variable's words
-		// have no claims.)
-		if size > varSize {
+		// (mask is not 0 for a type that has pointers: ssagen's
+		// checkPtrAlignment.)
+		if size > varSize || v.AuxInt&0xff != CSlowConv && (mask != 0 || varType.HasPointers()) {
 			cSlowAlways(v)
 			return
 		}

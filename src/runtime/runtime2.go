@@ -983,6 +983,11 @@ type p struct {
 
 	// Padding is no longer needed. False sharing is now not a worry because p is large enough
 	// that its size class is an integer multiple of the cache line size (for any of our architectures).
+
+	// The variables of the stack and of the data that the checks of
+	// unsafe pointers looked up last (stackvar.go).
+	varCache     [4]varCacheEnt
+	varCacheNext uint8
 }
 
 type schedt struct {

@@ -51,6 +51,16 @@ const fipsMagic = " Go fipsinfo \xff\x00"
 
 var zeroSum [32]byte
 
+// sectBytes returns the n bytes of a section of the program that starts
+// at start. A section is many variables, and the check of unsafe.Slice
+// knows where each of them ends (gd: doc/gd/unsafe.md), so there is none
+// here: the bytes are only read.
+//
+//go:nocheckptr
+func sectBytes(start unsafe.Pointer, n uintptr) []byte {
+	return unsafe.Slice((*byte)(start), n)
+}
+
 func init() {
 	if !fips140.Enabled {
 		return
@@ -85,7 +95,7 @@ func init() {
 		n := uintptr(sect.End) - uintptr(sect.Start)
 		byteorder.BEPutUint64(nbuf[:], uint64(n))
 		w.Write(nbuf[:])
-		w.Write(unsafe.Slice((*byte)(sect.Start), n))
+		w.Write(sectBytes(sect.Start, n))
 	}
 	sum := h.Sum(nil)
 

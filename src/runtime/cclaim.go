@@ -507,20 +507,23 @@ func cReclaim(s *mspan, b *cBits, w, a uintptr, have, want, old, id uint32, elem
 // (cmd/compile/internal/ssa's CConvMax.)
 const cConvMax = 4096
 
-// What c23Header gives as the classes of what is not C's, for the checks
-// of stores: the first uint32 is looked at for a store of bytes, which
-// is let through if the word has no pointer's class, and the second for
-// a store of a pointer to anything, which is let through if the word
-// has that class. (The third is only loaded.)
+// What c23Header gives as the classes of what is not C's, where it has
+// a shift that is not 3: every word is then the first, and the uint32s
+// are for what asks. The first is what a conversion looks at, where it
+// looks (a shift of 59): nothing claimed, so that the runtime is asked.
+// The second is for a store of a pointer to anything, which is let
+// through if the class is that of one; the third for a store of bytes,
+// which is let through if it is no pointer's. (The fourth is only
+// loaded.)
 var (
-	// The stack, the data, and what the runtime knows nothing of: a
-	// store is let through. (Until their variables have types here.)
-	cStoreFree = [3]uint32{0, 0x55555555 * cUntyped, 0}
-	// An object of Go's without pointers: bytes are stored, and a
-	// pointer is the runtime's to refuse.
-	cStoreNoPtr = [3]uint32{0, 0x55555555 * cTyped, 0}
-	// An object of Go's with pointers: the runtime looks at its type.
-	cStoreTyped = [3]uint32{0x55555555 * cTyped, 0x55555555 * cTyped, 0}
+	// What the runtime knows nothing of: a store is let through.
+	cStoreFree = [4]uint32{0, 0x55555555 * cUntyped, 0, 0}
+	// An object of Go's without pointers, and a variable without:
+	// bytes are stored, and a pointer is the runtime's to refuse.
+	cStoreNoPtr = [4]uint32{0, 0x55555555 * cTyped, 0, 0}
+	// An object of Go's with pointers, and a variable with: the
+	// runtime looks at its type.
+	cStoreTyped = [4]uint32{0, 0x55555555 * cTyped, 0x55555555 * cTyped, 0}
 )
 
 // c23Header returns what does not change of where p points for as long
@@ -563,10 +566,11 @@ var (
 //
 // A conversion to a type of a few words needs no more than that the
 // words are claimed for what the type has there. For what is not C's,
-// sh is 63, w is 0, and bits is of three uint32s that say what a store
-// is to do (cStoreFree): a store of bytes looks at the class of the word
-// it is in as above, and a store of a pointer to anything at the one in
-// the uint32 after, at bits + w/16*4 + (sh>>3)&4.
+// sh is 63 or 59, w is 0, and bits is of uint32s that say what a store
+// is to do (cStoreFree): a store of a pointer to anything looks at the
+// class in the second, at bits + w/16*4 + (sh>>3)&4, and a store of
+// bytes at the one in the third, 4 further. A variable of the stack or
+// of the data is c23HeaderVar's to say.
 //
 //go:nosplit
 func c23Header(p unsafe.Pointer) (d, n, m, b8, sh, bits uintptr) {
@@ -579,8 +583,7 @@ func c23Header(p unsafe.Pointer) (d, n, m, b8, sh, bits uintptr) {
 	// of something that is not C's is the address of what is next.
 	la := cEndAddr(uintptr(p))
 	if gp := getg(); gp.stack.lo <= la && la < gp.stack.hi {
-		n = gp.stack.hi - a
-		return 0, n, n, 0, sh, bits
+		return c23HeaderVar(a, la)
 	}
 	if s := spanOfHeap(la); s != nil {
 		if s.isUserArenaChunk {
@@ -602,18 +605,62 @@ func c23Header(p unsafe.Pointer) (d, n, m, b8, sh, bits uintptr) {
 		size := s.cSizeOf(i)
 		return a - base, size, size, base - s.base(), 3, uintptr(unsafe.Pointer(b))
 	}
-	for _, datap := range activeModules() {
-		for _, r := range [...][2]uintptr{
-			{datap.data, datap.edata}, {datap.bss, datap.ebss},
-			{datap.noptrdata, datap.enoptrdata}, {datap.noptrbss, datap.enoptrbss},
-		} {
-			if r[0] <= la && la < r[1] {
-				n = r[1] - r[0]
-				return a - r[0], n, n, 0, sh, bits
-			}
-		}
+	return c23HeaderVar(a, la)
+}
+
+// c23HeaderVar is c23Header for an address a that is in no object of
+// the heap: what it says is of the variable of the stack or of the
+// program's data that la is in (stackvar.go), and nothing if it is in
+// none that is known.
+//
+// A variable ends where it does, as an object of C's: n and m are its
+// size, which is all that arithmetic and a conversion to bytes ask. The
+// other conversions are compared with the variable's type by the
+// runtime (checkptrConvVar), but for one: if the variable has no
+// pointer, a type of a few words without pointers that is in it whole
+// is let through by the compiled code, and so is a store of bytes. What
+// says so to that code is the classes of cVarScalar, as if they were
+// the variable's: b8 is such that the last whole word of the variable
+// has the last class of them that is for no pointer, and the words
+// after it have none, so that a type that does not end in the
+// variable's whole words is the runtime's to look at. For any other
+// variable the classes are those of an object of Go's (cStoreTyped,
+// cStoreNoPtr), which let no conversion through but one to bytes.
+//
+//go:nosplit
+func c23HeaderVar(a, la uintptr) (d, n, m, b8, sh, bits uintptr) {
+	base, size, typ, typed, state := checkptrVar(la)
+	if state != varFound {
+		return 0, 0, 0, 0, 63, uintptr(unsafe.Pointer(&cStoreFree))
 	}
-	return
+	// (base is of the stack as it is now, and d is not: it is where a
+	// is in the variable. b8 has of base only how it is aligned, which
+	// a stack that moves keeps.)
+	if !typed || typ != nil && typ.Pointers() {
+		// (With a shift of 59 every word is the first, and bit 2
+		// of it is not set: the classes are looked at, as for an
+		// object of C's.)
+		return a - base, size, size, 0, 59, uintptr(unsafe.Pointer(&cStoreTyped))
+	}
+	if end := base + size; end>>3-base>>3 <= cVarWords {
+		return a - base, size, size, base&7 + 8*(cVarWords-(end>>3-base>>3)), 3, uintptr(unsafe.Pointer(&cVarScalar))
+	}
+	return a - base, size, size, 0, 59, uintptr(unsafe.Pointer(&cStoreNoPtr))
+}
+
+// cVarWords is the number of words of the largest variable without
+// pointers that compiled code is told the classes of.
+const cVarWords = 8192
+
+// cVarScalar is the classes of cVarWords words that are claimed for no
+// pointer, and after them of words that nothing claimed: as many as the
+// compiled code loads the classes of at a time (cheaders.go).
+var cVarScalar [cVarWords/cClassPer + 4]uint32
+
+func init() {
+	for i := 0; i < cVarWords/cClassPer; i++ {
+		cVarScalar[i] = 0x55555555 * cScalar
+	}
 }
 
 // cEndAddr returns an address in what the pointer p, which may have
@@ -1043,7 +1090,8 @@ func cMoveBounds(a, n uintptr) *mspan {
 	}
 	a &^= cPtrBits
 	if gp := getg(); gp.stack.lo <= a && a < gp.stack.hi {
-		if n > gp.stack.hi-a {
+		// A variable of a frame (stackvar.go).
+		if base, size, _ := cObjectOf(a); n > size-(a-base) {
 			throw("checkptr: memory copied or set past the end of its object")
 		}
 		return nil

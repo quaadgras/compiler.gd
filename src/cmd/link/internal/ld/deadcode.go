@@ -296,8 +296,13 @@ func (d *deadcodePass) flood() {
 			a := d.ldr.Aux(symIdx, i)
 			if a.Type() == goobj.AuxGotype {
 				// A symbol being reachable doesn't imply we need its
-				// type descriptor. Don't mark it.
-				continue
+				// type descriptor. Don't mark it. gd: but for a
+				// variable of the program's data, whose type the
+				// runtime's checks of unsafe pointers compare
+				// with (datavars.go).
+				if !d.ctxt.dataVarTypes(symIdx) {
+					continue
+				}
 			}
 			d.mark(a.Sym(), symIdx)
 		}

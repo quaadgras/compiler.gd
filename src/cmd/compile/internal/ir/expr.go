@@ -371,6 +371,12 @@ type ConvExpr struct {
 	// unsafe.Pointer to a pointer: see walk's markWholeViews.
 	View ViewKind
 
+	// Raw is set for a conversion of a function that is not checked
+	// (ir.NoCheckPtrIn: one of the runtime's, or marked go:nocheckptr)
+	// which is inlined in one that is: a pointer that it makes an
+	// integer of keeps every bit that it has.
+	Raw bool
+
 	// LoadOnly is set if the result of a conversion from unsafe.Pointer
 	// to a pointer is loaded through and nothing else: it is not
 	// stored through, kept, or passed on (gd: walk's markWholeViews).
@@ -420,6 +426,7 @@ func NoCheckPtrIn(nodes Nodes) {
 		case *ConvExpr:
 			if n.Op() == OCONVNOP {
 				n.SetCheckPtr(true)
+				n.Raw = true
 			}
 		case *BinaryExpr:
 			switch n.Op() {
@@ -1355,6 +1362,25 @@ func UncheckedPkg(path string) bool {
 		return true
 	}
 	return objabi.LookupPkgSpecial(path).Runtime
+}
+
+// StackVars reports what the table of the variables of fn's frame is to
+// have, as -d=stackvars says it: nothing if it is 0. A function of the
+// runtime's packages has no table, and neither has one that the compiler
+// writes for a type (an equality or a hash function): no pointer to a
+// variable of theirs is given to code whose pointers are checked. It
+// goes by the function's own package, not by the one that is compiled:
+// a function that more than one package has a copy of, as a generic
+// function's instance is, is the same in each.
+func StackVars(gd *base.Invocation, fn *Func) int {
+	if gd.Debug.StackVars <= 0 {
+		return 0
+	}
+	sym := fn.Sym()
+	if sym == nil || sym.Pkg == nil || sym.Pkg.Path == "type" || objabi.LookupPkgSpecial(sym.Pkg.Path).Runtime {
+		return 0
+	}
+	return gd.Debug.StackVars
 }
 
 // ShouldAsanCheckPtr reports whether pointer checking should be enabled for

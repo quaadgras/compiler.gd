@@ -1296,6 +1296,16 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 			s.vars[convVar] = s.rtcall(fn, true, []*types.Type{v.Type}, v, rtype, count)[0]
 			return
 		}
+		fn := fn
+		if s.gd.CObjects && fn == ir.Syms(s.gd).CheckPtrView && size > 1 {
+			// More than a byte of C's, a char[64] or a struct
+			// of chars, is in a variable of the stack or of the
+			// data whole, which the check of any other
+			// conversion says (runtime.checkptrAlignVarC): bytes
+			// are over anything, and end where what they are
+			// over does.
+			fn = ir.Syms(s.gd).CheckPtrAlignmentC
+		}
 		s.rtcall(fn, true, nil, v, rtype, count)
 	}
 	if c := fn == ir.Syms(s.gd).CheckPtrAlignmentC || fn == ir.Syms(s.gd).CheckPtrView && s.gd.CObjects; c && count == nil && size <= ssa.CConvMax && s.cHeaders() {
@@ -4609,7 +4619,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 		// elision.
 		if to.IsPtrShaped() != from.IsPtrShaped() {
 			v := s.newValue2(ssa.OpConvert, to, x, s.mem())
-			if s.gd.CObjects && from.IsPtrShaped() && to.Size() == 8 && !n.CheckPtr() {
+			if s.gd.CObjects && s.checkPtrEnabled && from.IsPtrShaped() && to.Size() == 8 && !n.Raw {
 				// The address that a pointer of C's is: without the
 				// bit of a pointer to the end of its object
 				// (runtime's cEnd), which what is added to it, what
@@ -4720,7 +4730,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 			// float comparison
 			return s.newValueOrSfCall2(s.ssaOp(op, n.X.Type()), types.Types[types.TBOOL], a, b)
 		}
-		if t := n.X.Type(); s.gd.CObjects && (op == ir.OEQ || op == ir.ONE) && (t.IsPtr() || t.IsUnsafePtr()) && t.Size() == 8 && !ir.IsNil(n.X) && !ir.IsNil(n.Y) {
+		if t := n.X.Type(); s.gd.CObjects && s.checkPtrEnabled && (op == ir.OEQ || op == ir.ONE) && (t.IsPtr() || t.IsUnsafePtr()) && t.Size() == 8 && !ir.IsNil(n.X) && !ir.IsNil(n.Y) {
 			// Two pointers of C's are the same if their addresses
 			// are: one of them may have the bit of a pointer that
 			// nothing is loaded through (runtime's cEnd).
