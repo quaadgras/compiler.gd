@@ -21,10 +21,12 @@ import (
 //
 //   - where one has no pointer the other has none: an integer stored over
 //     a pointer is a pointer that the program made up, when it is loaded
-//     again, and an integer loaded as a pointer is one already. (A type
-//     of alignment 1, bytes, may be over anything: its stores are checked
-//     by themselves. And where the compiler knows that the result is
-//     only loaded through, integers may be over pointers.)
+//     again, and an integer loaded as a pointer is one already. Bytes
+//     are integers in this. (Where the compiler knows that the result is
+//     only loaded through, integers may be over pointers. And in a
+//     package that is C translated by cmd/cc bytes may be over anything:
+//     C looks at everything as bytes, and its stores of them are to be
+//     checked by themselves.)
 //   - a *B is over a *A only if A and B are the same size and agree in
 //     the same way, both ways, since a *B that is stored there is loaded
 //     as a *A by the code that the memory is A's to;
@@ -275,7 +277,7 @@ func checkptrCompat(typ *_type, tbase, limit, p uintptr, elem *_type, size uintp
 	if size == 0 || p < tbase || p >= limit {
 		return
 	}
-	if !elem.Pointers() && (load || elem.Align_ == 1 || !typ.Pointers()) {
+	if !elem.Pointers() && (load || !typ.Pointers()) {
 		return
 	}
 	const word = goarch.PtrSize
@@ -360,11 +362,12 @@ func checkptrIncompat(p unsafe.Pointer, why int) {
 // object, or one without pointers), has pointers where the object has
 // them and nowhere else: all that the object's bitmap says.
 func checkptrPointers(s *mspan, p uintptr, elem *_type, n uintptr, load bool) {
-	if s.spanclass.c() || !elem.Pointers() && (load || elem.Align_ == 1) {
+	if s.spanclass.c() || !elem.Pointers() && load {
 		return
 	}
 	const word = goarch.PtrSize
-	size := n * elem.Size_
+	// (No further than the object, for a type that is longer.)
+	size := min(n*elem.Size_, s.base()+(s.objIndex(p)+1)*s.elemsize-p)
 	if size == 0 || s.isFree(s.objIndex(p)) {
 		// (A pointer kept from before: the bitmap is not its object's.)
 		return

@@ -256,6 +256,7 @@ var runtimeDecls = [...]struct {
 	{"checkptrPartial", funcTag, 123},
 	{"checkptrIncompat", funcTag, 170},
 	{"checkptrView", funcTag, 167},
+	{"checkptrViewKept", funcTag, 167},
 	{"exposeptr", funcTag, 123},
 	{"libfuzzerTraceCmp1", funcTag, 171},
 	{"libfuzzerTraceCmp2", funcTag, 172},

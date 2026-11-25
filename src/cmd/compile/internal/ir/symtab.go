@@ -42,6 +42,7 @@ type SymsStruct struct {
 	CheckPtrAlignmentLoad     *obj.LSym
 	C23Header                 *obj.LSym
 	CheckPtrView              *obj.LSym
+	CheckPtrViewKept          *obj.LSym
 	Deferproc                 *obj.LSym
 	Deferprocat               *obj.LSym
 	DeferprocStack            *obj.LSym

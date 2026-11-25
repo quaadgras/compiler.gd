@@ -35,6 +35,11 @@ type ptrTest struct {
 	fail          bool     // whether the test should fail
 	expensive     bool     // whether the test requires the expensive check
 	errTextRegexp string   // error text regexp; if empty, use the pattern `.*unpinned Go.*`
+
+	// gd: the body looks at a pointer as bytes that it keeps, which
+	// the checks of unsafe.Pointer refuse before cgo's are reached
+	// (doc/gd/unsafe.md): the function is compiled without them.
+	nocheckptr bool
 }
 
 type extra struct {
@@ -353,6 +358,8 @@ var ptrTests = []ptrTest{
 		imports: []string{"unsafe"},
 		body:    `var b C.char; p := &b; C.f29((*C.u29)(unsafe.Pointer(&p)))`,
 		fail:    true,
+
+		nocheckptr: true,
 	},
 	{
 		// Don't check a pointer to a union if the union does
@@ -365,6 +372,8 @@ var ptrTests = []ptrTest{
 		imports: []string{"unsafe"},
 		body:    `var b C.char; p := &b; C.f39((*C.u39)(unsafe.Pointer(&p)))`,
 		fail:    false,
+
+		nocheckptr: true,
 	},
 	{
 		// Test preemption while entering a cgo call. Issue #21306.
@@ -615,7 +624,11 @@ func buildPtrTests(t *testing.T, gopath string, cgocheck2 bool) (exe string) {
 		if strings.Contains(pt.support, "//export") {
 			cgo = &cgo2
 		}
-		fmt.Fprintf(cgo, "%s\nfunc %s() {\n%s\n}\n", pt.support, pt.name, pt.body)
+		pragma := ""
+		if pt.nocheckptr {
+			pragma = "//go:nocheckptr\n"
+		}
+		fmt.Fprintf(cgo, "%s\n%sfunc %s() {\n%s\n}\n", pt.support, pragma, pt.name, pt.body)
 	}
 
 	// Func list and main dispatch.

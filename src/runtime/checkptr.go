@@ -189,6 +189,45 @@ func checkptrView(p unsafe.Pointer, elem *_type, n uintptr) {
 	}
 }
 
+// checkptrViewKept is checkptrView for a conversion of a package of Go's
+// whose result is not only loaded through, and for the elements of
+// unsafe.Slice(p, n): bytes that are kept may be stored through, so
+// they are over no pointer, as other integers are (checkptr_compat.go).
+// The view is compared as far as the object goes: (*[1<<30]byte)(p) is
+// a type that is longer than what it is over.
+func checkptrViewKept(p unsafe.Pointer, elem *_type, n uintptr) {
+	if p == nil {
+		return
+	}
+	s := spanOfHeap(uintptr(p))
+	if s == nil || s.isUserArenaChunk || s.spanclass.c() {
+		// (The words of an object of C's are what they are
+		// claimed for, and bytes claim nothing: cclaim.go.)
+		return
+	}
+	if s.spanclass.noscan() && !elem.Pointers() {
+		return
+	}
+	base := s.base() + s.objIndex(uintptr(p))*s.elemsize
+	size := n * elem.Size_
+	typ, tbase := checkptrObjectType(s, base)
+	if typ != nil {
+		if typ == elem && uintptr(p) >= tbase && (uintptr(p)-tbase)%elem.Size_ == 0 {
+			// What the object was allocated as.
+			return
+		}
+		checkptrWhole(typ, tbase, base+s.elemsize, uintptr(p), elem, size)
+		checkptrCompat(typ, tbase, base+s.elemsize, uintptr(p), elem, size, false)
+		return
+	}
+	if wholeBitsEnabled {
+		checkptrWholeSmall(s, base, uintptr(p), elem, size)
+	}
+	if s.spanclass.noscan() || heapBitsInSpan(s.elemsize) {
+		checkptrPointers(s, uintptr(p), elem, n, false)
+	}
+}
+
 // checkptrPartial is called where the compiler knows that a conversion
 // makes a view of part of a string, a slice or an interface, if p is not
 // nil: a nil pointer views nothing. It cannot move the stack, as exposeptr

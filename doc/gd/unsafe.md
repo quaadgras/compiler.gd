@@ -46,7 +46,8 @@ memory (`runtime/checkptr.go`). A check that fails is a fatal error.
   once it is freed the integer is the address of nothing exposed.
 - **`unsafe.Add`**: as the arithmetic.
 - **`unsafe.Slice`, `unsafe.String`**: the result is inside one
-  allocation. (What the language says panics still panics, and is not a
+  allocation, and the elements of a slice are compatible with what the
+  memory is (below). (What the language says panics still panics, and is not a
   fatal error: `unsafeslicecheckptr` uses the caller's pc.)
 
 ## Compatible types
@@ -64,7 +65,7 @@ something else:
 | --- | --- | --- |
 | no pointer | no pointer | allowed, whatever the types: integers, floats, arrays of them |
 | no pointer | a pointer | refused: an integer stored there is a pointer that the program made up, once it is loaded again. Allowed where the result is only loaded through (below) |
-| bytes (a type of alignment 1) | anything but a string, a slice or an interface | allowed: a store of bytes is to be checked by itself (the plan's step 3; not yet) |
+| bytes (a type of alignment 1) | a pointer | as any integer: refused, unless the result is only loaded through. (In a package that is C translated by `cmd/cc`, bytes are over anything: C looks at all memory as bytes, and its stores of them are to be checked by themselves, the plan's step 3) |
 | a pointer | no pointer | refused, whatever the integer is |
 | `*B` | `*A` | allowed if `A` and `B` are the same size and agree in this way themselves, both ways: a `*B` stored there is loaded as a `*A` by the code that the memory is `A`'s to |
 | `unsafe.Pointer`, or a pointer to a type of no size (C's `void *`) | any pointer, func, map or chan | allowed: what is loaded is converted before it is used, and checked then. (What is stored through it is not checked yet.) |
@@ -89,6 +90,21 @@ pointers: a pointer read as an integer is an integer. The runtime's
 check is then `checkptrAlignmentLoad`. Nothing else is relaxed: a
 pointer over an integer, or over a pointer to something else, is a
 pointer that the program would go on to use.
+
+**Bytes are integers.** `(*[8]byte)(unsafe.Pointer(&p))[0]` and
+`*(*[16]byte)(p)` are loads, and look at anything. A view of bytes
+that is kept, `(*[16]byte)(p)[:]` or a `*byte` in a variable, can be
+stored through later, by code that no conversion is in: it is refused
+over a pointer as a `*uintptr` is (`checkptrViewKept`, for a type of
+alignment 1, which needs no other check). The decision is the user's,
+2026-11-25: "Go should refuse such views unless they are load-only".
+
+**`unsafe.Slice(p, n)`** is of n elements where `p` was converted for
+one. The elements are compared with the memory as a conversion to
+`*[n]T` that is kept would be: `unsafe.Slice((*byte)(p), n)` over a
+struct's pointers is refused, and `unsafe.Slice(&a[i], n)` in an array
+of the same type is what the object was allocated as. `unsafe.String`
+is not compared: a string is not stored through.
 
 Where the type of the memory comes from:
 
@@ -133,6 +149,12 @@ and their tests had:
   `TestValuePointerAndUnsafePointer`, `test/fixedbugs/issue11656`, which
   makes a func of bytes): `//go:nocheckptr`, or the func's word read as
   an `unsafe.Pointer` first.
+- Two of cgo's tests of its own pointer checks
+  (`cmd/cgo/internal/testerrors`, `union1` and `union2`) pass the
+  address of a Go pointer as a C union, which cgo has as bytes: a view
+  of bytes that is kept over a pointer. They are `//go:nocheckptr`.
+  Nothing else in the standard library, the tools or their tests keeps
+  bytes over a pointer, or slices over what is not their element.
 - What SWIG generates for a function that returns a string reads C's
   struct of a pointer and a length as a Go string. `cmd/cgo/internal/swig`
   compiles its programs with `-d=checkptr=0`: SWIG's output does not
@@ -148,8 +170,8 @@ and their tests had:
 - **A store through an `unsafe.Pointer` that is over a typed pointer**
   is not checked: `*(*unsafe.Pointer)(unsafe.Pointer(&p)) = q` puts any
   pointer where a `*A` is. `sync/atomic.StorePointer` is used this way.
-- **Bytes over a pointer** can be written, until stores of bytes are
-  checked.
+- **Bytes over a pointer in C's packages** can be written, until their
+  stores of bytes are checked (step 3).
 - **The stack and globals through a plain `unsafe.Pointer`** have no
   type at run time: only what the compiler knows is compared.
 
@@ -173,8 +195,9 @@ a store. So:
   offset, if their types are compatible (above). A view of memory that
   holds none of them is not part of a value that goes whole, and is held
   to that rule alone.
-- A plain pointer is not a value that goes whole: its bytes may be
-  viewed. As a `uintptr` it may not, by the rule above.
+- A plain pointer is not a value that goes whole. Its bytes may be
+  loaded; a view of them that is kept, or a `uintptr` over it, is
+  refused by the rule above.
 - **`[]byte` as `string`, and the reverse**, are partial with 8-byte words:
   they never worked there. A slice's second word is `len:32|cap:32`, so a
   slice read as a string has the length `len|cap<<32`, and an inline string

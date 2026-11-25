@@ -472,8 +472,8 @@ func viewSmall() {
 			runtime.GC()
 			runtime.GC()
 			for range 2000 {
-				viewAs[[unsafe.Sizeof(viewPlainWords{})]byte](viewPlain(new(viewPlainWords)))
-				viewAs[[unsafe.Sizeof(viewPadded{})]byte](viewPlain(new(viewPadded)))
+				viewAs[viewPlainWords](viewPlain(new(viewPlainWords)))
+				viewAs[viewPadded](viewPlain(new(viewPadded)))
 			}
 		}
 	})

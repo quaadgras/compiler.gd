@@ -98,7 +98,17 @@ func init() {
 	// An object that records its type.
 	compatCase(C+"Same", func() { compatAs[compatNode](compatHide(node())) })
 	compatCase(C+"Shape", func() { compatAs[compatNode2](compatHide(node())) })
-	compatCase(C+"Bytes", func() { compatAs[[32]byte](compatHide(node())) })
+	compatCase(C+"BytesOverIntegers", func() { compatAs[[40]byte](compatHide(&node().pad[3])) })
+	compatCase(C+"BytesLoaded", func() { sink2 = (*[32]byte)(compatHide(node()))[3] })
+	compatCase(C+"BytesLonger", func() { compatAs[[1 << 20]byte](compatHide(&node().pad[3])) })
+	compatCase(C+"StringOfBytes", func() { sink2 = unsafe.String((*byte)(compatHide(&node().val)), 24) })
+	compatCase(C+"SliceOfBytes", func() { sink2 = unsafe.Slice((*byte)(compatHide(&node().pad[3])), 40) })
+	compatCase(C+"SliceOfElements", func() {
+		a := new([40]compatSmall)
+		checkptrSink = a
+		sink2 = unsafe.Slice(&a[7], 3)
+		sink2 = unsafe.Slice((*compatSmall2)(compatHide(&a[7])), 3)
+	})
 	compatCase(C+"Field", func() { compatAs[int](compatHide(&node().val)) })
 	compatCase(C+"FieldPointer", func() { compatAs[*compatNode2](compatHide(&node().next)) })
 	compatCase(C+"UnsafeOverPointer", func() { compatAs[unsafe.Pointer](compatHide(node())) })
@@ -113,6 +123,21 @@ func init() {
 		compatAs[[3]compatSmall2](compatHide(&a[7]))
 	})
 
+	// Bytes that are kept may be stored through: they are integers.
+	compatCase(I+"Bytes", func() { compatAs[[32]byte](compatHide(node())) })
+	compatCase(I+"ByteSlice", func() { sink2 = (*[32]byte)(compatHide(node()))[:] })
+	compatCase(I+"ByteStore", func() { (*[32]byte)(compatHide(node()))[3] = 1 })
+	compatCase(I+"BytesLonger", func() {
+		a := new([40]compatSmall)
+		checkptrSink = a
+		compatAs[[1 << 20]byte](compatHide(&a[7].n))
+	})
+	compatCase(I+"SliceOfBytes", func() { sink2 = unsafe.Slice((*byte)(compatHide(&node().val)), 24) })
+	compatCase(I+"SliceOfWords", func() {
+		a := new([40]compatSmall)
+		checkptrSink = a
+		sink2 = unsafe.Slice((*uintptr)(compatHide(&a[7].n)), 3)
+	})
 	compatCase(I+"Pointee", func() { compatAs[compatWrong](compatHide(node())) })
 	compatCase(I+"PointeeSize", func() { compatAs[*[2]compatNode](compatHide(node())) })
 	compatCase(I+"IntegersOverPointer", func() { compatAs[compatInts](compatHide(node())) })
@@ -133,7 +158,10 @@ func init() {
 
 	// An object that has only a bitmap, or no pointers.
 	compatCase(C+"Small", func() { compatAs[compatSmall2](compatHide(small())) })
-	compatCase(C+"SmallBytes", func() { compatAs[[16]byte](compatHide(small())) })
+	compatCase(C+"SmallBytesLoaded", func() { sink2 = *(*[16]byte)(compatHide(small())) })
+	compatCase(C+"SmallBytesOverInteger", func() { compatAs[[8]byte](compatHide(&small().n)) })
+	compatCase(I+"SmallBytes", func() { compatAs[[16]byte](compatHide(small())) })
+	compatCase(I+"SmallSliceOfBytes", func() { sink2 = unsafe.Slice((*byte)(compatHide(small())), 8) })
 	compatCase(C+"SmallUnsafe", func() { compatAs[unsafe.Pointer](compatHide(small())) })
 	compatCase(C+"NoPointers", func() {
 		b := make([]byte, 64)
@@ -165,9 +193,23 @@ func init() {
 	})
 	compatCase(C+"KnownFromBytes", func() {
 		// Bytes say nothing of what they are over.
+		s := new(compatSmall)
+		checkptrSink = s
+		b := (*byte)(unsafe.Pointer(&s.n))
+		sink2 = (*compatSmall)(unsafe.Add(unsafe.Pointer(b), -8)).p
+	})
+	compatCase(C+"KnownBytesOverInteger", func() {
 		var s compatSmall
-		b := (*[16]byte)(unsafe.Pointer(&s))
-		sink2 = (*compatSmall)(unsafe.Pointer(b)).n
+		sink2 = (*[8]byte)(unsafe.Pointer(&s.n))[:]
+	})
+	compatCase(I+"KnownBytesKept", func() {
+		var s compatSmall
+		sink2 = (*[16]byte)(unsafe.Pointer(&s))[:]
+	})
+	compatCase(I+"KnownByteStore", func() {
+		var p *int
+		(*[8]byte)(unsafe.Pointer(&p))[0] = 1
+		sink2 = p
 	})
 	compatCase(I+"KnownIntegerOverPointer", func() {
 		var p *int

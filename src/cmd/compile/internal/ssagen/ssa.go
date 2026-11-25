@@ -158,6 +158,8 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).
 		CheckPtrView = typecheck.LookupRuntimeFunc(gd, "checkptrView")
 	ir.Syms(gd).
+		CheckPtrViewKept = typecheck.LookupRuntimeFunc(gd, "checkptrViewKept")
+	ir.Syms(gd).
 		Deferproc = typecheck.LookupRuntimeFunc(gd, "deferproc")
 	ir.Syms(gd).
 		Deferprocat = typecheck.LookupRuntimeFunc(gd, "deferprocat")
@@ -1214,6 +1216,12 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 			return
 		}
 		fn = ir.Syms(s.gd).CheckPtrView
+		if !s.gd.CObjects && !n.LoadOnly {
+			// Bytes that are kept may be stored through: they
+			// are over no pointer, as other integers are. (C
+			// looks at everything as bytes.)
+			fn = ir.Syms(s.gd).CheckPtrViewKept
+		}
 	}
 	if n.LoadOnly && !s.gd.CObjects && fn == ir.Syms(s.gd).CheckPtrAlignment {
 		// What is only loaded through may have integers where the

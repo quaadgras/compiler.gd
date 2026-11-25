@@ -312,6 +312,7 @@ func c23slow(unsafe.Pointer, unsafe.Pointer) bool
 func checkptrPartial(unsafe.Pointer)
 func checkptrIncompat(unsafe.Pointer, int)
 func checkptrView(unsafe.Pointer, *byte, uintptr)
+func checkptrViewKept(unsafe.Pointer, *byte, uintptr)
 func exposeptr(unsafe.Pointer)
 
 func libfuzzerTraceCmp1(uint8, uint8, uint)

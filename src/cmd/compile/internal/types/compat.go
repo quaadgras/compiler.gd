@@ -108,8 +108,9 @@ func compatLeaf(t *Type, off int64) (kind int, leaf *Type, in, rest int64) {
 // compatSeen is the pairs of types that are being compared.
 type compatSeen [][2]*Type
 
-// compatBytes reports whether t is bytes: a type that may be over
-// anything, since stores through it are checked by themselves.
+// compatBytes reports whether t is bytes: a pointer to them says nothing
+// of what the memory is, since bytes may be over anything where they
+// are only loaded, and in C.
 func compatBytes(t *Type) bool {
 	return !t.HasPointers() && t.Alignment() == 1
 }
@@ -251,7 +252,7 @@ func min64(a, b int64) int64 {
 // If load is set the view is only loaded through, and may have integers
 // where the memory has pointers.
 func CompatView(gd *base.Invocation, src *Type, off int64, view *Type, size int64, load bool) ViewCompat {
-	if size <= 0 || src.HasShape() || view.HasShape() || compatBytes(src) || compatBytes(view) {
+	if size <= 0 || src.HasShape() || view.HasShape() || compatBytes(src) {
 		return ViewOK
 	}
 	if !view.HasPointers() && (load || !src.HasPointers()) {
