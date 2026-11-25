@@ -57,6 +57,10 @@ var escBitsAlwaysEscapeMask func(unsafe.Pointer, uint64, int) uint64 = func(carr
 // read-only.
 var escBitsDynCapture int
 
+// (It looks at a func value as the words of its closure and writes one
+// of them, which the checks of unsafe.Pointer refuse: doc/gd/unsafe.md.)
+//
+//go:nocheckptr
 func init() {
 	capPtr := &escBitsDynCapture
 	escBitsDynReader = func(p *int) {
@@ -176,6 +180,9 @@ var escBitsDynTwoArg func(p *int, q *int)
 var escBitsDynTwoArgCapture int
 var escBitsDynTwoArgSink int
 
+// (As the init above.)
+//
+//go:nocheckptr
 func init() {
 	cap2 := &escBitsDynTwoArgCapture
 	escBitsDynTwoArg = func(p *int, q *int) {

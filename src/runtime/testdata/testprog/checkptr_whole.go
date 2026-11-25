@@ -139,9 +139,11 @@ func viewSame() {
 		sink2 = *(*struct{ s string })(unsafe.Pointer(&s))
 	})
 	viewCase("CheckPtrWholeSlice", func() {
+		// A slice of elements of the same size, with pointers where
+		// they are: its length is in those (checkptr_compat.go).
 		b := []byte("a slice")
-		sink2 = *(*[]int)(unsafe.Pointer(&b))
-		sink2 = *(*[]string)(unsafe.Pointer(&b))
+		sink2 = *(*[]int8)(unsafe.Pointer(&b))
+		sink2 = *(*[]bool)(unsafe.Pointer(&b))
 	})
 	viewCase("CheckPtrWholeIface", func() {
 		var e any = 1
@@ -164,10 +166,11 @@ func viewSame() {
 		})(unsafe.Pointer(&v))
 	})
 	viewCase("CheckPtrWholePointerWord", func() {
-		// A plain pointer is not a whole value.
+		// A plain pointer is not a whole value: its bytes may be
+		// looked at. (As an integer it may not: checkptr_compat.go.)
 		p := new(int)
 		sink2 = p
-		viewWord = uint64(*(*uintptr)(unsafe.Pointer(&p)))
+		viewWord = uint64((*[8]byte)(unsafe.Pointer(&p))[0])
 	})
 	viewCase("CheckPtrWholeZeroSize", func() {
 		var s string
@@ -320,6 +323,13 @@ type (
 		a, b uint64
 		c    uint64
 	}
+	// What a string's words are: a pointer and an integer.
+	viewPlainPairs struct {
+		p *byte
+		n uint64
+		q *byte
+		m uint64
+	}
 	viewPadded struct {
 		p *int
 		f float64
@@ -435,7 +445,7 @@ func viewSmall() {
 		// A string's type over memory that holds no whole value, in
 		// a span that has a bitmap.
 		sink2 = new([2]string)
-		viewAs[[2]string](viewPlain(new(viewPlainWords)))
+		viewAs[[2]string](viewPlain(new(viewPlainPairs)))
 	})
 	viewCase(W+"Reflect", func() {
 		t := reflect.StructOf([]reflect.StructField{

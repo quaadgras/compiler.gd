@@ -31,6 +31,10 @@ func main() {
 	f(20)
 }
 
+// gd: f makes a func of the address of bytes, which the checks of
+// unsafe.Pointer refuse.
+//
+//go:nocheckptr
 func f(n int) {
 	if n > 0 {
 		f(n - 1)

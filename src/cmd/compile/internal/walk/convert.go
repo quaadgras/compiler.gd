@@ -62,6 +62,12 @@ func walkConv(gd *base.Invocation, n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 			n.X = cheapExpr(gd, n.X, init)
 			init.Append(mkcall(gd, "checkptrPartial", nil, init, n.X))
 		}
+		if n.View >= ir.ViewPtrInt && !n.CheckPtr() {
+			// gd: a type that is not compatible with what the
+			// pointer is known to point into (wholeview.go).
+			n.X = cheapExpr(gd, n.X, init)
+			init.Append(mkcall(gd, "checkptrIncompat", nil, init, n.X, ir.NewInt(gd, n.Pos(), int64(n.View-ir.ViewPtrInt)+1)))
+		}
 	}
 	param, result := rtconvfn(n.X.Type(), n.Type())
 	if param == types.Txxx {

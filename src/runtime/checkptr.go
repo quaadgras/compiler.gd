@@ -13,15 +13,24 @@ import (
 )
 
 func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
-	checkptrAlign(p, elem, n, true)
+	checkptrAlign(p, elem, n, true, false)
 }
 
-// checkptrAlign is checkptrAlignment. If claim is set and p is to an
-// object of C's (cspan.go), the words of it that elem has pointers in
-// may hold pointers from here on: the conversion is one of a package
-// whose stores of pointers the runtime does not see, as it sees those of
-// C translated by cmd/cc.
-func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, claim bool) {
+// checkptrAlignmentLoad is checkptrAlignment for a conversion whose
+// result the compiler knows to be loaded through and nothing else, as
+// in *(*uintptr)(p): what is not stored through may have integers where
+// the memory has pointers (checkptr_compat.go).
+func checkptrAlignmentLoad(p unsafe.Pointer, elem *_type, n uintptr) {
+	checkptrAlign(p, elem, n, true, true)
+}
+
+// checkptrAlign is checkptrAlignment. If claim is set the conversion is
+// one of a package of Go's: elem is compared with what the memory is
+// (checkptr_compat.go), and if p is to an object of C's (cspan.go), the
+// words of it that elem has pointers in may hold pointers from here on,
+// since the runtime does not see such a package's stores of pointers as
+// it sees those of C translated by cmd/cc.
+func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, claim, load bool) {
 	// nil pointer is always suitably aligned (#47430).
 	if p == nil {
 		return
@@ -55,16 +64,27 @@ func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, claim bool) {
 			// A pointer to what the object was allocated as.
 			return
 		}
-		if elem.Pointers() {
-			if claim && s.spanclass.c() {
-				cTypedPointers(uintptr(p), elem, n)
-			}
-			checkptrPointers(s, uintptr(p), elem, n)
+		if claim && elem.Pointers() && s.spanclass.c() {
+			cTypedPointers(uintptr(p), elem, n)
 		}
 		if typ != nil {
 			checkptrWhole(typ, tbase, base+s.elemsize, uintptr(p), elem, size)
-		} else if wholeBitsEnabled {
+			if claim {
+				checkptrCompat(typ, tbase, base+s.elemsize, uintptr(p), elem, size, load)
+			} else if elem.Pointers() {
+				checkptrPointersC(s, uintptr(p), elem, n)
+			}
+			return
+		}
+		if wholeBitsEnabled {
 			checkptrWholeSmall(s, base, uintptr(p), elem, size)
+		}
+		if !claim {
+			if elem.Pointers() {
+				checkptrPointersC(s, uintptr(p), elem, n)
+			}
+		} else if s.spanclass.noscan() || heapBitsInSpan(s.elemsize) {
+			checkptrPointers(s, uintptr(p), elem, n, load)
 		}
 		return
 	}
@@ -125,7 +145,7 @@ func checkptrAlignmentC(p unsafe.Pointer, elem *_type, n uintptr) {
 			}
 		}
 	}
-	checkptrAlign(p, elem, n, false)
+	checkptrAlign(p, elem, n, false, false)
 }
 
 // checkptrObjectType returns the type that the object at base of the span
@@ -395,22 +415,18 @@ func checkptrSameObject(s *mspan, a, v uintptr) bool {
 	return s.base() <= v && v < s.limit && s.objIndex(a) == s.objIndex(v)
 }
 
-// checkptrPointers checks that (*[n]elem)(p), which is in one object of
-// the span s, has pointers only where the object has, or where the object
-// has a word that does not hold the address of anything in the heap now:
-// a pointer read from a word that holds an integer is whatever the
-// integer is.
-//
-// What it cannot see: a pointer stored later through the converted
-// pointer in a word the collector does not look at, and an integer stored
-// where the object has a pointer. A conversion cannot tell what will be
-// stored.
+// checkptrPointersC is the check of the pointers of (*[n]elem)(p), which
+// is in one object of the span s, for a package that is C translated by
+// cmd/cc, whose types are not compared with the memory's yet
+// (checkptrCompat, checkptrPointers): the type has pointers only where
+// the object has, or where the object has a word that does not hold the
+// address of anything in the heap now.
 //
 // A word of C's (cspan.go) is what was last stored in it, and has
 // neither kind for good: a pointer may be stored where an integer is,
 // which a conversion cannot refuse. So nothing is checked there, and
 // what C reads as a pointer where it stored an integer is the integer.
-func checkptrPointers(s *mspan, p uintptr, elem *_type, n uintptr) {
+func checkptrPointersC(s *mspan, p uintptr, elem *_type, n uintptr) {
 	if s.spanclass.c() {
 		return
 	}

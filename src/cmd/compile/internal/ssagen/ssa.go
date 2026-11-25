@@ -152,6 +152,8 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).
 		CheckPtrAlignmentC = typecheck.LookupRuntimeFunc(gd, "checkptrAlignmentC")
 	ir.Syms(gd).
+		CheckPtrAlignmentLoad = typecheck.LookupRuntimeFunc(gd, "checkptrAlignmentLoad")
+	ir.Syms(gd).
 		C23StorePtr = typecheck.LookupRuntimeFunc(gd, "c23StorePtr")
 	ir.Syms(gd).
 		C23Scalars = typecheck.LookupRuntimeFunc(gd, "c23Scalars")
@@ -1219,6 +1221,11 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 		}
 		fn = ir.Syms(s.gd).CheckPtrView
 	}
+	if n.LoadOnly && !s.gd.CObjects && fn == ir.Syms(s.gd).CheckPtrAlignment {
+		// What is only loaded through may have integers where the
+		// memory has pointers.
+		fn = ir.Syms(s.gd).CheckPtrAlignmentLoad
+	}
 	if s.gd.CObjects && fn == ir.Syms(s.gd).CheckPtrAlignment {
 		// C's pointer may be to the end of its object, and no further
 		// (ir.CObjType): what it is converted to may not fit there.
@@ -1235,6 +1242,17 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 		var rtype *ssa.Value
 		if rtypeExpr != nil {
 			rtype = s.expr(rtypeExpr)
+		} else if n.PtrRType != nil {
+			// The type itself, not its shape: what the pointer
+			// type points to, and the elements of that if it is
+			// an array of count of them. (abi.PtrType and
+			// abi.ArrayType have it after their abi.Type.)
+			bp := types.NewPtr(types.Types[types.TUINT8])
+			off := int64(rtabi.CommonSize(int(s.config.PtrSize)))
+			rtype = s.load(bp, s.newValue1I(ssa.OpOffPtr, types.NewPtr(bp), off, s.expr(n.PtrRType)))
+			if elem != n.Type().Elem() {
+				rtype = s.load(bp, s.newValue1I(ssa.OpOffPtr, types.NewPtr(bp), off, rtype))
+			}
 		} else {
 			rtype = s.reflectType(elem)
 		}

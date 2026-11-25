@@ -350,6 +350,13 @@ type ConvExpr struct {
 	TypeWord Node `mknode:"-"`
 	SrcRType Node `mknode:"-"`
 
+	// PtrRType is an expression yielding the *runtime._type of the
+	// pointer type that an unsafe.Pointer is converted to, in generic
+	// code, where the type itself is a shape, which says nothing of
+	// what a pointer in it points to (gd: runtime.checkptrAlignment
+	// compares the type with the memory's).
+	PtrRType Node `mknode:"-"`
+
 	// For -d=checkptr instrumentation of conversions from
 	// unsafe.Pointer to *Elem or *[Len]Elem.
 	//
@@ -363,16 +370,25 @@ type ConvExpr struct {
 	// View is what the compiler knows of a conversion from
 	// unsafe.Pointer to a pointer: see walk's markWholeViews.
 	View ViewKind
+
+	// LoadOnly is set if the result of a conversion from unsafe.Pointer
+	// to a pointer is loaded through and nothing else: it is not
+	// stored through, kept, or passed on (gd: walk's markWholeViews).
+	LoadOnly bool
 }
 
 // A ViewKind says whether a conversion to a pointer views a string, a
-// slice or an interface whole (doc/gd/unsafe.md).
+// slice or an interface whole, and whether its type is compatible with
+// what it points into (doc/gd/unsafe.md).
 type ViewKind uint8
 
 const (
 	ViewUnknown ViewKind = iota // what it points into is not known
 	ViewWhole                   // known, and it views them whole
 	ViewPartial                 // known, and it views part of one: it fails at run time
+	ViewPtrInt                  // known, and it has a pointer where that has an integer: it fails
+	ViewIntPtr                  // known, and it has an integer where that has a pointer: it fails
+	ViewPointee                 // known, and its pointer is to another type than that one's: it fails
 )
 
 func NewConvExpr(gd *base.Invocation, pos src.XPos, op Op, typ *types.Type, x Node) *ConvExpr {

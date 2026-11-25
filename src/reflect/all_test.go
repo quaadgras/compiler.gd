@@ -8673,7 +8673,10 @@ func TestValuePointerAndUnsafePointer(t *testing.T) {
 		{"channel", ValueOf(ch), *(*unsafe.Pointer)(unsafe.Pointer(&ch))},
 		{"map", ValueOf(m), *(*unsafe.Pointer)(unsafe.Pointer(&m))},
 		{"unsafe.Pointer", ValueOf(unsafePtr), unsafePtr},
-		{"function", ValueOf(fn), **(**unsafe.Pointer)(unsafe.Pointer(&fn))},
+		// (gd: a func is a pointer to its closure, whose first word
+		// is the code's address: looked at as an unsafe.Pointer, and
+		// then as the word that it points to.)
+		{"function", ValueOf(fn), *(*unsafe.Pointer)(*(*unsafe.Pointer)(unsafe.Pointer(&fn)))},
 		{"slice", ValueOf(slice), unsafe.Pointer(unsafe.SliceData(slice))},
 		{"string", ValueOf(s), unsafe.Pointer(unsafe.StringData(s))},
 	}

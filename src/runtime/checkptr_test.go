@@ -46,8 +46,8 @@ func TestCheckPtr(t *testing.T) {
 		{"CheckPtrSliceFail", "fatal error: checkptr: unsafe.Slice result straddles multiple allocations\n"},
 		{"CheckPtrStringOK", ""},
 		{"CheckPtrStringFail", "fatal error: checkptr: unsafe.String result straddles multiple allocations\n"},
-		{"CheckPtrPointersNoscan", "fatal error: checkptr: converted pointer type has a pointer where the memory has an integer\n"},
-		{"CheckPtrPointersScalar", "fatal error: checkptr: converted pointer type has a pointer where the memory has an integer\n"},
+		{"CheckPtrPointersNoscan", "fatal error: checkptr: converted pointer type has a pointer where the memory has an integer"},
+		{"CheckPtrPointersScalar", "fatal error: checkptr: converted pointer type has an integer where the memory has a pointer"},
 		{"CheckPtrPointersOK", ""},
 	}
 
@@ -91,6 +91,39 @@ func TestCheckPtrViews(t *testing.T) {
 			t.Parallel()
 			got, err := testenv.CleanCmdEnv(exec.Command(exe, name)).CombinedOutput()
 			if strings.HasPrefix(name, "CheckPtrPartial") {
+				if !strings.HasPrefix(string(got), fatal) {
+					t.Errorf("output:\n%s\n\nwant output starting with: %s", got, fatal)
+				}
+				return
+			}
+			if err != nil || len(got) > 0 {
+				t.Errorf("%v, output:\n%s\nwant no output", err, got)
+			}
+		})
+	}
+}
+
+// TestCheckPtrCompat runs the conversions of testprog's
+// checkptr_compat.go to types that are compatible with the memory, and
+// that are not, with the checks as they are by default.
+func TestCheckPtrCompat(t *testing.T) {
+	t.Parallel()
+	testenv.MustHaveGoRun(t)
+
+	exe, err := buildTestProg(t, "testprog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := testenv.CleanCmdEnv(exec.Command(exe, "CheckPtrCompatList")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, list)
+	}
+	const fatal = "fatal error: checkptr: converted pointer type has "
+	for _, name := range strings.Fields(string(list)) {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := testenv.CleanCmdEnv(exec.Command(exe, name)).CombinedOutput()
+			if strings.HasPrefix(name, "CheckPtrIncompat") {
 				if !strings.HasPrefix(string(got), fatal) {
 					t.Errorf("output:\n%s\n\nwant output starting with: %s", got, fatal)
 				}

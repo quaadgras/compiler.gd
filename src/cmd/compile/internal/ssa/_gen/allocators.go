@@ -4,8 +4,8 @@
 
 package main
 
-// TODO: should we share backing storage for similarly-shaped types?
-// e.g. []*Value and []*Block, or even []int32 and []bool.
+// Types without pointers share backing storage: []int32 and []bool are
+// derived from []limit.
 
 import (
 	"bytes"
@@ -40,6 +40,19 @@ func genAllocators() {
 			typ:      "[]*Value",
 			capacity: "cap(%s)",
 			mak:      "make([]*Value, %s)",
+			resize:   "%s[:%s]",
+			clear:    "clear(%s)",
+			minLog:   5,
+			maxLog:   32,
+		},
+		{
+			// gd: not derived from ValueSlice: memory that was
+			// allocated for pointers to Values is not looked at as
+			// pointers to Blocks (doc/gd/unsafe.md).
+			name:     "BlockSlice",
+			typ:      "[]*Block",
+			capacity: "cap(%s)",
+			mak:      "make([]*Block, %s)",
 			resize:   "%s[:%s]",
 			clear:    "clear(%s)",
 			minLog:   5,
@@ -87,11 +100,6 @@ func genAllocators() {
 		},
 	}
 	deriveds := []derived{
-		{
-			name: "BlockSlice",
-			typ:  "[]*Block",
-			base: "ValueSlice",
-		},
 		{
 			name: "Int64",
 			typ:  "[]int64",

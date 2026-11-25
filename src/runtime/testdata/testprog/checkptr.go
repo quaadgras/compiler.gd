@@ -118,10 +118,11 @@ func CheckPtrStringFail() {
 }
 
 func CheckPtrAlignmentNested() {
-	s := make([]int8, 100)
-	p := unsafe.Pointer(&s[0])
+	// (gd: an integer, not a pointer, which integers may not be over.)
+	p := new(int64)
+	checkptrSink = p
 	n := 9
-	_ = ((*[10]int8)(unsafe.Pointer((*[10]int64)(unsafe.Pointer(&p)))))[:n:n]
+	_ = ((*[10]int8)(unsafe.Pointer((*[10]int64)(unsafe.Pointer(p)))))[:n:n]
 }
 
 func init() {
@@ -162,8 +163,7 @@ func CheckPtrPointersScalar() {
 	sink2 = y
 }
 
-// The same layout under another name, integers over pointers, and a part
-// of an array.
+// The same layout under another name, and a part of an array.
 func CheckPtrPointersOK() {
 	x := new([4]checkptrPair)
 	checkptrSink = x
@@ -173,12 +173,7 @@ func CheckPtrPointersOK() {
 	}
 	sink2 = (*pair2)(unsafe.Pointer(&x[2]))
 	sink2 = (*[2]pair2)(unsafe.Pointer(&x[2]))
-	sink2 = (*[2]uintptr)(unsafe.Pointer(&x[3]))
 	sink2 = (**int)(unsafe.Pointer(&x[3].p))
-	// A pointer over an integer that is not an address in the heap,
-	// as the first word of an interface is.
-	x[0].n = 12345
-	sink2 = (*checkptrRiap)(unsafe.Pointer(&x[0]))
 }
 
 //go:noinline

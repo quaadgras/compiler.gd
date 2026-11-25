@@ -6,12 +6,14 @@ unsafe's six patterns); the fork checks them in every build.
 
 > **Status:** in: the checks Go has under the race detector
 > (`-d=checkptr`) are the default, made cheaper for the usual cases, and
-> extended with a check of where the pointers are; and an integer that
+> extended with a check that the type converted to is compatible with
+> what the memory is (below, "Compatible types": the first step of the
+> plan for memory-safe `unsafe`, 2026-11-25); and an integer that
 > was kept (a `uintptr` field, an argument of a callback, which C-style
 > APIs have) is a pointer again if its object is exposed. Not yet: the
 > integer keeping its object alive, bounds of stack objects and globals,
-> and exact sizes in the heap (an object's bound is its size class,
-> but for what C's malloc gave: `cc.md`).
+> exact sizes in the heap (an object's bound is its size class,
+> but for what C's malloc gave: `cc.md`), and the rest of that plan.
 
 ## What is checked
 
@@ -21,13 +23,9 @@ memory (`runtime/checkptr.go`). A check that fails is a fatal error.
 
 - **`(*T)(p)`**, `p` an `unsafe.Pointer` (`checkptrAlignment`): `p` is
   aligned for `T` if `T` has pointers; the `T` at `p` is inside one
-  allocation; and where `T` has a pointer, the object has one too, or
-  has a word that does not hold the address of anything in the heap. The
-  last is new: an integer that happens to be an address is not read as a
-  pointer. (The first word of an interface is a word the collector does
-  not look at that points to a type or a method table, outside the heap,
-  and reflect reads it as a pointer: this check allows it, and reflect is
-  not held to the rule on views below.)
+  allocation; and `T` is compatible with what the memory is (below,
+  "Compatible types"): it has a pointer where the memory has one, and
+  nowhere else, and its pointers point to what the memory's do.
 - **`(*T)(p)` is not a partial view of a string, a slice or an interface**
   (below).
 - **`unsafe.Pointer(u)`**, `u` a `uintptr` (`checkptrArithmetic`): if the
@@ -51,6 +49,110 @@ memory (`runtime/checkptr.go`). A check that fails is a fatal error.
   allocation. (What the language says panics still panics, and is not a
   fatal error: `unsafeslicecheckptr` uses the caller's pc.)
 
+## Compatible types
+
+Code that uses `unsafe` may take the bytes of memory for what it likes,
+and not its pointers. A conversion cannot tell a load from a store, so
+it is refused if a store through its result, or a load, could make a
+pointer of what is not one, or a pointer to a `T` of what points to
+something else:
+
+> `(*T)(p)` is a fatal error unless `T` and the type of the memory agree,
+> word by word, on what a word is.
+
+| `T` has | the memory has | |
+| --- | --- | --- |
+| no pointer | no pointer | allowed, whatever the types: integers, floats, arrays of them |
+| no pointer | a pointer | refused: an integer stored there is a pointer that the program made up, once it is loaded again. Allowed where the result is only loaded through (below) |
+| bytes (a type of alignment 1) | anything but a string, a slice or an interface | allowed: a store of bytes is to be checked by itself (the plan's step 3; not yet) |
+| a pointer | no pointer | refused, whatever the integer is |
+| `*B` | `*A` | allowed if `A` and `B` are the same size and agree in this way themselves, both ways: a `*B` stored there is loaded as a `*A` by the code that the memory is `A`'s to |
+| `unsafe.Pointer`, or a pointer to a type of no size (C's `void *`) | any pointer, func, map or chan | allowed: what is loaded is converted before it is used, and checked then. (What is stored through it is not checked yet.) |
+| `*B` | `unsafe.Pointer` | refused: it would be a conversion with no check |
+| a func, a map, a chan | the same | allowed if the parameters and results, or the key and the element, are the same types. (A map is also a pointer to `internal/runtime/maps.Map`. A func is nothing else: its closure begins with the address of its code) |
+| a slice | a slice | allowed if the elements are the same size and agree: `[]int32` as `[]float32`, not `[]byte` as `[]uint64`, whose length would be in the wrong unit |
+| an interface | an interface | allowed if both are of the same type, or have no methods, or one is `internal/abi`'s struct for it |
+
+So a `(*uintptr)(unsafe.Pointer(&p))` that is kept or stored through is
+refused for a pointer `p`, and so is a `reflect.StringHeader` variable
+read as a `string`, which package unsafe never allowed. Types of the
+same shape under other names are compatible, to any depth: a type that
+points to itself is compared once.
+
+**What is only loaded through.** The rule is about what a store could
+do. Where the compiler sees that the result of the conversion is
+dereferenced for a value and nothing else, as in
+`*(*uintptr)(unsafe.Pointer(&p))`, `(*T)(p).f` and `(*[2]uintptr)(p)[0]`
+that are not assigned to, sliced, or have their address taken
+(`walk.markLoadOnly`, `ir.ConvExpr.LoadOnly`), integers may be over
+pointers: a pointer read as an integer is an integer. The runtime's
+check is then `checkptrAlignmentLoad`. Nothing else is relaxed: a
+pointer over an integer, or over a pointer to something else, is a
+pointer that the program would go on to use.
+
+Where the type of the memory comes from:
+
+- **An object of the heap that records its type** (more than 512 bytes,
+  or large): the runtime compares `T` with it
+  (`runtime/checkptr_compat.go`, `checkptrCompat`).
+- **A smaller object** has a bitmap of where its pointers are, and no
+  type: `T` must have its pointers there and nowhere else
+  (`checkptrPointers`). What its pointers point to is not compared: see
+  the gaps.
+- **What the compiler knows.** Where `p` is made of a pointer to `S`
+  (`&x`, a `p` of static type `*S`, an offset of those: as for views,
+  below), `T` is compared with `S` when the package is compiled
+  (`cmd/compile/internal/types/compat.go`, `CompatView`), and the
+  conversion fails when it runs if they disagree. `S` is itself a type
+  that the memory was found compatible with, so what `S` and `T`
+  disagree on, the memory and `T` do. Bytes say nothing of what they are
+  over, and neither does an `unsafe.Pointer` of what the pointer under
+  it points to: those are left to the runtime. This is the only check
+  of the stack and of globals, which have no type at run time.
+- **Generic code** has a type's shape, in which every pointer is a
+  `*uint8`. The conversion is given the type itself, from the
+  dictionary (`ir.ConvExpr.PtrRType`), and the compiler compares nothing
+  there.
+
+Not compared: the conversions of a package that is C translated by
+`cmd/cc`, whose memory has its own rules until the plan's next steps
+(`cc.md`); the runtime's packages and reflect, as for every check here;
+and the functions that the compiler writes itself.
+
+`-d=unsafewhole=1` reports the conversions that the compiler finds
+incompatible, instead of failing. What the standard library, the tools
+and their tests had:
+
+- The compiler's own cache of slices gave out memory allocated as
+  `[]*Value` as a `[]*Block`
+  (`cmd/compile/internal/ssa/_gen/allocators.go`): it has a list of its
+  own now. Slices of integers of different sizes still share memory
+  there.
+- Tests that look at a func value as the words of its closure
+  (`cmd/compile/internal/test`'s escape bits, `reflect`'s
+  `TestValuePointerAndUnsafePointer`, `test/fixedbugs/issue11656`, which
+  makes a func of bytes): `//go:nocheckptr`, or the func's word read as
+  an `unsafe.Pointer` first.
+- What SWIG generates for a function that returns a string reads C's
+  struct of a pointer and a length as a Go string. `cmd/cgo/internal/swig`
+  compiles its programs with `-d=checkptr=0`: SWIG's output does not
+  run with the checks.
+
+### What this does not close
+
+- **A small object's pointers are known, their types are not.** A
+  `struct{ p *[1]int }` of 512 bytes or less, reached through a plain
+  `unsafe.Pointer`, converts to `*struct{ p *[1000]int }`. Closing it
+  needs the type of every object with pointers, 8 bytes each or a word
+  of its span: not decided.
+- **A store through an `unsafe.Pointer` that is over a typed pointer**
+  is not checked: `*(*unsafe.Pointer)(unsafe.Pointer(&p)) = q` puts any
+  pointer where a `*A` is. `sync/atomic.StorePointer` is used this way.
+- **Bytes over a pointer** can be written, until stores of bytes are
+  checked.
+- **The stack and globals through a plain `unsafe.Pointer`** have no
+  type at run time: only what the compiler knows is compared.
+
 ## Views of strings, slices and interfaces
 
 These values are loaded and stored as a unit, which is what makes a race on
@@ -65,12 +167,14 @@ a store. So:
 > `checkptr: converted pointer is a partial view of a string, a slice or an
 > interface`.
 
-- Allowed: string as string, slice as slice of any element type, interface
-  as interface, `internal/abi`'s `EmptyInterface` and `NonEmptyInterface` as
-  an interface, and any of these inside a struct or an array at the same
-  offset. A view of memory that holds none of them may have any type: it is
-  not part of a value that goes whole.
-- A plain pointer viewed as `*uintptr` is not covered.
+- Allowed: string as string, slice as slice, interface as interface,
+  `internal/abi`'s `EmptyInterface` and `NonEmptyInterface` as an
+  interface, and any of these inside a struct or an array at the same
+  offset, if their types are compatible (above). A view of memory that
+  holds none of them is not part of a value that goes whole, and is held
+  to that rule alone.
+- A plain pointer is not a value that goes whole: its bytes may be
+  viewed. As a `uintptr` it may not, by the rule above.
 - **`[]byte` as `string`, and the reverse**, are partial with 8-byte words:
   they never worked there. A slice's second word is `len:32|cap:32`, so a
   slice read as a string has the length `len|cap<<32`, and an inline string
@@ -216,9 +320,9 @@ and for http ClientServer, within their spread of runs, and +0.2% for json.
 
 ## What it does not see
 
-- A pointer stored, through a converted pointer, in a word the collector
-  does not look at; an integer stored where the object has a pointer. A
-  conversion cannot tell what will be stored.
+- What the gaps of "Compatible types" list: the types of a small
+  object's pointers, stores through an `unsafe.Pointer` over a typed
+  pointer, and bytes written over a pointer.
 - A pointer one past the end of an object is, to these checks, a pointer
   to the next object.
 - The stack is one allocation, and so is each of data and bss.
@@ -245,7 +349,10 @@ the type its object was allocated with, and memory outside the heap.
 ## Tests
 
 `runtime/checkptr_test.go`, with `CheckPtrPointers*` for the check of
-pointers and `TestCheckPtrViews` for views (`testprog/checkptr_whole.go`),
+pointers, `TestCheckPtrCompat` for compatible types
+(`testprog/checkptr_compat.go`: what must pass and what must stop, for
+objects with a type, with a bitmap and for what the compiler knows) and
+`TestCheckPtrViews` for views (`testprog/checkptr_whole.go`),
 `runtime/mwholebits_test.go` for the bitmap;
 the standard library's tests pass with the checks on. Six tests of
 `test/` that count instructions or diagnostics, or that misuse `unsafe`
