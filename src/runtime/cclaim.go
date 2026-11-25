@@ -689,7 +689,10 @@ func c23IntPtr(v uintptr) unsafe.Pointer {
 	if s := spanOf(v); s != nil {
 		switch s.state.get() {
 		case mSpanInUse:
-			addr = v >= s.base() && v < s.limit && !s.isFree(s.objIndex(v))
+			// (Anywhere in the span: what is after its last
+			// object is where a span of small objects keeps
+			// its mark bits.)
+			addr = true
 		case mSpanManual:
 			addr = true // a stack
 		}

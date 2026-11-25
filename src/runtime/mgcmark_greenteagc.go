@@ -294,6 +294,12 @@ func tryDeferToSpanScan(p uintptr, gcw *gcWork) bool {
 	base := alignDown(p, gc.PageSize)
 	q := spanInlineMarkBitsFromBase(base)
 	objIndex := uint16((uint64(p-base) * uint64(gc.SizeClassToDivMagic[spanClass(q.class).sizeclass()])) >> 32)
+	if (uintptr(objIndex)+1)*uintptr(gc.SizeClassToSize[spanClass(q.class).sizeclass()]) > gc.PageSize-unsafe.Sizeof(spanInlineMarkBits{}) {
+		// gd: p is after the span's last object, where these bits
+		// are: an integer that a word which is looked at as a
+		// pointer may hold (cspan.go) is the address of anything.
+		return false
+	}
 
 	// Set mark bit.
 	idx, mask := objIndex/8, uint8(1)<<(objIndex%8)

@@ -143,7 +143,12 @@ func cFrameEnd(gp *g, a uintptr) uintptr {
 //go:linkname c23BytesStored
 //go:nosplit
 func c23BytesStored(p unsafe.Pointer, n uintptr) {
-	if n == 0 || !writeBarrier.enabled {
+	if n == 0 {
+		return
+	}
+	// Bytes are not written over a word that holds a pointer.
+	c23ByteStore(p, n)
+	if !writeBarrier.enabled {
 		return
 	}
 	const word = goarch.PtrSize
