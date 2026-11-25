@@ -19,12 +19,12 @@ type lconv struct {
 
 var lconvOnce sync.Once
 
-var lconvC c23.Ptr
+var lconvC *c23.Void
 
 // Localeconv returns the C locale's numeric and monetary conventions:
 // "." as the decimal point, empty strings and CHAR_MAX otherwise. C must
 // not modify them.
-func Localeconv() c23.Ptr {
+func Localeconv() *c23.Void {
 	lconvOnce.Do(func() {
 		lconvC = c23.New[lconv]()
 		c23.StorePtr(lconvC, c23.CString("."))
@@ -45,15 +45,15 @@ func Localeconv() c23.Ptr {
 // C's if the environment names another. It returns the category's name
 // (LC_ALL's is glibc's list of the categories' if they differ), or null
 // for another name or category.
-func Setlocale(category int32, locale c23.Ptr) c23.Ptr {
+func Setlocale(category int32, locale *c23.Void) *c23.Void {
 	Localeconv()
 	if category < 0 || category > lcAll {
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	globalMu.Lock()
 	defer globalMu.Unlock()
 	if c23.Addr(locale) != 0 && !setGlobal(int(category), c23.GoString(locale)) {
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	if category == lcAll {
 		return nameOf(allName(globalUTF8))

@@ -227,7 +227,7 @@ func printpanicval(v any) {
 		printstring(v)
 	default:
 		printstring("(")
-		printstring(toRType((*_type)(unsafePointerOf(efaceOf(&v)._type))).string())
+		printstring(toRType((*_type)(typeWordPtr(efaceOf(&v)._type))).string())
 		printstring(") ...")
 	}
 }

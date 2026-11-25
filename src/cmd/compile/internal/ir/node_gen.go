@@ -342,6 +342,9 @@ func (n *CallExpr) doChildrenWithHidden(do func(Node) bool) bool {
 	if doNames(n.KeepAlive, do) {
 		return true
 	}
+	if n.LocalBits != nil && do(n.LocalBits) {
+		return true
+	}
 	return false
 }
 func (n *CallExpr) editChildren(edit func(Node) Node) {
@@ -368,6 +371,9 @@ func (n *CallExpr) editChildrenWithHidden(edit func(Node) Node) {
 		n.RType = edit(n.RType).(Node)
 	}
 	editNames(n.KeepAlive, edit)
+	if n.LocalBits != nil {
+		n.LocalBits = edit(n.LocalBits).(Node)
+	}
 }
 
 func (n *CaseClause) Format(s fmt.State, verb rune) { fmtNode(n, s, verb) }
@@ -554,6 +560,9 @@ func (n *ConvExpr) doChildrenWithHidden(do func(Node) bool) bool {
 	if n.SrcRType != nil && do(n.SrcRType) {
 		return true
 	}
+	if n.PtrRType != nil && do(n.PtrRType) {
+		return true
+	}
 	if n.ElemRType != nil && do(n.ElemRType) {
 		return true
 	}
@@ -578,6 +587,9 @@ func (n *ConvExpr) editChildrenWithHidden(edit func(Node) Node) {
 	}
 	if n.SrcRType != nil {
 		n.SrcRType = edit(n.SrcRType).(Node)
+	}
+	if n.PtrRType != nil {
+		n.PtrRType = edit(n.PtrRType).(Node)
 	}
 	if n.ElemRType != nil {
 		n.ElemRType = edit(n.ElemRType).(Node)

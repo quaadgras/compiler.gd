@@ -281,7 +281,7 @@ func Fetestexcept(excepts int32) int32 {
 }
 
 // fexcept_t is an int: the flags.
-func Fegetexceptflag(flagp Ptr, excepts int32) int32 {
+func Fegetexceptflag(flagp *Void, excepts int32) int32 {
 	if excepts&^FeAllExcept != 0 {
 		return 1
 	}
@@ -289,7 +289,7 @@ func Fegetexceptflag(flagp Ptr, excepts int32) int32 {
 	return 0
 }
 
-func Fesetexceptflag(flagp Ptr, excepts int32) int32 {
+func Fesetexceptflag(flagp *Void, excepts int32) int32 {
 	if excepts&^FeAllExcept != 0 {
 		return 1
 	}
@@ -298,7 +298,7 @@ func Fesetexceptflag(flagp Ptr, excepts int32) int32 {
 	return 0
 }
 
-func Fetestexceptflag(flagp Ptr, excepts int32) int32 {
+func Fetestexceptflag(flagp *Void, excepts int32) int32 {
 	return int32(Load32(flagp)) & excepts & FeAllExcept
 }
 
@@ -319,19 +319,19 @@ func Fesetround(round int32) int32 {
 }
 
 // fenv_t is an int: the direction and the flags, whose bits differ.
-func Fegetenv(envp Ptr) int32 {
+func Fegetenv(envp *Void) int32 {
 	e := Fenv()
 	Store32(envp, uint32(e.Round|e.Except))
 	return 0
 }
 
-func Feholdexcept(envp Ptr) int32 {
+func Feholdexcept(envp *Void) int32 {
 	Fegetenv(envp)
 	Fenv().Except = 0
 	return 0
 }
 
-func Fesetenv(envp Ptr) int32 {
+func Fesetenv(envp *Void) int32 {
 	v := int32(Load32(envp))
 	e := Fenv()
 	e.Round = v & feRoundMask
@@ -339,7 +339,7 @@ func Fesetenv(envp Ptr) int32 {
 	return 0
 }
 
-func Feupdateenv(envp Ptr) int32 {
+func Feupdateenv(envp *Void) int32 {
 	raised := Fenv().Except
 	Fesetenv(envp)
 	Raise(raised)
@@ -347,12 +347,12 @@ func Feupdateenv(envp Ptr) int32 {
 }
 
 // femode_t is an int: the direction.
-func Fegetmode(modep Ptr) int32 {
+func Fegetmode(modep *Void) int32 {
 	Store32(modep, uint32(CurRound()))
 	return 0
 }
 
-func Fesetmode(modep Ptr) int32 {
+func Fesetmode(modep *Void) int32 {
 	Fenv().Round = int32(Load32(modep)) & feRoundMask
 	return 0
 }
@@ -363,10 +363,10 @@ func Fesetmode(modep Ptr) int32 {
 // does not link what allocating it takes.
 var (
 	feDflOnce sync.Once
-	feDfl     Ptr
+	feDfl     *Void
 )
 
-func FeDfl() Ptr {
+func FeDfl() *Void {
 	feDflOnce.Do(func() { feDfl = Malloc(8) })
 	return feDfl
 }

@@ -12,7 +12,7 @@ import (
 
 // Utimes is utimes: tv is two struct timevals, the access and
 // modification times, or null for now.
-func Utimes(path, tv c23.Ptr) int32 {
+func Utimes(path, tv *c23.Void) int32 {
 	a, m := time.Now(), time.Now()
 	if c23.Addr(tv) != 0 {
 		var ts [2]time.Time

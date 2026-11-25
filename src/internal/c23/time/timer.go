@@ -42,8 +42,8 @@ type timer struct {
 	clock  int32
 	notify int32
 	signo  int32
-	value  c23.Ptr // sigev_value, as its pointer member
-	fn     c23.Ptr // sigev_notify_function
+	value  c23.SigVal // sigev_value
+	fn     *c23.Void  // sigev_notify_function
 
 	mu       sync.Mutex
 	t        *time.Timer
@@ -62,36 +62,26 @@ var (
 	timerN   uintptr
 )
 
-func timerOf(id c23.Ptr) *timer {
+func timerOf(id *c23.Void) *timer {
 	timersMu.Lock()
 	defer timersMu.Unlock()
 	return timers[c23.Addr(id)]
 }
-
-// The offsets in struct sigevent {union sigval sigev_value; int
-// sigev_signo; int sigev_notify; void (*sigev_notify_function)(union
-// sigval); void *sigev_notify_attributes; ...}.
-var (
-	sevSignoOff  = int(c23.WordSize)
-	sevNotifyOff = int(c23.WordSize) + 4
-	sevFnOff     = int(c23.WordSize) + 8
-)
 
 // TimerCreate is timer_create: a timer on CLOCK_REALTIME,
 // CLOCK_MONOTONIC, CLOCK_BOOTTIME or a CPU-time clock, which notifies as
 // evp says (if evp is null, SIGALRM with the timer's id as si_value).
 // The timer's id, stored at timerid, is a timer_t that is not a pointer
 // to anything.
-func TimerCreate(clock int32, evp, timerid c23.Ptr) int32 {
+func TimerCreate(clock int32, evp, timerid *c23.Void) int32 {
 	if _, ok := c23.ClockOrigin(clock); !ok {
 		c23.SetErrno(c23.EINVAL)
 		return -1
 	}
 	tm := &timer{clock: clock, notify: SIGEV_SIGNAL, signo: SIGALRM}
 	if c23.Addr(evp) != 0 {
-		tm.value = c23.LoadPtr(evp)
-		tm.signo = int32(c23.Load32(c23.Add(evp, sevSignoOff)))
-		tm.notify = int32(c23.Load32(c23.Add(evp, sevNotifyOff)))
+		ev := c23.LoadSigEvent(evp)
+		tm.value, tm.signo, tm.notify = ev.Value, ev.Signo, ev.Notify
 		switch tm.notify {
 		case SIGEV_SIGNAL:
 			if tm.signo <= 0 || tm.signo >= c23.Nsig {
@@ -99,8 +89,8 @@ func TimerCreate(clock int32, evp, timerid c23.Ptr) int32 {
 				return -1
 			}
 		case SIGEV_THREAD:
-			tm.fn = c23.LoadPtr(c23.Add(evp, sevFnOff))
-			c23.FuncOf[func(c23.Ptr)](tm.fn)
+			tm.fn = ev.Function
+			c23.FuncOf[func(*c23.Void)](tm.fn)
 		case SIGEV_NONE:
 		default:
 			c23.SetErrno(c23.EINVAL)
@@ -113,7 +103,7 @@ func TimerCreate(clock int32, evp, timerid c23.Ptr) int32 {
 	timers[tm.id] = tm
 	timersMu.Unlock()
 	if c23.Addr(evp) == 0 {
-		tm.value = c23.FromInt(tm.id)
+		tm.value = c23.SigVal{Int: uint64(tm.id)}
 	}
 	c23.StorePtr(timerid, c23.FromInt(tm.id))
 	return 0
@@ -121,7 +111,7 @@ func TimerCreate(clock int32, evp, timerid c23.Ptr) int32 {
 
 // TimerDelete is timer_delete: the timer is disarmed, and its id no
 // longer one.
-func TimerDelete(id c23.Ptr) int32 {
+func TimerDelete(id *c23.Void) int32 {
 	timersMu.Lock()
 	tm := timers[c23.Addr(id)]
 	delete(timers, c23.Addr(id))
@@ -156,7 +146,7 @@ func (tm *timer) left() time.Duration {
 
 // storeItimerspec stores interval and value as struct itimerspec
 // {struct timespec it_interval, it_value;} at p.
-func storeItimerspec(p c23.Ptr, interval, value time.Duration) {
+func storeItimerspec(p *c23.Void, interval, value time.Duration) {
 	c23.StoreTimespec(p, interval)
 	c23.StoreTimespec(c23.Add(p, 16), value)
 }
@@ -166,7 +156,7 @@ func storeItimerspec(p c23.Ptr, interval, value time.Duration) {
 // that has passed; a time from now if not), then every it_interval if
 // that is not zero; a zero it_value disarms it. What was left of the
 // previous arming is stored at ovalue (if not null).
-func TimerSettime(id c23.Ptr, flags int32, value, ovalue c23.Ptr) int32 {
+func TimerSettime(id *c23.Void, flags int32, value, ovalue *c23.Void) int32 {
 	tm := timerOf(id)
 	if tm == nil {
 		c23.SetErrno(c23.EINVAL)
@@ -202,7 +192,7 @@ func TimerSettime(id c23.Ptr, flags int32, value, ovalue c23.Ptr) int32 {
 
 // TimerGettime is timer_gettime: the time until the timer expires (0 if
 // it is disarmed) and its interval.
-func TimerGettime(id, value c23.Ptr) int32 {
+func TimerGettime(id, value *c23.Void) int32 {
 	tm := timerOf(id)
 	if tm == nil {
 		c23.SetErrno(c23.EINVAL)
@@ -217,7 +207,7 @@ func TimerGettime(id, value c23.Ptr) int32 {
 // TimerGetoverrun is timer_getoverrun: how many times the timer expired
 // while its last signal was pending, or late (an expiry the timer's
 // goroutine ran after the next was due counts the ones it missed).
-func TimerGetoverrun(id c23.Ptr) int32 {
+func TimerGetoverrun(id *c23.Void) int32 {
 	tm := timerOf(id)
 	if tm == nil {
 		c23.SetErrno(c23.EINVAL)
@@ -279,9 +269,8 @@ func (tm *timer) expire(seq int) {
 	case SIGEV_THREAD:
 		tm.overrun = missed
 		tm.mu.Unlock()
-		f := c23.FuncOf[func(c23.Ptr)](tm.fn)
-		v := c23.Calloc(1, uint64(c23.WordSize)) // union sigval
-		c23.StorePtr(v, tm.value)
+		f := c23.FuncOf[func(*c23.Void)](tm.fn)
+		v := c23.NewSigVal(tm.value) // the union sigval, by value
 		c23.SpawnBlocked(c23.New[uint64](), func(*c23.Thread) { f(v) })
 	default:
 		tm.overrun = missed
@@ -295,7 +284,7 @@ func (tm *timer) expire(seq int) {
 // CPU-time clock; a thread's is EINVAL, as on Linux). It is not
 // interrupted by signals, so it does not store what is left at rmtp.
 // The result is an error number.
-func ClockNanosleep(id, flags int32, rqtp, rmtp c23.Ptr) int32 {
+func ClockNanosleep(id, flags int32, rqtp, rmtp *c23.Void) int32 {
 	if id == CLOCK_THREAD_CPUTIME_ID || id < 0 && id&7 != 2 {
 		return c23.EINVAL
 	}
@@ -316,7 +305,7 @@ func ClockNanosleep(id, flags int32, rqtp, rmtp c23.Ptr) int32 {
 
 // ClockSettime is clock_settime: the program may not set the system's
 // clock (EPERM); the other clocks cannot be set (EINVAL).
-func ClockSettime(id int32, ts c23.Ptr) int32 {
+func ClockSettime(id int32, ts *c23.Void) int32 {
 	if id == CLOCK_REALTIME {
 		if _, ok := c23.LoadTimespec(ts); !ok {
 			c23.SetErrno(c23.EINVAL)
@@ -333,7 +322,7 @@ func ClockSettime(id int32, ts c23.Ptr) int32 {
 // program's process (pid 0 or its own), which counts the time since it
 // started. Another process's is EPERM: the program cannot know its time.
 // The result is an error number.
-func ClockGetcpuclockid(pid int32, clock c23.Ptr) int32 {
+func ClockGetcpuclockid(pid int32, clock *c23.Void) int32 {
 	if pid != 0 && pid != int32(os.Getpid()) {
 		return c23.EPERM
 	}

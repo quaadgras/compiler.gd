@@ -12,7 +12,7 @@ import (
 
 // NlLanginfo is nl_langinfo, of the C locale: its CODESET is "UTF-8",
 // which is what the C library's multibyte functions read and write.
-func NlLanginfo(item int32) c23.Ptr {
+func NlLanginfo(item int32) *c23.Void {
 	langinfoMu.Lock()
 	defer langinfoMu.Unlock()
 	p, ok := langinfoStr[item]
@@ -25,7 +25,7 @@ func NlLanginfo(item int32) c23.Ptr {
 
 var langinfoMu sync.Mutex
 
-var langinfoStr = map[int32]c23.Ptr{}
+var langinfoStr = map[int32]*c23.Void{}
 
 func langinfo(item int32) string {
 	switch {
@@ -65,4 +65,4 @@ func langinfo(item int32) string {
 
 // NlLanginfoL is nl_langinfo_l, which is nl_langinfo: the library's
 // locales have the same information (internal/c23/locale).
-func NlLanginfoL(item int32, _ c23.Ptr) c23.Ptr { return NlLanginfo(item) }
+func NlLanginfoL(item int32, _ *c23.Void) *c23.Void { return NlLanginfo(item) }

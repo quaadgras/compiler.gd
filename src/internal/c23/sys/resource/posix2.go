@@ -17,7 +17,7 @@ const RUSAGE_THREAD = 1
 // Getrusage is getrusage: the system's, where it has it (RUSAGE_THREAD is
 // the process's); elsewhere, the time since the program started as its
 // user time. usage is a struct rusage: two struct timevals and 14 longs.
-func Getrusage(who int32, usage c23.Ptr) int32 {
+func Getrusage(who int32, usage *c23.Void) int32 {
 	if who != RUSAGE_SELF && who != RUSAGE_CHILDREN && who != RUSAGE_THREAD {
 		c23.SetErrno(c23.EINVAL)
 		return -1

@@ -28,31 +28,26 @@ type jmpBuf struct {
 	mask  uint64
 }
 
-var jmpBufInfo = TinfoOf[jmpBuf]()
-
 // Setjmp is setjmp(env) at site of frame f's function: it saves both in
-// env, a jmp_buf, and returns 0.
-func Setjmp(env Ptr, f *JmpFrame, site int32) int32 {
-	p := New[jmpBuf]()
-	*(*jmpBuf)(p.Obj) = jmpBuf{f: f, site: site}
-	StorePtr(env, p)
+// env, a jmp_buf, and returns 0. What env gets is the pointer to a
+// Handle: longjmp goes nowhere but where a setjmp was.
+func Setjmp(env *Void, f *JmpFrame, site int32) int32 {
+	StorePtr(env, NewHandle(&jmpBuf{f: f, site: site}))
 	return 0
 }
 
 // Sigsetjmp is sigsetjmp(env, save): setjmp that also saves the calling
 // thread's signal mask in env if save is not 0, for longjmp (and
 // siglongjmp) to restore, as glibc's and musl's do.
-func Sigsetjmp(env Ptr, f *JmpFrame, site, save int32) int32 {
-	p := New[jmpBuf]()
-	jb := (*jmpBuf)(p.Obj)
-	*jb = jmpBuf{f: f, site: site}
+func Sigsetjmp(env *Void, f *JmpFrame, site, save int32) int32 {
+	jb := &jmpBuf{f: f, site: site}
 	if save != 0 {
 		t := SigSelf()
 		SigMu.Lock()
 		jb.saved, jb.mask = true, t.Mask
 		SigMu.Unlock()
 	}
-	StorePtr(env, p)
+	StorePtr(env, NewHandle(jb))
 	return 0
 }
 
@@ -62,12 +57,12 @@ type longjmpPanic struct {
 }
 
 // Longjmp is longjmp.
-func Longjmp(env Ptr, val int32) {
+func Longjmp(env *Void, val int32) {
 	p := LoadPtr(env)
-	if p.Obj == nil || p.Off != 0 || p.Info() != jmpBufInfo {
+	jb, ok := HandleOf[*jmpBuf](p)
+	if !ok {
 		RaiseFault("longjmp to a jmp_buf setjmp did not set", Addr(p))
 	}
-	jb := (*jmpBuf)(p.Obj)
 	if !jb.f.live {
 		RaiseFault("longjmp to a function that has returned", Addr(p))
 	}

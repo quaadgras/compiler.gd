@@ -8,6 +8,7 @@ import (
 	"cmd/internal/sys"
 	"cmd/link/internal/loader"
 	"internal/abi"
+	"internal/buildcfg"
 )
 
 // A WasmGCLeaf is one field of the WebAssembly struct of a Go type
@@ -191,7 +192,13 @@ func wasmGCAppendRegs(ctxt *Link, rs []WasmGCReg, typ loader.Sym, off int64) []W
 		// a pointer in a register. (The two floats of its inline
 		// payload are after two words, at 8 or 16.)
 		ps := int64(arch.PtrSize)
-		add(0, WasmGCWordKind(arch), 'r', false)
+		if buildcfg.GOWASM.Split {
+			// (With split it is a pointer in memory too: see
+			// cmd/compile/internal/ssa's Types.ITab.)
+			add(0, 'r', 'r', false)
+		} else {
+			add(0, WasmGCWordKind(arch), 'r', false)
+		}
 		add(ps, 'r', 'r', false)
 		add(2*ps, 'd', 'd', false)
 		add(2*ps+8, 'd', 'd', false)

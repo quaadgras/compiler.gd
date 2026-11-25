@@ -9,7 +9,6 @@ atomic2
 attr_section
 attr_weak
 attribute
-attribute_hiding
 autotype
 bitfield
 builtin

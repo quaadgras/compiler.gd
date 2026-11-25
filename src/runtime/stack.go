@@ -629,7 +629,9 @@ func adjustpointer(adjinfo *adjustinfo, vpp unsafe.Pointer) {
 		// See go.dev/issues/73801.
 		valgrindMakeMemDefined(unsafe.Pointer(&p), unsafe.Sizeof(&p))
 	}
-	if adjinfo.old.lo <= p && p < adjinfo.old.hi {
+	// (gd: a pointer of C's to a union has a bit that no address has,
+	// which stays: cclaim.go's cPtrBits.)
+	if q := p &^ cPtrBits; adjinfo.old.lo <= q && q < adjinfo.old.hi {
 		*pp = p + adjinfo.delta
 		if stackDebug >= 3 {
 			print("        adjust ptr ", pp, ":", hex(p), " -> ", hex(*pp), "\n")
@@ -686,11 +688,11 @@ func adjustpointers(scanp unsafe.Pointer, bv *bitvector, adjinfo *adjustinfo, f 
 				print("runtime: bad pointer in frame ", funcname(f), " at ", pp, ": ", hex(p), "\n")
 				throw("invalid pointer found on stack")
 			}
-			if minp <= p && p < maxp {
+			if q := p &^ cPtrBits; minp <= q && q < maxp {
 				if stackDebug >= 3 {
 					print("adjust ptr ", hex(p), " ", funcname(f), "\n")
 				}
-				if debug.stackptrcheck != 0 && p+delta < adjinfo.frameSP {
+				if debug.stackptrcheck != 0 && p&^cPtrBits+delta < adjinfo.frameSP {
 					print("runtime: in frame of ", funcname(f), "\n")
 					badStackPtr(p, uintptr(unsafe.Pointer(pp))-delta, adjinfo.frameSP-delta)
 				}
@@ -1001,9 +1003,6 @@ func copystack(gp *g, newsize uintptr) {
 	adjustctxt(gp, &adjinfo)
 	adjustdefers(gp, &adjinfo)
 	adjustpanics(gp, &adjinfo)
-	if gp.c23 != nil && c23StackMove != nil {
-		c23StackMove(gp.c23, old.lo, old.hi, adjinfo.delta)
-	}
 	if adjinfo.sghi != 0 {
 		adjinfo.sghi += adjinfo.delta
 	}

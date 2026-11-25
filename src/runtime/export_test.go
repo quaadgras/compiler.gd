@@ -2262,3 +2262,122 @@ func WholeStates(p unsafe.Pointer, n int) string {
 	}
 	return string(b)
 }
+
+// The memory that C allocates (cspan.go).
+
+func MallocC(n uintptr) unsafe.Pointer { return mallocC(n) }
+
+// MallocCTyped is malloc for values of the type of e; MallocCScalar for
+// what holds no pointers.
+func MallocCTyped(n uintptr, e any) unsafe.Pointer { return c23Malloc(n, efaceOf(&e)._type, false) }
+
+func MallocCScalar(n uintptr) unsafe.Pointer { return c23Malloc(n, nil, true) }
+
+func CHeader(p unsafe.Pointer) (d, n, nc, b8, sh, bits uintptr) { return c23Header(p) }
+
+// CScalar reports whether the word at p, in an object of C's, is claimed
+// for no pointer.
+func CScalar(p unsafe.Pointer) bool {
+	s := cSpanOf(uintptr(p))
+	return s != nil && s.cScalar(uintptr(p))
+}
+
+// CConvert is the conversion of p to a pointer to n values of the type
+// of e, as a package that is C translated by cmd/cc makes it.
+func CConvert(p unsafe.Pointer, e any, n uintptr) unsafe.Pointer {
+	return checkptrConvC(p, efaceOf(&e)._type, n)
+}
+
+// CClasses returns what the words from p on, in an object of C's, are
+// claimed for: '-' nothing, '.' no pointer, 'u' a pointer to anything,
+// 'p' a pointer of a type.
+func CClasses(p unsafe.Pointer, words int) string {
+	s := cSpanOf(uintptr(p))
+	if s == nil || s.cBitsOf() == nil {
+		return ""
+	}
+	b := make([]byte, words)
+	for i := range b {
+		b[i] = "-.up"[cClass(s.cBitsOf(), (uintptr(p)-s.base())/goarch.PtrSize+uintptr(i))]
+	}
+	return string(b)
+}
+
+// CClaimType returns the type that the word at p is claimed for a
+// pointer of, or "".
+func CClaimType(p unsafe.Pointer) string {
+	s := cSpanOf(uintptr(p))
+	if s == nil || s.cBitsOf() == nil || s.cIDsOf() == nil {
+		return ""
+	}
+	w := (uintptr(p) - s.base()) / goarch.PtrSize
+	if cClass(s.cBitsOf(), w) != cTyped {
+		return ""
+	}
+	return toRType(cTypeOf(atomic.Load(s.cIDsOf().word(w)))).string()
+}
+
+// CClaimCounts returns what the claims of C's memory found so far.
+func CClaimCounts() (claims, reclaims, narrowed, forged, bytes uint64) {
+	st := &cClaimStats
+	return st.claims.Load(), st.reclaims.Load(), st.narrowed.Load(), st.forged.Load(), st.bytes.Load()
+}
+
+// CTag returns p with the bit that a pointer of C's to a union has, and
+// CUntag takes it off.
+// CLoad32 loads the uint32 at a, an address of the runtime's own memory
+// that c23Header gave: where the classes of a span's words are, which
+// no pointer of the program's is to.
+func CLoad32(a uintptr) uint32 { return *(*uint32)(unsafe.Pointer(a)) }
+
+// SetCReclaim sets GODEBUG's creclaim, with which memory of C's that is
+// claimed again is counted and the program goes on, and returns what it
+// was.
+func SetCReclaim(v int32) int32 {
+	old := debug.creclaim
+	debug.creclaim = v
+	return old
+}
+
+func CTag(p unsafe.Pointer) unsafe.Pointer { return unsafe.Pointer(uintptr(p) | cPtrTag) }
+
+func CUntag(p unsafe.Pointer) unsafe.Pointer { return unsafe.Pointer(uintptr(p) &^ cPtrTag) }
+
+func CUsable(p unsafe.Pointer) (uintptr, bool) { return c23Usable(p) }
+
+func CMemmove(dst, src unsafe.Pointer, n uintptr) { c23Memmove(dst, src, n) }
+
+func CMemset(dst unsafe.Pointer, c byte, n uintptr) { c23Memset(dst, c, n) }
+
+// CheckptrVarOf returns what checkptrVarOf says of the variable of the
+// stack or of the data that p is in: where p is in it, its size, and
+// its type, which is "" for a variable that is bytes to the program.
+func CheckptrVarOf(p unsafe.Pointer) (off, size uintptr, typ string, ok bool) {
+	base, size, t, ok := checkptrVarOf(uintptr(p))
+	off = uintptr(p) - base
+	if !ok {
+		return 0, 0, "", false
+	}
+	if t != nil {
+		typ = toRType(t).string()
+	}
+	return off, size, typ, true
+}
+
+// StackVarAddr reports whether p is an address of the stack that is
+// running.
+func StackVarAddr(p unsafe.Pointer) bool {
+	gp := getg()
+	return gp.stack.lo <= uintptr(p) && uintptr(p) < gp.stack.hi
+}
+
+// StackVarOf is CheckptrVarOf for an address of the stack, by
+// stackVarOf, which unwinds the stack.
+func StackVarOf(p unsafe.Pointer) (off, size uintptr, typ string, ok bool) {
+	base, size, t, ok := stackVarOf(getg(), uintptr(p))
+	off = uintptr(p) - base
+	if !ok {
+		return 0, 0, "", false
+	}
+	return off, size, toRType(t).string(), true
+}

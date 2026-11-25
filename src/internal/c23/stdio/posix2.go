@@ -19,17 +19,17 @@ var popens = map[*c23.File]*exec.Cmd{}
 // Popen is popen: a stream that reads the standard output of the shell's
 // command (mode "r") or writes its standard input ("w"). The command's
 // other standard files are the program's.
-func Popen(command, mode c23.Ptr) c23.Ptr {
+func Popen(command, mode *c23.Void) *c23.Void {
 	m := c23.GoString(mode)
 	rd := strings.HasPrefix(m, "r")
 	if !rd && !strings.HasPrefix(m, "w") || strings.Trim(m[1:], "e") != "" {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	r, w, err := os.Pipe()
 	if err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	cmd := exec.Command("/bin/sh", "-c", c23.GoString(command))
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
@@ -45,7 +45,7 @@ func Popen(command, mode c23.Ptr) c23.Ptr {
 	if err != nil {
 		mine.Close()
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	p := c23.NewFile(c23.FdNew(mine, c23.If[int32](rd, c23.O_RDONLY, c23.O_WRONLY)), rd, !rd)
 	popenMu.Lock()
@@ -57,7 +57,7 @@ func Popen(command, mode c23.Ptr) c23.Ptr {
 // Pclose is pclose: it closes the stream and waits for its command, whose
 // status it returns (as wait does), or -1 (errno ECHILD) for a stream
 // popen did not open.
-func Pclose(p c23.Ptr) int32 {
+func Pclose(p *c23.Void) int32 {
 	f := c23.FileOf(p)
 	popenMu.Lock()
 	cmd := popens[f]

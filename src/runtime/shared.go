@@ -1066,9 +1066,9 @@ func shareMove(typ *_type, dst, src unsafe.Pointer, n uintptr) {
 	sd, ss := shareSides(typ, dst, src)
 	if !sd && !ss {
 		shareMoveRaw(typ, dst, src, n)
-		return
+	} else {
+		shareMoveGuarded(typ, dst, src, n, sd, ss)
 	}
-	shareMoveGuarded(typ, dst, src, n, sd, ss)
 }
 
 // shareMoveGuarded is shareMove where the locks of dst are taken (sd), or

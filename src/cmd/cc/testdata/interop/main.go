@@ -1,6 +1,7 @@
-// Go and C sharing memory with typed capabilities: an ordinary cgo
-// package, which go build compiles with cmd/cc when cgo is off (see
-// TestInterop).
+// Go and C sharing memory: an ordinary cgo package, which go build
+// compiles with cmd/cc when cgo is off (see TestInterop). C's objects are
+// Go variables and its pointers are Go's, so each side uses what the
+// other allocated as it is.
 package main
 
 // #include <stdlib.h>
@@ -10,29 +11,25 @@ import "C"
 import (
 	"fmt"
 	"runtime"
-	"runtime/debug"
 	"testing"
 	"unsafe"
 )
 
-func try(what string, f func()) {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("%-44s trapped: %v\n", what, r)
-		}
-	}()
-	f()
-	fmt.Printf("%-44s ok\n", what)
-}
-
-// A Go type with invariants C must not break.
+// A Go type that C writes a word of.
 type goThing struct {
 	n    int64
 	data []int32
 }
 
+func collect() {
+	for range 3 {
+		_ = make([]byte, 1<<20)
+		runtime.GC()
+	}
+}
+
 func main() {
-	// C's list, read by Go as Go structs: no checks, no conversions.
+	// C's list, read by Go as Go structs.
 	list := C.make_list(5)
 	runtime.GC()
 	fmt.Print("C's list in Go:")
@@ -47,101 +44,95 @@ func main() {
 
 	// A long list built by C and kept only by C's memory, across collections.
 	long := C.make_list(100000)
-	for range 3 {
-		_ = make([]byte, 1<<20)
-		runtime.GC()
-	}
+	collect()
 	sum := int64(0)
 	for n := long; n != nil; n = n.next {
 		sum += int64(n.v)
 	}
 	fmt.Println("100000 nodes, after 3 collections: Go", sum, "C", C.sum_list(long))
 
-	// Go's stack, passed to C (escape analysis keeps it there: see
-	// TestStackStaysOnStack).
+	// Go's stack, passed to C, and C's own locals: nothing is allocated.
 	fmt.Println("Go's stack pair summed by C:", sumPair())
 	fmt.Println("C's locals:", C.locals())
 	fmt.Println("allocations per call: sumPair", testing.AllocsPerRun(100, func() { sumPair() }),
 		"locals", testing.AllocsPerRun(100, func() { C.locals() }))
 
+	// Go's slice, indexed and kept by C.
 	arr := []int32{10, 20, 30}
-	try("C reads arr[2] of Go's slice", func() { fmt.Print(C.read_at(&arr[0], 2), " ") })
-	try("C reads arr[3] of Go's slice", func() { C.read_at(&arr[0], 3) })
-
-	// In C's object, C keeps the capability; in Go's, the word's type is
-	// all that is left.
+	fmt.Println("C reads arr[2] of Go's slice:", C.read_at(&arr[0], 2))
 	h := C.new_holder()
-	C.store_past(h, &arr[0], 3)
-	runtime.GC()
-	fmt.Printf("word C stored past the end: %#x\n", uintptr(unsafe.Pointer(h.random_int)))
-	// A fault at a non-canonical address is fatal in Go unless the
-	// goroutine asks for a panic.
-	tryDeref("Go dereferences it", func() {
-		defer debug.SetPanicOnFault(debug.SetPanicOnFault(true))
-		sink = *h.random_int
-	})
-	try("C brings it back in bounds (arr[2])", func() { fmt.Print(C.load_back(h, 4), " ") })
-	try("C dereferences it out of bounds", func() { C.load_back(h, 0) })
-	gh := &C.struct_holder{}
-	C.store_past(gh, &arr[0], 3)
-	try("...stored in Go's heap object instead", func() { fmt.Print(C.load_back(gh, 4), " ") })
-	try("...stored in Go's stack, which then moves", func() { fmt.Print(stackRoundTrip(arr), " ") })
-	ga := &C.struct_holder{}
-	C.keep_array(ga, &arr[0])
-	try("C keeps a slice's array in Go's int* field", func() { fmt.Print(C.at(ga, 2), " ") })
-	try("...and indexes past it", func() { C.at(ga, 3) })
-	try("C one-based indexing", func() { fmt.Print(C.one_based_sum(&arr[0], 3), " ") })
-	try("C writes an integer over a pointer word", func() { C.pun(h) })
-	try("C dereferences an integer", func() { C.forge(C.long(uintptr(unsafe.Pointer(&arr[0])))) })
-	try("C keeps a pointer in untyped bytes", func() { C.hide(golist) })
+	C.keep_array(h, &arr[0])
+	arr = nil
+	collect()
+	fmt.Println("C keeps a slice's array in its int* field:", C.at(h, 2), *h.ints)
 
-	// Unions: Go sees their bytes, as with cgo; C keeps the capabilities
-	// of the pointers it stores in them.
-	v := C.make_variant(4)
-	runtime.GC()
-	fmt.Println("variant's list, after a collection:", C.variant_sum(v), "type", v._type, "bytes", len(v.v.b))
-	C.variant_set_double(v, 2.5)
-	try("C reads the double as a pointer", func() { C.variant_misread(v) })
-	C.make_pool()
-	runtime.GC()
-	fmt.Println("objects in a pool, after a collection:", C.pool_sum())
-	tryDeref("Go sees the pool's objects only as bytes", func() {
-		defer debug.SetPanicOnFault(debug.SetPanicOnFault(true))
-		sink = C.in_pool().v
-	})
-	try("C puns a pointer word of a stack local", func() { C.stack_pun() })
+	// A pointer kept only in memory that C was given no type for.
+	C.hide(C.make_list(1000))
+	collect()
+	fmt.Println("a list kept in untyped memory, after 3 collections:", C.hidden_sum())
 
-	n := C.make_list(1)
-	x := new(int32)
-	*x = 42
-	C.confuse(n, x)
-	fmt.Printf("int* stored in a struct node* field: %#x\n", uintptr(unsafe.Pointer(n.next)))
-	tryDeref("Go follows it", func() {
-		defer debug.SetPanicOnFault(debug.SetPanicOnFault(true))
-		sink = n.next.v
-	})
-	try("C uses it as the int it is", func() { fmt.Print(C.unconfuse(n), " ") })
-
+	// void * is unsafe.Pointer, as with cgo.
+	fmt.Println("through void *:", (*C.node_t)(C.as_void(golist)).v)
 	g := &goThing{n: 1, data: []int32{1, 2}}
-	try("C writes a plain field of a Go value", func() { C.poke(unsafe.Pointer(g), 0, 7) })
-	// poke indexes by longs, which are words.
-	word := unsafe.Sizeof(C.long(0))
-	try("C writes the length of a Go slice", func() { C.poke(unsafe.Pointer(g), C.int(unsafe.Offsetof(g.data)/word+1), 1000) })
-	try("C writes past a Go value", func() { C.poke(unsafe.Pointer(g), C.int(unsafe.Sizeof(*g)/word), 1) })
-	fmt.Println("Go's value after:", g.n, len(g.data))
+	C.poke(unsafe.Pointer(g), 0, 7)
+	fmt.Println("C writes a field of a Go value:", g.n, len(g.data))
 
-	// free and realloc: only what malloc returned. free lets a pointer
-	// with no capability be; realloc cannot copy its object.
-	try("C frees what malloc and the like returned", func() { C.free_mallocd() })
-	try("C frees a pointer into its object", func() { C.free_interior() })
-	try("C frees a local", func() { C.free_local() })
-	try("C frees a pointer that went through a long", func() { C.free_lost() })
-	try("C reallocs a pointer gone through a long", func() { C.realloc_lost() })
-	try("C reallocs a pointer into its object", func() { C.realloc_interior() })
-	try("C frees Go's slice", func() { C.free_go(&arr[0]) })
-	try("Go frees C's string", func() { C.free(unsafe.Pointer(C.CString("x"))) })
-	try("Go frees its own slice", func() { C.free(unsafe.Pointer(&arr[0])) })
+	// C's variables, enumerations and strings.
+	C.counter = 41
+	C.count()
+	was := C.count()
+	fmt.Println("C's variable:", was, C.counter)
+	var c C.enum_color = C.GREEN
+	fmt.Println("enum:", c, C.next_color(c), C.next_color(C.BLUE) == C.RED)
+	cs := C.CString("hello")
+	fmt.Println("string:", C.GoString(C.shout(cs)))
+	C.free(unsafe.Pointer(cs))
+
+	// The pointer one past the end of an array, of each size up to 64.
+	total := 0
+	for n := 1; n <= 64; n++ {
+		total += int(C.backwards_sum(C.int(n)))
+	}
+	fmt.Println("arrays summed from one past their end:", total)
+
+	// Unions: Go sees their words, C the pointers it stores in them.
+	v := C.make_variant(4)
+	collect()
+	fmt.Println("variant's list, after 3 collections:", C.variant_sum(v), "type", v._type, "size", unsafe.Sizeof(v.v))
+	C.variant_set_long(v, 12)
+	fmt.Println("variant's long:", C.variant_sum(v))
+
+	// Objects that C placed in untyped memory.
+	C.make_pool()
+	collect()
+	fmt.Println("objects in a pool, after 3 collections:", C.pool_sum(), C.pool_root.v, C.pool_root.next.v)
+
+	fmt.Println("C frees what malloc and the like returned:", C.free_mallocd())
+
+	// What is put on the heap as the program runs has an end for C as
+	// well: a local that a call moves there because the function
+	// called keeps its address, and a result that the caller gave no
+	// buffer for (doc/gd/escape-bits.md).
+	fmt.Println("a local moved to the heap at a call, summed from its end:", movedSum(keep))
+	keptResult = fresh()
+	collect()
+	fmt.Println("a result that no buffer was given for, summed from its end:", C.sum_back((*C.int)(unsafe.Add(unsafe.Pointer(keptResult), 16)), 4))
 }
+
+var kept, keptResult *[4]C.int
+
+var keep = func(p *[4]C.int) { kept = p }
+
+//go:noinline
+func movedSum(f func(*[4]C.int)) C.long {
+	a := [4]C.int{1, 2, 3, 4}
+	f(&a)
+	collect()
+	return C.sum_back((*C.int)(unsafe.Add(unsafe.Pointer(kept), 16)), 4)
+}
+
+//go:noinline
+func fresh() *[4]C.int { return &[4]C.int{5, 6, 7, 8} }
 
 //go:noinline
 func sumPair() C.long {
@@ -149,40 +140,3 @@ func sumPair() C.long {
 	a := C.struct_node{v: 1, next: &b}
 	return C.sum_pair(&a)
 }
-
-// stackRoundTrip has C store an out-of-bounds pointer into a holder on
-// this goroutine's stack, moves the stack, and has C bring it back.
-//
-//go:noinline
-func stackRoundTrip(arr []int32) int32 {
-	var h C.struct_holder
-	C.store_past(&h, &arr[0], 3)
-	before := uintptr(unsafe.Pointer(&h))
-	grow(2000)
-	if stacksMove && uintptr(unsafe.Pointer(&h)) == before {
-		panic("the stack did not move")
-	}
-	return C.load_back(&h, 4)
-}
-
-//go:noinline
-func grow(n int) int {
-	var buf [512]byte
-	buf[n%512] = byte(n)
-	if n == 0 {
-		return int(buf[0])
-	}
-	return grow(n-1) + int(buf[n%512])
-}
-
-// tryDeref is try, for Go's use of a word that C tagged.
-func tryDeref(what string, f func()) {
-	if !derefPanics {
-		fmt.Printf("%-44s not tried: a trap would stop the program\n", what)
-		return
-	}
-	try(what, f)
-}
-
-// sink makes Go really load what it dereferences.
-var sink C.int

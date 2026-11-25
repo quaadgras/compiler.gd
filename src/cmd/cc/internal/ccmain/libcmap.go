@@ -440,6 +440,9 @@ func libcType(name string) *ctype {
 		libcTypesMap = map[string]*ctype{}
 		var src strings.Builder
 		for _, h := range Headers() {
+			if !strings.HasSuffix(h, ".h") {
+				continue // C++'s
+			}
 			fmt.Fprintf(&src, "#include <%s>\n", h)
 		}
 		toks, err := lexUnit([]source{{"<headers>", src.String()}})

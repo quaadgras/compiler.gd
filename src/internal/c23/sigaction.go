@@ -64,7 +64,7 @@ const (
 // void (*)(int) or, with SA_SIGINFO, a void (*)(int, siginfo_t *, void *)),
 // the signals blocked while it runs, and the flags.
 type SigAction struct {
-	Handler Ptr
+	Handler *Void
 	Mask    uint64
 	Flags   uint32
 }
@@ -72,7 +72,7 @@ type SigAction struct {
 // A sigInfo is what siginfo_t tells of a signal.
 type SigInfo struct {
 	Code, Pid, Uid, Status int32
-	Value                  Ptr     // si_value, of sigqueue or a timer
+	Value                  SigVal  // si_value, of sigqueue or a timer
 	Timer                  uintptr // the timer whose expiry it is (time.h's timer_create)
 }
 
@@ -246,14 +246,9 @@ func (t *SigThread) Run(sig int32, info SigInfo) {
 	t.Mask &^= SigUnblockable
 	SigMu.Unlock()
 	if act.Flags&SA_SIGINFO != 0 {
-		si := Calloc(1, sigInfoSize)
-		Store32(si, uint32(sig))
-		Store32(Add(si, 8), uint32(info.Code))
-		Store32(Add(si, 12), uint32(info.Pid))
-		Store32(Add(si, 16), uint32(info.Uid))
-		Store32(Add(si, 20), uint32(info.Status))
-		StorePtr(Add(si, SigInfoValueOff), info.Value)
-		FuncOf[func(int32, Ptr, Ptr)](act.Handler)(sig, si, Ptr{})
+		si := Malloc(uint64(SigInfoSize))
+		StoreSigInfo(si, sig, info)
+		FuncOf[func(int32, *Void, *Void)](act.Handler)(sig, si, (*Void)(nil))
 		Free(si)
 	} else {
 		FuncOf[func(int32)](act.Handler)(sig)
@@ -263,26 +258,25 @@ func (t *SigThread) Run(sig int32, info SigInfo) {
 	SigMu.Unlock()
 }
 
-// sizeof(siginfo_t): {int si_signo, si_errno, si_code; pid_t si_pid;
-// uid_t si_uid; int si_status; ...}.
-const sigInfoSize = 128
-
-// SigInfoSize is sizeof(siginfo_t) on the target: 116 bytes on wasm32.
-const SigInfoSize = 24 + 3*WordSize + 80
+// SigInfoSize is sizeof(siginfo_t): {int si_signo, si_errno, si_code;
+// pid_t si_pid; uid_t si_uid; int si_status; void *si_addr; union
+// sigval si_value; long si_band; int __pad[20];}, 136 bytes, and 116 on
+// wasm32.
+const SigInfoSize = 24 + WordSize + SigValSize + WordSize + 80
 
 // SigInfoValueOff is the offset of si_value in siginfo_t, after
 // void *si_addr at 24.
 const SigInfoValueOff = 24 + int(WordSize)
 
 // StoreSigInfo stores sig and info as siginfo_t at si, all of it.
-func StoreSigInfo(si Ptr, sig int32, info SigInfo) {
+func StoreSigInfo(si *Void, sig int32, info SigInfo) {
 	Memset(si, 0, uint64(SigInfoSize))
 	Store32(si, uint32(sig))
 	Store32(Add(si, 8), uint32(info.Code))
 	Store32(Add(si, 12), uint32(info.Pid))
 	Store32(Add(si, 16), uint32(info.Uid))
 	Store32(Add(si, 20), uint32(info.Status))
-	StorePtr(Add(si, SigInfoValueOff), info.Value)
+	StoreSigVal(Add(si, SigInfoValueOff), info.Value)
 }
 
 // Take takes the lowest signal of w pending for t or for the process,
@@ -332,9 +326,9 @@ func (t *SigThread) DeliverPending() bool {
 
 // Signal sets.
 
-func LoadSigset(p Ptr) uint64 { return uint64(Load32(p)) | uint64(Load32(Add(p, 4)))<<32 }
+func LoadSigset(p *Void) uint64 { return uint64(Load32(p)) | uint64(Load32(Add(p, 4)))<<32 }
 
-func StoreSigset(p Ptr, m uint64) {
+func StoreSigset(p *Void, m uint64) {
 	Store32(p, uint32(m))
 	Store32(Add(p, 4), uint32(m>>32))
 	for i := 8; i < SigsetLen; i += 4 {

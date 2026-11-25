@@ -23,7 +23,7 @@ type sem struct {
 
 var sems sync.Map
 
-func semOf(p c23.Ptr) *sem {
+func semOf(p *c23.Void) *sem {
 	c23.Check(p, 4)
 	s, _ := sems.LoadOrStore(c23.Addr(p), &sem{posted: make(chan struct{})})
 	return s.(*sem)
@@ -31,7 +31,7 @@ func semOf(p c23.Ptr) *sem {
 
 // SemInit is sem_init: pshared is accepted, and the semaphore is shared
 // by the program's threads, the only ones there are.
-func SemInit(p c23.Ptr, pshared int32, value uint32) int32 {
+func SemInit(p *c23.Void, pshared int32, value uint32) int32 {
 	if value > semValueMax {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -41,12 +41,12 @@ func SemInit(p c23.Ptr, pshared int32, value uint32) int32 {
 	return 0
 }
 
-func SemDestroy(p c23.Ptr) int32 {
+func SemDestroy(p *c23.Void) int32 {
 	sems.Delete(c23.Addr(p))
 	return 0
 }
 
-func SemPost(p c23.Ptr) int32 {
+func SemPost(p *c23.Void) int32 {
 	s := semOf(p)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -108,16 +108,16 @@ func semRet(e int32) int32 {
 }
 
 // SemWait is sem_wait, a cancellation point.
-func SemWait(p c23.Ptr) int32 {
+func SemWait(p *c23.Void) int32 {
 	c23.TestCancel()
 	return semRet(semOf(p).wait(false, time.Time{}))
 }
 
-func SemTrywait(p c23.Ptr) int32 { return semRet(semOf(p).wait(true, time.Time{})) }
+func SemTrywait(p *c23.Void) int32 { return semRet(semOf(p).wait(true, time.Time{})) }
 
 // SemTimedwait is sem_timedwait, which gives up at the CLOCK_REALTIME
 // time at ts.
-func SemTimedwait(p, ts c23.Ptr) int32 {
+func SemTimedwait(p, ts *c23.Void) int32 {
 	c23.TestCancel()
 	s := semOf(p)
 	if e := s.wait(true, time.Time{}); e == 0 {
@@ -135,7 +135,7 @@ func SemTimedwait(p, ts c23.Ptr) int32 {
 	return semRet(s.wait(false, d))
 }
 
-func SemGetvalue(p, value c23.Ptr) int32 {
+func SemGetvalue(p, value *c23.Void) int32 {
 	s := semOf(p)
 	s.mu.Lock()
 	c23.Store32(value, uint32(s.value))
@@ -146,7 +146,7 @@ func SemGetvalue(p, value c23.Ptr) int32 {
 // A namedSem is a semaphore sem_open made: its sem_t, and how many
 // opens sem_close has not closed.
 type namedSem struct {
-	p    c23.Ptr
+	p    *c23.Void
 	refs int
 }
 
@@ -163,29 +163,29 @@ const semSize = 32
 // and fourth arguments. The name is glibc's: leading slashes are
 // dropped, and what is left must not be empty or have one. The result is
 // SEM_FAILED (null) on error.
-func SemOpen(name c23.Ptr, oflag int32, va ...any) c23.Ptr {
+func SemOpen(name *c23.Void, oflag int32, va ...any) *c23.Void {
 	n := strings.TrimLeft(c23.GoString(name), "/")
 	if n == "" || strings.Contains(n, "/") {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	if len(n) > 251 {
 		c23.SetErrno(c23.ENAMETOOLONG)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	namedMu.Lock()
 	defer namedMu.Unlock()
 	if s := named[n]; s != nil {
 		if oflag&(c23.O_CREAT|c23.O_EXCL) == c23.O_CREAT|c23.O_EXCL {
 			c23.SetErrno(c23.EEXIST)
-			return c23.Ptr{}
+			return (*c23.Void)(nil)
 		}
 		s.refs++
 		return s.p
 	}
 	if oflag&c23.O_CREAT == 0 {
 		c23.SetErrno(c23.ENOENT)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	var value uint64
 	if len(va) > 1 {
@@ -193,7 +193,7 @@ func SemOpen(name c23.Ptr, oflag int32, va ...any) c23.Ptr {
 	}
 	if value > semValueMax {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	s := &namedSem{p: c23.Malloc(semSize), refs: 1}
 	SemInit(s.p, 1, uint32(value))
@@ -203,7 +203,7 @@ func SemOpen(name c23.Ptr, oflag int32, va ...any) c23.Ptr {
 }
 
 // SemClose is sem_close: the semaphore lives while it is linked or open.
-func SemClose(p c23.Ptr) int32 {
+func SemClose(p *c23.Void) int32 {
 	namedMu.Lock()
 	defer namedMu.Unlock()
 	s := namedPtr[c23.Addr(p)]
@@ -231,7 +231,7 @@ func semLinked(s *namedSem) bool {
 
 // SemUnlink is sem_unlink: the name goes, and the semaphore with the
 // last sem_close.
-func SemUnlink(name c23.Ptr) int32 {
+func SemUnlink(name *c23.Void) int32 {
 	n := strings.TrimLeft(c23.GoString(name), "/")
 	namedMu.Lock()
 	defer namedMu.Unlock()

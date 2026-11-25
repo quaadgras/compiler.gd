@@ -101,7 +101,7 @@ func (t rtype) nameOff(off nameOff) name {
 	if off < 0 {
 		return name{Bytes: (*byte)(reflectOffs[-1-off])}
 	}
-	return name{Bytes: (*byte)(unsafe.Pointer(firstmoduledata.types + uintptr(off)))}
+	return name{Bytes: (*byte)(staticptr(firstmoduledata.types + uintptr(off)))}
 }
 
 func (t rtype) typeOff(off typeOff) *_type {
@@ -111,7 +111,7 @@ func (t rtype) typeOff(off typeOff) *_type {
 	if off < 0 {
 		return (*_type)(reflectOffs[-1-off])
 	}
-	return (*_type)(unsafe.Pointer(firstmoduledata.types + uintptr(off)))
+	return (*_type)(staticptr(firstmoduledata.types + uintptr(off)))
 }
 
 // textOff returns the function at off: its index in the table, shifted

@@ -10,6 +10,7 @@ import (
 // cacheFree has the free lists of a Cache, by the logarithm of the size.
 type cacheFree struct {
 	ValueSlice   [27][][]*Value
+	BlockSlice   [27][][]*Block
 	LimitSlice   [27][][]limit
 	SparseSet    [27][]*sparseSet
 	SparseMap    [27][]*sparseMap
@@ -38,6 +39,29 @@ func (c *Cache) freeValueSlice(s []*Value) {
 	clear(s)
 	b := bits.Len(uint(cap(s)) - 1)
 	c.free.ValueSlice[b-5] = append(c.free.ValueSlice[b-5], s)
+}
+func (c *Cache) allocBlockSlice(n int) []*Block {
+	var s []*Block
+	n2 := n
+	if n2 < 32 {
+		n2 = 32
+	}
+	b := bits.Len(uint(n2 - 1))
+	l := &c.free.BlockSlice[b-5]
+	if k := len(*l); k == 0 {
+		s = make([]*Block, 1<<b)
+	} else {
+		s = (*l)[k-1]
+		(*l)[k-1] = nil
+		*l = (*l)[:k-1]
+	}
+	s = s[:n]
+	return s
+}
+func (c *Cache) freeBlockSlice(s []*Block) {
+	clear(s)
+	b := bits.Len(uint(cap(s)) - 1)
+	c.free.BlockSlice[b-5] = append(c.free.BlockSlice[b-5], s)
 }
 func (c *Cache) allocLimitSlice(n int) []limit {
 	var s []limit
@@ -127,23 +151,6 @@ func (c *Cache) freeSparseMapPos(s *sparseMapPos) {
 	s.clear()
 	b := bits.Len(uint(s.cap()) - 1)
 	c.free.SparseMapPos[b-5] = append(c.free.SparseMapPos[b-5], s)
-}
-func (c *Cache) allocBlockSlice(n int) []*Block {
-	var base *Value
-	var derived *Block
-	if unsafe.Sizeof(base)%unsafe.Sizeof(derived) != 0 {
-		panic("bad")
-	}
-	scale := unsafe.Sizeof(base) / unsafe.Sizeof(derived)
-	b := c.allocValueSlice(int((uintptr(n) + scale - 1) / scale))
-	return unsafe.Slice((**Block)(unsafe.Pointer(&b[0])), cap(b)*int(scale))[:n]
-}
-func (c *Cache) freeBlockSlice(s []*Block) {
-	var base *Value
-	var derived *Block
-	scale := unsafe.Sizeof(base) / unsafe.Sizeof(derived)
-	b := unsafe.Slice((**Value)(unsafe.Pointer(&s[0])), int((uintptr(cap(s))+scale-1)/scale))[:int((uintptr(len(s))+scale-1)/scale)]
-	c.freeValueSlice(b)
 }
 func (c *Cache) allocInt64(n int) []int64 {
 	var base limit

@@ -8,14 +8,18 @@ import (
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/reflectdata"
 	"cmd/compile/internal/ssa"
+	"cmd/compile/internal/ssagen"
 	"cmd/compile/internal/types"
 	"cmd/internal/obj"
 	"cmd/internal/obj/wasm"
 	"cmd/internal/objabi"
 	"cmp"
+	"fmt"
 	"internal/buildcfg"
 	"math"
+	"os"
 	"slices"
+	"strings"
 )
 
 // Code generation for GOWASM=gc,split (stage 15 of doc/gd/wasm-gc.md).
@@ -40,6 +44,104 @@ import (
 
 func gcSplit() bool { return buildcfg.GOWASM.Split }
 
+// Bounds.
+//
+// A pointer has the size of what it points into (wasm.GCPtrLim), and
+// how far its address is from where that begins (wasm.GCPtrOff): the
+// block of an allocation, a variable of a frame, the data. Code that is
+// not the runtime's loads and stores through a pointer only what is
+// inside (wasm.GCSplitCheck), whatever made the pointer: the program
+// may have added anything to it, and converted it to a pointer to
+// anything (package unsafe, C that cmd/cc compiled). A pointer made of
+// an integer has no size, and nothing is loaded through it. So a
+// program reaches the memory that it was given pointers to and no
+// other, whatever it does: doc/gd/cc.md, "On wasm".
+//
+// What is not checked: an address that the compiler made itself, of a
+// variable of the frame or of the data, at a constant offset or at an
+// index that Go checked; and a function that is marked go:nocheckptr.
+
+// splitChecked reports whether the code of f is checked.
+func splitChecked(s *ssagen.State, f *ssa.Func) bool {
+	if !gcSplit() || os.Getenv("GOWASMGC_NOBOUNDS") != "" {
+		return false
+	}
+	// (The runtime too: it is given pointers by the program, and sizes
+	// by the types that the program says its values have. What it does
+	// with addresses of its own, the blocks of the allocator and the
+	// stacks, it does with integers, and the pointers that it makes of
+	// integers are those of runtime.staticptr.)
+	if fn := f.Frontend().Func(); fn != nil && fn.Pragma&ir.NoCheckPtr != 0 {
+		return false
+	}
+	return true
+}
+
+// splitHelper returns the function name of the linker's, or the form
+// of it that checked code calls.
+func (g *gcGen) splitHelper(name string) string {
+	if g.checked {
+		return wasm.GCSplitChecked(name)
+	}
+	return name
+}
+
+// integer reports whether a is an address that the compiler has as an
+// integer: the word of an interface that holds its type or its table,
+// which is the address of a descriptor in the data, and what is read
+// from there. (An integer that the program converts to a pointer is a
+// pointer, of no size, before anything is loaded through it.)
+func (g *gcGen) integer(a spAddr) bool {
+	if a.kind == spBase && g.wtype(a.base.Type) == 'l' {
+		if g.checked && os.Getenv("GOWASMGC_NOTES") != "" {
+			fmt.Fprintf(os.Stderr, "GOWASM=gc,split: %s loads or stores at an integer: %s\n", g.f.Name, a.base.LongString())
+		}
+		return true
+	}
+	return false
+}
+
+// splitHelperAt is splitHelper for a load or a store at a.
+func (g *gcGen) splitHelperAt(name string, as ...spAddr) string {
+	for _, a := range as {
+		if g.integer(a) {
+			return name
+		}
+	}
+	return g.splitHelper(name)
+}
+
+// spPushPtrAccess is spPushPtrRel for a load (or, if store is set, a
+// store) of n bytes at a by one of the linker's functions, and reports
+// whether that is to be the form of it that checks.
+func (g *gcGen) spPushPtrAccess(a spAddr, n int64, store bool) bool {
+	if g.checked && a.kind == spStatic && g.trusted(a, n, store) {
+		// A variable of the data, in it: by the pointer to all the
+		// data, which needs no global of the variable's own.
+		g.global(wasm.AGlobalGet, wasm.GCGlobalStatic)
+		p := g.prog(wasm.AI32Const)
+		p.From = obj.Addr{Type: obj.TYPE_ADDR, Name: obj.NAME_EXTERN, Sym: a.sym, Offset: a.off}
+		if g.spDyn(a) {
+			g.prog(wasm.AI32Add)
+		}
+		// (The form that checks all the same: what it loads, where
+		// the program wrote an integer over a pointer, is a pointer
+		// with no size.)
+		return true
+	}
+	g.spPushPtrRel(a)
+	return g.checked && !g.integer(a)
+}
+
+// accessHelper returns the function name of the linker's, or the form
+// of it that checks if checked is set.
+func accessHelper(name string, checked bool) string {
+	if checked {
+		return wasm.GCSplitChecked(name)
+	}
+	return name
+}
+
 func (g *gcGen) ptrSym() *obj.LSym { return wasm.GCTypeSym(g.ctxt, wasm.GCPtr) }
 
 // The kinds of base of an address.
@@ -57,6 +159,9 @@ type spTerm struct {
 
 type spAddr struct {
 	kind  int
+	added bool       // an offset was added that Go did not check (unsafe.Add, pointer arithmetic)
+	size  int64      // spFrame, spStatic: the size of the variable, or -1
+	index int64      // the most that the indexes that Go checked add to the offset
 	base  *ssa.Value // spBase
 	local int32      // spLocal
 	sym   *obj.LSym  // spStatic
@@ -77,11 +182,20 @@ func (g *gcGen) spResolve(v *ssa.Value) spAddr {
 		case ssa.OpPtrIndex:
 			if e := v.Type.Elem(); e.Size() != 0 {
 				a.addTerm(v.Args[1], e.Size())
+				// Go checked the index against the length of the
+				// array that the pointer is to: if that is what
+				// the SSA still says the pointer is.
+				if at := v.Args[0].Type; at.IsPtr() && at.Elem().IsArray() && at.Elem().Elem().Size() == e.Size() {
+					a.index += at.Elem().Size() - e.Size()
+				} else {
+					a.added = true
+				}
 			}
 			v = v.Args[0]
 			continue
 		case ssa.OpAddPtr:
 			a.addTerm(v.Args[1], 1)
+			a.added = true
 			v = v.Args[0]
 			continue
 		case ssa.OpLocalAddr:
@@ -90,6 +204,7 @@ func (g *gcGen) spResolve(v *ssa.Value) spAddr {
 				a.kind = spFrame
 				a.name = n
 				a.off += off
+				a.size = n.Type().Size()
 				return a
 			}
 			if l, ok := g.objs[n]; ok {
@@ -106,6 +221,10 @@ func (g *gcGen) spResolve(v *ssa.Value) spAddr {
 			}
 			a.kind = spStatic
 			a.sym = sym
+			a.size = -1
+			if v.Type.IsPtr() {
+				a.size = v.Type.Elem().Size()
+			}
 			return a
 		}
 		a.kind = spBase
@@ -173,6 +292,332 @@ func (g *gcGen) spPushAddr(a spAddr) int64 {
 	return off
 }
 
+// direct reports whether a, the address of n bytes, is one that the
+// compiler made itself and needs no check: of a variable of the frame
+// or of the data, at an offset and at indexes that are in the variable
+// whatever the indexes are (Go checked them against the lengths of the
+// arrays that they are of, which are in the variable). It returns -1 if
+// a load or a store there is to be checked, and 1 if not.
+func (a spAddr) direct(g *gcGen, n int64) int {
+	switch a.kind {
+	case spFrame, spStatic:
+		if a.added || a.size < 0 {
+			return -1
+		}
+		in := a.off
+		if a.kind == spFrame {
+			in -= g.frame[a.name]
+		}
+		// (A constant offset may be what the program added,
+		// folded.)
+		if in < 0 || in+a.index+n > a.size {
+			return -1
+		}
+		return 1
+	}
+	return -1
+}
+
+// spConst reports whether sym is data of the compiler's that nothing
+// changes: the bytes of a string, a descriptor, a table, a composite
+// literal that is only read. A store there is not one that the compiler
+// made itself.
+func spConst(sym *obj.LSym) bool {
+	return strings.HasPrefix(sym.Name, "go:") || strings.HasPrefix(sym.Name, "type:") || strings.Contains(sym.Name, "..stmp_") || strings.Contains(sym.Name, ".stmp_")
+}
+
+// trusted reports whether a load (or, if store is set, a store) of n
+// bytes at a needs no check in checked code.
+func (g *gcGen) trusted(a spAddr, n int64, store bool) bool {
+	if !g.checked || g.integer(a) {
+		return true
+	}
+	if a.direct(g, n) < 0 {
+		return false
+	}
+	return !(store && a.kind == spStatic && spConst(a.sym))
+}
+
+// spCheck is wasm.GCSplitCheck for n bytes, of the pointer and the
+// offset that are pushed, as instructions: in a loop, where a call that
+// the engine does not expand costs several times the load that it is
+// for.
+func (g *gcGen) spCheck(n int64, store bool) {
+	if g.chkR < 0 {
+		g.chkR, g.chkI = g.newLocal('r'), g.newLocal('i')
+	}
+	ptr := g.ptrSym()
+	g.local(wasm.ALocalSet, g.chkI)
+	g.local(wasm.ALocalTee, g.chkR)
+	g.typed(wasm.AStructGet, ptr, wasm.GCPtrOff)
+	g.local(wasm.ALocalGet, g.chkI)
+	g.prog(wasm.AI32Add)
+	g.prog(wasm.AI64ExtendI32U)
+	i64Const(g.s, n)
+	g.prog(wasm.AI64Add)
+	g.local(wasm.ALocalGet, g.chkR)
+	g.typed(wasm.AStructGet, ptr, wasm.GCPtrLim)
+	g.prog(wasm.AI64ExtendI32U)
+	g.prog(wasm.AI64GtU)
+	g.prog(wasm.AIf)
+	g.splitFault()
+	g.prog(obj.AUNDEF)
+	g.prog(wasm.AEnd)
+	g.local(wasm.ALocalGet, g.chkR)
+	g.typed(wasm.AStructGet, ptr, wasm.GCPtrAddr)
+	g.local(wasm.ALocalGet, g.chkI)
+	g.prog(wasm.AI32Add)
+	if store {
+		// Not in the data that nothing changes.
+		g.local(wasm.ALocalTee, g.chkI)
+		g.global(wasm.AGlobalGet, wasm.GCGlobalROEnd)
+		g.prog(wasm.AI32LtU)
+		g.prog(wasm.AIf)
+		g.splitFault()
+		g.prog(obj.AUNDEF)
+		g.prog(wasm.AEnd)
+		g.local(wasm.ALocalGet, g.chkI)
+	}
+}
+
+// splitFault stops the program: a load or a store that is not in what
+// its pointer points into. (With GOWASMGC_TRAP set when compiling, the
+// engine says where, and not the runtime what.)
+func (g *gcGen) splitFault() {
+	if os.Getenv("GOWASMGC_TRAP") == "" {
+		g.runtime("runtime.splitfault")
+	}
+}
+
+// splitLoops returns the blocks of f that are in a loop: those that can
+// be reached from themselves.
+func splitLoops(f *ssa.Func) map[ssa.ID]bool {
+	// (Tarjan's strongly connected components, without recursion.)
+	in := make(map[ssa.ID]bool)
+	index := make(map[ssa.ID]int)
+	low := make(map[ssa.ID]int)
+	on := make(map[ssa.ID]bool)
+	var stack []*ssa.Block
+	type frame struct {
+		b *ssa.Block
+		i int
+	}
+	next := 1
+	for _, root := range f.Blocks {
+		if index[root.ID] != 0 {
+			continue
+		}
+		work := []frame{{root, 0}}
+		index[root.ID], low[root.ID] = next, next
+		next++
+		stack = append(stack, root)
+		on[root.ID] = true
+		for len(work) > 0 {
+			fr := &work[len(work)-1]
+			b := fr.b
+			if fr.i < len(b.Succs) {
+				c := b.Succs[fr.i].Block()
+				fr.i++
+				if c == b {
+					in[b.ID] = true
+				}
+				if index[c.ID] == 0 {
+					index[c.ID], low[c.ID] = next, next
+					next++
+					stack = append(stack, c)
+					on[c.ID] = true
+					work = append(work, frame{c, 0})
+				} else if on[c.ID] {
+					low[b.ID] = min(low[b.ID], index[c.ID])
+				}
+				continue
+			}
+			work = work[:len(work)-1]
+			if len(work) > 0 {
+				p := work[len(work)-1].b
+				low[p.ID] = min(low[p.ID], low[b.ID])
+			}
+			if low[b.ID] == index[b.ID] {
+				n := 0
+				for i := len(stack) - 1; ; i-- {
+					n++
+					if stack[i] == b {
+						break
+					}
+				}
+				for i := 0; i < n; i++ {
+					c := stack[len(stack)-1]
+					stack = stack[:len(stack)-1]
+					on[c.ID] = false
+					if n > 1 {
+						in[c.ID] = true
+					}
+				}
+			}
+		}
+	}
+	return in
+}
+
+// One check for the loads and stores of a block that are through the
+// same pointer.
+//
+// The code of a block runs from its start to its end, so what is
+// loaded and stored at constant offsets from one pointer (and the same
+// indexes) is asked about once, for all the bytes from the first to the
+// last: p.x, p.y and p.z are one check, of the three. splitRanges finds
+// those bytes for each such address of the block (chkRange); the first
+// load or store that is generated asks for them all, and the others
+// are then of an address that is known to be inside (chkDone, which is
+// forgotten wherever the code that is generated branches: splitFlow).
+//
+// (So a program that loads the first field of a struct through a
+// pointer to less memory than the struct, and never reaches the load of
+// a later field that is in the same block, stops at the first.)
+
+// spKey returns what names the pointer and the indexes of a, for
+// chkRange, or "" if a is not checked.
+func (g *gcGen) spKey(a spAddr, n int64, store bool) string {
+	if g.trusted(a, n, store) {
+		return ""
+	}
+	var b strings.Builder
+	switch a.kind {
+	case spBase:
+		fmt.Fprintf(&b, "v%d", a.base.ID)
+	case spLocal:
+		fmt.Fprintf(&b, "l%d", a.local)
+	default:
+		return ""
+	}
+	for _, t := range a.dyn {
+		fmt.Fprintf(&b, "+v%d*%d", t.v.ID, t.scale)
+	}
+	return b.String()
+}
+
+// splitRanges finds the bytes that the loads and stores of the block b
+// are of, by pointer.
+func (g *gcGen) splitRanges(b *ssa.Block) {
+	if !g.checked {
+		return
+	}
+	g.chkRange = make(map[string][2]int64)
+	g.chkDone = make(map[string][2]int64)
+	g.chkStore = make(map[string]bool)
+	if g.inLoop == nil {
+		g.inLoop = splitLoops(g.f)
+	}
+	g.hot = g.inLoop[b.ID]
+	add := func(addr *ssa.Value, n int64, store bool) {
+		a := g.spResolve(addr)
+		k := g.spKey(a, n, store)
+		if k == "" {
+			return
+		}
+		r, ok := g.chkRange[k]
+		if !ok {
+			r = [2]int64{a.off, a.off + n}
+		}
+		g.chkRange[k] = [2]int64{min(r[0], a.off), max(r[1], a.off+n)}
+		if store {
+			g.chkStore[k] = true
+		}
+	}
+	for _, v := range b.Values {
+		switch v.Op {
+		case ssa.OpLoad:
+			if g.wtype(v.Type) != 'r' {
+				add(v.Args[0], spScalar(v.Type).Size(), false)
+			}
+		case ssa.OpStore:
+			if t := v.Aux.(*types.Type); g.wtype(t) != 'r' {
+				add(v.Args[0], spScalar(t).Size(), true)
+			}
+		case ssa.OpMove:
+			if t := v.Aux.(*types.Type); !t.HasPointers() && t.Size() != 0 {
+				add(v.Args[0], t.Size(), true)
+				add(v.Args[1], t.Size(), false)
+			}
+		case ssa.OpZero:
+			if t := v.Aux.(*types.Type); !t.HasPointers() && t.Size() != 0 {
+				add(v.Args[0], t.Size(), true)
+			}
+		}
+	}
+}
+
+// splitFlow is called before the instruction as is generated: after one
+// that branches, or that a branch may reach, what was asked before is
+// not known to have been.
+func (g *gcGen) splitFlow(as obj.As) {
+	if len(g.chkDone) == 0 {
+		return
+	}
+	switch as {
+	case wasm.ABlock, wasm.ALoop, wasm.AIf, wasm.AElse, wasm.AEnd, wasm.ABr, wasm.ABrIf, wasm.ABrTable,
+		wasm.ATRYCATCH, wasm.ABrOnCast, wasm.ABrOnCastFail, wasm.ARefBlock, wasm.ABrOnNonNull:
+		clear(g.chkDone)
+	}
+}
+
+// spPushAddrN is spPushAddr for a load (or, if store is set, a store)
+// of n bytes at a, which in checked code are in what the pointer points
+// into, and for a store are not of the data that nothing changes.
+func (g *gcGen) spPushAddrN(a spAddr, n int64, store bool) int64 {
+	if g.trusted(a, n, store) {
+		return g.spPushAddr(a)
+	}
+	if k := g.spKey(a, n, store); k != "" {
+		if r, ok := g.chkDone[k]; ok && r[0] <= a.off && a.off+n <= r[1] {
+			return g.spPushAddr(a)
+		}
+		if r, ok := g.chkRange[k]; ok && r[0] <= a.off && a.off+n <= r[1] && (r[0] != a.off || r[1] != a.off+n) && r[1]-r[0] <= math.MaxInt32 {
+			// The first of several: all of them, as a store if any
+			// of them is one.
+			off := a.off - r[0]
+			a.off = r[0]
+			g.spPushPtrRel(a)
+			w := g.chkStore[k]
+			if g.hot {
+				g.spCheck(r[1]-r[0], w)
+			} else {
+				i32Const(g.s, int32(r[1]-r[0]))
+				if w {
+					g.helper(wasm.GCSplitCheckW)
+				} else {
+					g.helper(wasm.GCSplitCheck)
+				}
+			}
+			g.chkDone[k] = r
+			return off
+		}
+	}
+	g.spPushPtrRel(a)
+	if g.hot {
+		g.spCheck(n, store)
+		return 0
+	}
+	names := [...]string{wasm.GCSplitCheck1, wasm.GCSplitCheck2, wasm.GCSplitCheck4, wasm.GCSplitCheck8, wasm.GCSplitCheck}
+	if store {
+		names = [...]string{wasm.GCSplitCheckW1, wasm.GCSplitCheckW2, wasm.GCSplitCheckW4, wasm.GCSplitCheckW8, wasm.GCSplitCheckW}
+	}
+	switch n {
+	case 1:
+		g.helper(names[0])
+	case 2:
+		g.helper(names[1])
+	case 4:
+		g.helper(names[2])
+	case 8:
+		g.helper(names[3])
+	default:
+		i32Const(g.s, int32(n))
+		g.helper(names[4])
+	}
+	return 0
+}
+
 // spPushPtrRel pushes a pointer and an offset in bytes from it (an
 // i32) that a is.
 func (g *gcGen) spPushPtrRel(a spAddr) {
@@ -189,10 +634,20 @@ func (g *gcGen) spPushPtrRel(a spAddr) {
 			// A variable with pointers: its own pointer, and array.
 			g.local(wasm.ALocalGet, l)
 			a.off -= g.frame[a.name]
+		} else if g.checked {
+			// A pointer to the variable alone: what is added to
+			// it stays in it.
+			g.splitFrameVar(a.name)
+			a.off -= g.frame[a.name]
 		} else {
 			g.local(wasm.ALocalGet, g.fptr)
 		}
 	case spStatic:
+		if g.checked {
+			// The pointer to the symbol, which has its size.
+			g.typed(wasm.ARefGlobalGet, a.sym, 0)
+			break
+		}
 		g.global(wasm.AGlobalGet, wasm.GCGlobalStatic)
 		p := g.prog(wasm.AI32Const)
 		p.From = obj.Addr{Type: obj.TYPE_ADDR, Name: obj.NAME_EXTERN, Sym: a.sym, Offset: a.off}
@@ -266,11 +721,16 @@ func (g *gcGen) splitLoad(v *ssa.Value) {
 	a := g.spResolve(v.Args[0])
 	t := spScalar(v.Type)
 	if g.wtype(v.Type) == 'r' {
-		g.spPushPtrRel(a)
-		g.helper(wasm.GCSplitLoadPtr)
+		c := g.spPushPtrAccess(a, int64(types.PtrSize), false)
+		if c && v.Type == g.f.Config.Types.ITab {
+			// The word of an interface that holds its type.
+			g.helper(wasm.GCSplitLoadTab)
+			return
+		}
+		g.helper(accessHelper(wasm.GCSplitLoadPtr, c))
 		return
 	}
-	off := g.spPushAddr(a)
+	off := g.spPushAddrN(a, t.Size(), false)
 	p := g.prog(loadOp(t))
 	p.From = obj.Addr{Type: obj.TYPE_CONST, Offset: off}
 	if w := g.wtype(t); w != g.wtype(v.Type) {
@@ -283,14 +743,14 @@ func (g *gcGen) splitLoad(v *ssa.Value) {
 func (g *gcGen) splitStore(addr *ssa.Value, t *types.Type, have byte, val func(), v *ssa.Value) {
 	a := g.spResolve(addr)
 	if g.wtype(t) == 'r' {
-		g.spPushPtrRel(a)
+		c := g.spPushPtrAccess(a, int64(types.PtrSize), true)
 		val()
 		g.spConvert(have, 'r', v)
-		g.helper(wasm.GCSplitStorePtr)
+		g.helper(accessHelper(wasm.GCSplitStorePtr, c))
 		return
 	}
 	st := spScalar(t)
-	off := g.spPushAddr(a)
+	off := g.spPushAddrN(a, st.Size(), true)
 	val()
 	g.spConvert(have, g.wtype(st), v)
 	p := g.prog(storeOp(st))
@@ -328,7 +788,7 @@ func (g *gcGen) splitPointer(v *ssa.Value) {
 	case a.kind == spBase && a.off == 0 && len(a.dyn) == 0:
 		g.get(a.base, false)
 		if g.wtype(a.base.Type) == 'l' {
-			g.helper(wasm.GCSplitIntToPtr)
+			g.helper(g.splitHelper(wasm.GCSplitIntToPtr))
 		}
 		return
 	}
@@ -360,15 +820,17 @@ func (g *gcGen) splitMove(v *ssa.Value, t *types.Type) {
 		return
 	}
 	if t.HasPointers() {
-		g.spPushPtrRel(dst)
-		g.spPushPtrRel(src)
+		// (Both by the pointers that have their sizes, unless
+		// neither is to be asked about.)
+		cd := g.spPushPtrAccess(dst, size, true)
+		cs := g.spPushPtrAccess(src, size, false)
 		i32Const(g.s, int32(size))
-		g.helper(wasm.GCSplitMove)
+		g.helper(accessHelper(wasm.GCSplitMove, cd && cs))
 		return
 	}
 	d, s := g.scratch('i'), g.scratch2()
-	g.spAddrLocal(dst, d)
-	g.spAddrLocal(src, s)
+	g.spAddrLocal(dst, d, size, true)
+	g.spAddrLocal(src, s, size, false)
 	if size > spSmall {
 		g.local(wasm.ALocalGet, d)
 		g.local(wasm.ALocalGet, s)
@@ -395,13 +857,13 @@ func (g *gcGen) splitZero(v *ssa.Value, t *types.Type) {
 		return
 	}
 	if t.HasPointers() {
-		g.spPushPtrRel(a)
+		c := g.spPushPtrAccess(a, size, true)
 		i32Const(g.s, int32(size))
-		g.helper(wasm.GCSplitZero)
+		g.helper(accessHelper(wasm.GCSplitZero, c))
 		return
 	}
 	d := g.scratch('i')
-	g.spAddrLocal(a, d)
+	g.spAddrLocal(a, d, size, true)
 	if size > spSmall {
 		g.local(wasm.ALocalGet, d)
 		i32Const(g.s, 0)
@@ -418,9 +880,9 @@ func (g *gcGen) splitZero(v *ssa.Value, t *types.Type) {
 	}
 }
 
-// spAddrLocal sets the i32 local l to the address a.
-func (g *gcGen) spAddrLocal(a spAddr, l int32) {
-	if off := g.spPushAddr(a); off != 0 {
+// spAddrLocal sets the i32 local l to the address a, of n bytes.
+func (g *gcGen) spAddrLocal(a spAddr, l int32, n int64, store bool) {
+	if off := g.spPushAddrN(a, n, store); off != 0 {
 		i32Const(g.s, int32(off))
 		g.prog(wasm.AI32Add)
 	}
@@ -520,6 +982,7 @@ func (g *gcGen) splitFrame() {
 	g.local(wasm.ALocalGet, g.fp)
 	g.prog(wasm.ARefNull)
 	i32Const(g.s, 0)
+	i32Const(g.s, int32(g.frameSize))
 	g.typed(wasm.AStructNew, g.ptrSym(), 0)
 	g.local(wasm.ALocalSet, g.fptr)
 	names := make([]*ir.Name, 0, len(g.frame))
@@ -541,6 +1004,7 @@ func (g *gcGen) splitFrame() {
 		i32Const(g.s, int32(spSlots(n.Type().Size())))
 		g.typed(wasm.AArrayNewDefault, wasm.GCTypeSym(g.ctxt, wasm.GCSlots), 0)
 		i32Const(g.s, 0)
+		i32Const(g.s, int32(n.Type().Size()))
 		g.typed(wasm.AStructNew, g.ptrSym(), 0)
 		g.local(wasm.ALocalSet, l)
 	}
@@ -552,9 +1016,17 @@ func (g *gcGen) splitFrameVar(n *ir.Name) {
 		g.local(wasm.ALocalGet, l)
 		return
 	}
-	g.local(wasm.ALocalGet, g.fptr)
-	i32Const(g.s, int32(g.frame[n]))
-	g.helper(wasm.GCSplitAddPtr)
+	// A variable without pointers: a pointer to it alone, with no
+	// array.
+	g.local(wasm.ALocalGet, g.fp)
+	if off := g.frame[n]; off != 0 {
+		i32Const(g.s, int32(off))
+		g.prog(wasm.AI32Add)
+	}
+	g.prog(wasm.ARefNull)
+	i32Const(g.s, 0)
+	i32Const(g.s, int32(n.Type().Size()))
+	g.typed(wasm.AStructNew, g.ptrSym(), 0)
 }
 
 // splitCall emits the call v, if it is one that split compiles in its
@@ -578,7 +1050,12 @@ func (g *gcGen) splitCall(v *ssa.Value, name string, args []*ssa.Value) bool {
 	case "runtime.newblockptr":
 		g.get(args[0], true)
 		g.get(args[1], true)
+		g.get(args[2], true)
 		g.helper(wasm.GCSplitNew)
+	case "runtime.ptrlim":
+		g.get(args[0], false)
+		g.typed(wasm.AStructGet, g.ptrSym(), wasm.GCPtrLim)
+		g.prog(wasm.AI64ExtendI32U)
 	case "runtime.ptroff":
 		g.get(args[0], false)
 		g.typed(wasm.AStructGet, g.ptrSym(), wasm.GCPtrOff)
@@ -605,12 +1082,55 @@ func (g *gcGen) splitCall(v *ssa.Value, name string, args []*ssa.Value) bool {
 		g.get(args[1], false)
 		i32Const(g.s, 0)
 		g.get(args[2], true)
-		g.helper(wasm.GCSplitMove)
+		g.helper(g.splitHelper(wasm.GCSplitMove))
+	case "runtime.splitcheck", "runtime.splitcheckw":
+		// The n bytes at p are in what it points into (and for a
+		// store are not of the data that nothing changes), or the
+		// program stops: before the runtime loads or stores them
+		// by their address.
+		g.get(args[0], false)
+		i32Const(g.s, 0)
+		g.get(args[1], true)
+		if name == "runtime.splitcheckw" {
+			g.helper(wasm.GCSplitCheckW)
+		} else {
+			g.helper(wasm.GCSplitCheck)
+		}
+		g.prog(wasm.ADrop)
+	case "runtime.splitmovec":
+		// The runtime's copy for the program: of what the two
+		// pointers point into.
+		g.get(args[0], false)
+		i32Const(g.s, 0)
+		g.get(args[1], false)
+		i32Const(g.s, 0)
+		g.get(args[2], true)
+		g.helper(wasm.GCSplitChecked(wasm.GCSplitMove))
+	case "runtime.splitsetlim":
+		// The pointer, with another size of what it points into.
+		tmp := g.scratch('r')
+		g.get(args[0], false)
+		g.local(wasm.ALocalTee, tmp)
+		g.typed(wasm.AStructGet, g.ptrSym(), wasm.GCPtrAddr)
+		g.local(wasm.ALocalGet, tmp)
+		g.typed(wasm.AStructGet, g.ptrSym(), wasm.GCPtrSlots)
+		g.local(wasm.ALocalGet, tmp)
+		g.typed(wasm.AStructGet, g.ptrSym(), wasm.GCPtrOff)
+		g.get(args[1], true)
+		g.typed(wasm.AStructNew, g.ptrSym(), 0)
+	case "runtime.splitintptr":
+		g.get(args[0], false)
+		g.helper(wasm.GCSplitChecked(wasm.GCSplitIntToPtr))
+	case "runtime.splitzeroc":
+		g.get(args[0], false)
+		i32Const(g.s, 0)
+		g.get(args[1], true)
+		g.helper(wasm.GCSplitChecked(wasm.GCSplitZero))
 	case "runtime.splitzero":
 		g.get(args[0], false)
 		i32Const(g.s, 0)
 		g.get(args[1], true)
-		g.helper(wasm.GCSplitZero)
+		g.helper(g.splitHelper(wasm.GCSplitZero))
 	case "runtime.makechan", "runtime.makechan64", "runtime.mapaccess1", "runtime.mapaccess2", "runtime.mapassign":
 		// (The runtime declares one more parameter, the zero value of
 		// an element that is an object in the other model: nil.)

@@ -6,7 +6,6 @@ package c23
 
 import (
 	"math/bits"
-	"unsafe"
 )
 
 // GCC's bit builtins (__builtin_clz and its kin) and C23's stdbit.h,
@@ -140,7 +139,7 @@ func Overflow(op byte, a int64, au bool, b int64, bu bool, width int32, ru bool)
 
 // LoadBytes loads n (1 to 8) bytes at p as a little-endian integer: a
 // packed bit-field's.
-func LoadBytes(p Ptr, n int) uint64 {
+func LoadBytes(p *Void, n int) uint64 {
 	b := BytesAt(p, uintptr(n))
 	var v uint64
 	for i := n - 1; i >= 0; i-- {
@@ -150,9 +149,9 @@ func LoadBytes(p Ptr, n int) uint64 {
 }
 
 // StoreBytes stores the n low bytes of v at p, little-endian.
-func StoreBytes(p Ptr, n int, v uint64) {
-	a := checkScalar(p, uintptr(n))
-	for i := 0; i < n; i++ {
-		*(*byte)(unsafe.Add(a, i)) = byte(v >> (8 * i))
+func StoreBytes(p *Void, n int, v uint64) {
+	b := BytesAt(p, uintptr(n))
+	for i := range b {
+		b[i] = byte(v >> (8 * i))
 	}
 }

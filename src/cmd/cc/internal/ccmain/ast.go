@@ -177,6 +177,9 @@ type initItem struct {
 type initializer struct {
 	items  []initItem
 	scalar expr // for a scalar not in memory
+	// The member that each union of the object is initialized as, by
+	// the union's offset: the last, if the initializer names several.
+	unions map[int64]*field
 }
 
 type storage uint8
@@ -196,6 +199,10 @@ const (
 	symFunc
 	symTypedef
 	symEnumConst
+	symNamespace // C++
+	symField     // C++: a class's non-static data member, in its scope
+	symTemplate  // C++: a class, alias or variable template
+	symPack      // C++: a template parameter pack, with its arguments
 )
 
 type symbol struct {
@@ -222,6 +229,48 @@ type symbol struct {
 	nested    bool    // GNU's nested function
 	vlaSize   string  // the Go temp with a VLA's size in bytes
 	allocSize int64   // more than its type\'s size: a flexible array member\'s initializer
+
+	// C++ (cxx.go). A symbol with C++ linkage has its mangled name as
+	// name, and its name in the source as src.
+	src     string
+	next    *symbol // the next function of its overload set
+	sc      *scope  // the scope it is declared in
+	ns      *scope  // symNamespace: the namespace
+	cLink   bool    // extern "C"
+	comdat  bool    // inline: each unit that uses it defines it
+	tagName bool    // a class or enumeration's name, as a type name
+	ctor    expr    // a class object's construction, after its (C) initializer
+	dtor    stmt    // its destruction, when its block is left
+
+	explicit  bool // a constructor or conversion function declared explicit
+	implicit  bool // a member function the class declares implicitly, or = default
+	deleted   bool // = delete
+	trivial   bool // an implicit member that does nothing, or copies bytes: never called
+	virtual   bool // a virtual member function
+	pure      bool // = 0
+	noCopy    bool // a parameter of class type that is the caller's object, not a copy
+	nrvo      bool // a local that is the function's result: in the caller's memory
+	funcNamed bool // __func__, once the function names it: an object of the unit
+	inExpr    bool // declared inside an expression: the length of a variably modified type
+
+	extended []*symbol // the temporaries whose lifetime a reference's declaration extends
+	once     stmt      // a static local's initialization, the first time its declaration is reached
+
+	// Templates (cxxtmpl.go).
+	tmpl        *template // the template it is (symTemplate; a function template, in its overload set)
+	instOf      *template // a class template's name within its own instance
+	inst        *tinst    // the instance it is
+	pack        []targ    // symPack
+	packSyms    []*symbol // symPack: a function parameter pack's parameters
+	isParamPack bool
+	depVal      bool // a value parameter's placeholder, in a pattern
+	depParam    int
+	late        *lateFunc // its body, not parsed until it is used
+	lateSc      *scope    // the scope late is parsed in, if not its own
+	synth       func()    // makes its (implicit) definition, when it is used
+	queued      bool
+	owner       *funcDecl // a local's or parameter's function
+	capInit     expr      // a lambda's initialized capture: what initializes it
 }
 
 type funcDecl struct {
@@ -237,6 +286,11 @@ type funcDecl struct {
 
 	labelIDs   int
 	addrLabels []*label // labels whose address is taken
+
+	// C++: the return statements of a function that returns a class,
+	// and the local each returns (nil if it is not one).
+	rets    []*block
+	retVars []*symbol
 }
 
 type label struct {
@@ -329,6 +383,8 @@ type unit struct {
 	tags    map[string]*ctype
 	scope   map[string]*symbol   // file scope: for cgo's names
 	fenv    map[expr]fenvPragmas // operations under floating-point pragmas (fenv.go)
+
+	callInto map[*call]expr // C++: the object a call that returns a class constructs
 }
 
 // goName is a label's Go name, without its L_.

@@ -6,6 +6,7 @@ package c23
 
 import (
 	"fmt"
+	"internal/abi"
 	"os"
 	"reflect"
 	"sync"
@@ -44,33 +45,50 @@ func If[T any](c bool, x, y T) T {
 //go:noinline
 func Val[T any](v T) T { return v }
 
-// A Func is a C function, as an object a C pointer may point to.
+// A Func is a C function, as an object a C pointer may point to. Like a
+// Handle it is an interface and nothing else, which C cannot look into
+// or change, in an object of the heap that was allocated as a Func.
 type Func struct {
 	f any
 }
 
+var funcType = abi.TypeFor[Func]()
+
 // NewFunc returns the C pointer to the function f.
-func NewFunc(f any) Ptr {
-	p := New[Func]()
-	(*Func)(p.Obj).f = f
-	return p
+//
+//go:nocheckptr
+func NewFunc(f any) *Void {
+	p := (*Func)(newObject(funcType))
+	p.f = f
+	return seal(unsafe.Pointer(p))
 }
 
-var funcInfo = TinfoOf[Func]()
+var funcs seen
+
+// funcAt returns the Func that p points to: p is the address of an
+// object that NewFunc made, or the call is a fault. Memory that C wrote
+// to look like a Func is not one: it could be made to call anything.
+//
+//go:nocheckptr
+func funcAt(p *Void) *Func {
+	fn := (*Func)(unseal(&funcs, p, funcType))
+	if fn == nil {
+		RaiseFault("call through a pointer that is not to a function", uintptr(unsafe.Pointer(p)))
+	}
+	return fn
+}
 
 // FuncOf returns the Go function of type F that p points to, which a
 // call through a C function pointer calls.
-func FuncOf[F any](p Ptr) F {
-	if p.Obj == nil || p.Off != 0 || p.Info() != funcInfo {
-		RaiseFault("call through a pointer that is not to a function", Addr(p))
-	}
-	f, ok := (*Func)(p.Obj).f.(F)
+func FuncOf[F any](p *Void) F {
+	fn := funcAt(p)
+	f, ok := fn.f.(F)
 	if !ok {
-		if g, ok := adapt[F]((*Func)(p.Obj).f); ok {
+		if g, ok := adapt[F](fn.f); ok {
 			return g
 		}
 		var z F
-		RaiseFault(fmt.Sprintf("call of a %T through a pointer to a function of type %T", (*Func)(p.Obj).f, z), Addr(p))
+		RaiseFault(fmt.Sprintf("call of a %T through a pointer to a function of type %T", fn.f, z), Addr(p))
 	}
 	return f
 }
@@ -149,45 +167,47 @@ func convertible(a, b reflect.Type) bool {
 	return num(a) && num(b)
 }
 
-// String allocates a string literal's array: s holds its elements'
-// bytes, the null element included.
-func String[T any](s string) Ptr {
-	p := NewArray[T](uintptr(len(s)))
-	copy(unsafe.Slice((*byte)(p.Obj), len(s)), s)
-	return p
+// emptyString is the empty string literal: its 0 byte.
+var emptyString [1]byte
+
+// String is the string literal s: the pointer to its first character.
+// The 0 byte that ends it is the one the compiler puts after the data of
+// every string constant, so s must be a constant. Its bytes are
+// read-only, as C's literal's are: storing through the pointer is a
+// fault. (Its conversion is of what the compiler made, and needs no
+// check.)
+//
+//go:nocheckptr
+func String(s string) *Char {
+	if len(s) == 0 {
+		return (*Char)(unsafe.Pointer(&emptyString))
+	}
+	return (*Char)(unsafe.Pointer(unsafe.StringData(s)))
 }
 
 // StringOf is String for a literal whose array, A ([N]T), cmd/cc knows:
 // the same object, of a type the compiler makes rather than reflect.
-func StringOf[T, A any](s string) Ptr {
+func StringOf[T, A any](s string) *Void {
 	p := LocalT(new(Obj[A]), TinfoOf[T]())
-	copy(unsafe.Slice((*byte)(p.Obj), len(s)), s)
+	copy(Writable(p, uintptr(len(s))), s)
 	return p
 }
 
-// Copy returns a copy of the n bytes at p, in a new object of p's type.
-func Copy(p Ptr, n uint64) Ptr {
-	ti := p.Info()
-	q := newOf(ti, uintptr(n))
+// A ByValue is a struct or union passed by value in variable arguments:
+// the pointer to a copy of it. (A pointer that is passed is a *Void.)
+type ByValue struct {
+	P *Void
+}
+
+// Copy returns a copy of the n bytes at p.
+func Copy(p *Void, n uint64) *Void {
+	q := Malloc(n)
 	Memmove(q, p, uintptr(n))
 	return q
 }
 
-// newOf allocates n bytes as an array of ti's type.
-func newOf(ti *tinfo, n uintptr) Ptr {
-	sz := ti.t.Size()
-	count := n
-	if sz > 0 {
-		count = (n + sz - 1) / sz
-	}
-	base := newObj(ti.arrayObj(count))
-	h := (*header)(base)
-	*h = header{ref: ti.ref | refC, ti: ti, size: count * sz}
-	return Ptr{Obj: unsafe.Add(base, hdrSize), Size: count * sz, ti: cref(ti)}
-}
-
 // Args returns main's argv.
-func Args() Ptr {
+func Args() *Void {
 	argv := NewArray[unsafe.Pointer](uintptr(len(os.Args)+1) * WordSize)
 	for i, a := range os.Args {
 		StorePtr(Add(argv, i*int(WordSize)), CString(a))
@@ -200,9 +220,9 @@ func Trap() { panic(&Fault{"trap", 0}) }
 
 // AssertC is C's assert: if ok is false, it reports the assertion's text,
 // file and line, and aborts.
-func AssertC(ok bool, text, file Ptr, line int32) {
+func AssertC(ok bool, text, file *Void, line int32) {
 	if !ok {
-		Fflush(Ptr{})
+		Fflush((*Void)(nil))
 		fmt.Fprintf(os.Stderr, "%s:%d: assertion failed: %s\n", GoString(file), line, GoString(text))
 		Abort()
 	}
@@ -215,60 +235,70 @@ type LDouble struct {
 	_ uint64
 }
 
-// A VaList is C's va_list: the variable arguments, and the next.
+// A VaList is C's va_list: the variable arguments that are left. Like
+// a Handle it is something that C cannot look into or change, a slice
+// and nothing else, in an object of the heap that was allocated as a
+// VaList: an argument is a Go value of its own type, and va_arg gives
+// it as that type or not at all.
 type VaList struct {
 	args []any
-	i    int
 }
 
-var vaInfo = TinfoOf[VaList]()
+var vaListType = abi.TypeFor[VaList]()
+
+var vaLists seen
 
 // VaStart is va_start: a va_list of a function's variable arguments.
-func VaStart(va []any) Ptr {
-	p := New[VaList]()
-	(*VaList)(p.Obj).args = va
-	return p
+//
+//go:nocheckptr
+func VaStart(va []any) *Void {
+	v := (*VaList)(newObject(vaListType))
+	v.args = va
+	return seal(unsafe.Pointer(v))
 }
 
-func VaOf(ap Ptr) *VaList {
-	if ap.Obj == nil || ap.Off != 0 || ap.Info() != vaInfo {
-		RaiseFault("va_arg of a va_list not started", Addr(ap))
+// VaOf returns the VaList that ap points to: one that VaStart or VaCopy
+// made.
+//
+//go:nocheckptr
+func VaOf(ap *Void) *VaList {
+	v := (*VaList)(unseal(&vaLists, ap, vaListType))
+	if v == nil {
+		RaiseFault("va_arg of what is not a va_list that va_start set", uintptr(unsafe.Pointer(ap)))
 	}
-	return (*VaList)(ap.Obj)
+	return v
 }
 
 // VaCopy is va_copy.
-func VaCopy(ap Ptr) Ptr {
-	v := VaOf(ap)
-	p := New[VaList]()
-	*(*VaList)(p.Obj) = *v
-	return p
-}
+func VaCopy(ap *Void) *Void { return VaStart(VaOf(ap).args) }
 
 func (v *VaList) Next() any {
-	if v.i >= len(v.args) {
+	if len(v.args) == 0 {
 		RaiseFault("va_arg past the last argument", 0)
 	}
-	a := v.args[v.i]
-	v.i++
+	a := v.args[0]
+	v.args = v.args[1:]
 	return a
 }
 
 // VaArg is va_arg(ap, T) of a scalar T. An argument of another type of
-// the same size and class is converted, as C allows for signedness.
-func VaArg[T any](ap Ptr) T {
+// the same size and class is converted, as C allows for signedness. An
+// integer that is read as a pointer is the pointer that the integer
+// converts to (IntPtr): one that cannot be used, if it is the address
+// of something.
+func VaArg[T any](ap *Void) T {
 	a := VaOf(ap).Next()
 	if v, ok := a.(T); ok {
 		return v
 	}
 	var r T
-	if _, ok := any(r).(Ptr); ok {
+	if _, ok := any(r).(*Void); ok {
 		// An integer passed for a pointer (0 for a null pointer).
 		if n, ok := intArgValue(a); ok {
-			return any(FromInt(uintptr(n))).(T)
+			return any(IntPtr(uintptr(n))).(T)
 		}
 	}
-	if p, ok := a.(Ptr); ok {
+	if p, ok := a.(*Void); ok {
 		// An intcap (or a pointer) passed for an integer: its address.
 		a = uint64(Addr(p))
 	}
@@ -293,10 +323,13 @@ func VaArg[T any](ap Ptr) T {
 	return r
 }
 
-// VaArgPtr is va_arg(ap, T) of a struct T: the c23.Ptr to its copy.
-func VaArgPtr(ap Ptr) Ptr {
+// VaArgPtr is va_arg(ap, T) of a struct T: the *c23.Void to its copy.
+func VaArgPtr(ap *Void) *Void {
 	a := VaOf(ap).Next()
-	p, ok := a.(Ptr)
+	if v, ok := a.(ByValue); ok {
+		return v.P
+	}
+	p, ok := a.(*Void)
 	if !ok {
 		RaiseFault(fmt.Sprintf("va_arg of a %T as a struct", a), 0)
 	}
@@ -306,11 +339,10 @@ func VaArgPtr(ap Ptr) Ptr {
 // ReallocOf is realloc whose result is a T*: n bytes as an array of T,
 // with what p's object holds. p is NULL or what malloc returned
 // (checkRealloc).
-func ReallocOf[T any](p Ptr, n uintptr) Ptr {
-	checkRealloc(p)
+func ReallocOf[T any](p *Void, n uintptr) *Void {
 	q := NewArray[T](n)
-	if p.Obj != nil {
-		Memmove(q, p, min(n, p.Size))
+	if p != nil && q != nil {
+		memmove(unsafe.Pointer(q), unsafe.Pointer(p), min(n, reallocSize(unsafe.Pointer(p))))
 	}
 	return q
 }
@@ -332,16 +364,16 @@ func intArgValue(a any) (int64, bool) {
 // dlfcn.h: C compiled by cmd/cc cannot load native code, so dlopen
 // fails, as for a library not found.
 
-func Dlopen(path Ptr, flags int32) Ptr { return Ptr{} }
-func Dlsym(h, name Ptr) Ptr            { return Ptr{} }
-func Dlclose(h Ptr) int32              { return 0 }
+func Dlopen(path *Void, flags int32) *Void { return (*Void)(nil) }
+func Dlsym(h, name *Void) *Void            { return (*Void)(nil) }
+func Dlclose(h *Void) int32                { return 0 }
 
 var (
 	dlMsgOnce sync.Once
-	dlMsg     Ptr
+	dlMsg     *Void
 )
 
-func Dlerror() Ptr {
+func Dlerror() *Void {
 	dlMsgOnce.Do(func() { dlMsg = CString("dynamic loading is not supported by cmd/cc") })
 	return dlMsg
 }

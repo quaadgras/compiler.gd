@@ -40,6 +40,9 @@ func unsafestringcheckptr(ptr unsafe.Pointer, len64 int64) {
 	if checkptrStraddles(ptr, uintptr(len64)) {
 		throw("checkptr: unsafe.String result straddles multiple allocations")
 	}
+	if checkptrPastC(ptr, uintptr(len64)) {
+		throw("checkptr: unsafe.String result is past the end of its object")
+	}
 }
 
 func panicunsafestringlen() {
@@ -103,6 +106,9 @@ func unsafeslicecheckptr(et *_type, ptr unsafe.Pointer, len64 int64) {
 	// unsafeslice64 has already checked for overflow.
 	if checkptrStraddles(ptr, uintptr(len64)*et.Size_) {
 		throw("checkptr: unsafe.Slice result straddles multiple allocations")
+	}
+	if checkptrPastC(ptr, uintptr(len64)*et.Size_) {
+		throw("checkptr: unsafe.Slice result is past the end of its object")
 	}
 }
 

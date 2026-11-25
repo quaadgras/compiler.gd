@@ -24,18 +24,18 @@ const (
 )
 
 // loadWord and storeWord load and store a word as a scalar.
-func LoadWord(p Ptr) uintptr     { return *(*uintptr)(Check(p, WordSize)) }
-func StoreWord(p Ptr, v uintptr) { *(*uintptr)(checkScalar(p, WordSize)) = v }
+func LoadWord(p *Void) uintptr     { return *(*uintptr)(in(p, int(WordSize))) }
+func StoreWord(p *Void, v uintptr) { *(*uintptr)(in(p, int(WordSize))) = v }
 
 // loadLong and storeLong load and store a C long.
-func LoadLong(p Ptr) int64 {
+func LoadLong(p *Void) int64 {
 	if LongSize == 4 {
 		return int64(int32(Load32(p)))
 	}
 	return int64(Load64(p))
 }
 
-func StoreLong(p Ptr, v int64) {
+func StoreLong(p *Void, v int64) {
 	if LongSize == 4 {
 		Store32(p, uint32(v))
 		return
@@ -45,7 +45,7 @@ func StoreLong(p Ptr, v int64) {
 
 // Strtol32 is strtol where long is 32 bits (cmd/cc's libcLong32): its
 // range is long's.
-func Strtol32(s, end Ptr, base int32) int64 {
+func Strtol32(s, end *Void, base int32) int64 {
 	v, neg, of, n := StrtoParse(GoString(s), int(base))
 	SetEnd(end, s, n)
 	switch {
@@ -62,7 +62,7 @@ func Strtol32(s, end Ptr, base int32) int64 {
 }
 
 // Strtoul32 is strtoul where unsigned long is 32 bits.
-func Strtoul32(s, end Ptr, base int32) uint64 {
+func Strtoul32(s, end *Void, base int32) uint64 {
 	v, neg, of, n := StrtoParse(GoString(s), int(base))
 	SetEnd(end, s, n)
 	if of || v > math.MaxUint32 {
@@ -77,7 +77,7 @@ func Strtoul32(s, end Ptr, base int32) uint64 {
 
 // Ldiv32 is ldiv where long is 32 bits: the ldiv_t it writes is two of
 // them.
-func Ldiv32(sret Ptr, n, d int64) {
+func Ldiv32(sret *Void, n, d int64) {
 	StoreLong(sret, n/d)
 	StoreLong(Add(sret, int(LongSize)), n%d)
 }

@@ -5,6 +5,8 @@
 package escape
 
 import (
+	"slices"
+
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/types"
 )
@@ -63,8 +65,20 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 		e.discard(n.X)
 	case ir.OADD, ir.OSUB, ir.OOR, ir.OXOR, ir.OMUL, ir.ODIV, ir.OMOD, ir.OLSH, ir.ORSH, ir.OAND, ir.OANDNOT, ir.OEQ, ir.ONE, ir.OLT, ir.OLE, ir.OGT, ir.OGE:
 		n := n.(*ir.BinaryExpr)
-		e.discard(n.X)
-		e.discard(n.Y)
+		// (An address that is only compared, or that another is
+		// subtracted from, is not kept as an integer: below.)
+		unkept := ir.UnkeptAddrs(n)
+		for _, x := range []ir.Node{n.X, n.Y} {
+			if c := ir.AddrConv(x); c != nil && slices.Contains(unkept, c) {
+				for ; x != c; x = x.(*ir.ConvExpr).X {
+					e.stmts(x.Init())
+				}
+				e.stmts(c.Init())
+				e.discard(c.X)
+				continue
+			}
+			e.discard(x)
+		}
 	case ir.OANDAND, ir.OOROR:
 		n := n.(*ir.LogicalExpr)
 		e.discard(n.X)

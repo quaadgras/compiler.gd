@@ -32,10 +32,10 @@ var (
 	globalMu   sync.Mutex
 	globalUTF8 uint32 // the categories of the global locale that are C.UTF-8
 
-	names = map[string]c23.Ptr{} // setlocale's results, which C must not change
+	names = map[string]*c23.Void{} // setlocale's results, which C must not change
 
 	// current is the calling thread's locale_t, null for the global locale.
-	current = c23.NewTLS(func() c23.Ptr { return c23.Malloc(uint64(c23.WordSize)) })
+	current = c23.NewTLS(func() *c23.Void { return c23.Malloc(uint64(c23.WordSize)) })
 )
 
 // localeName reports whether name is C.UTF-8's, and ok whether it is a
@@ -91,11 +91,11 @@ func resolve(mask uint32, name string) (utf8 uint32, ok bool) {
 	return utf8, true
 }
 
-func isGlobal(p c23.Ptr) bool { return p.Obj == nil && uint32(c23.Addr(p)) == 0xffffffff }
+func isGlobal(p *c23.Void) bool { return p == nil && uint32(c23.Addr(p)) == 0xffffffff }
 
-func globalPtr() c23.Ptr { return c23.FromInt(^uintptr(0)) }
+func globalPtr() *c23.Void { return c23.FromInt(^uintptr(0)) }
 
-func newObj(utf8 uint32) c23.Ptr {
+func newObj(utf8 uint32) *c23.Void {
 	p := c23.Malloc(4)
 	c23.Store32(p, utf8)
 	return p
@@ -106,16 +106,16 @@ func newObj(utf8 uint32) c23.Ptr {
 // returns it, if base is not null. A name other than "", "C", "POSIX"
 // and C.UTF-8's (C.utf8 and the like) fails with ENOENT, as a locale
 // glibc has not installed does.
-func Newlocale(mask int32, name, base c23.Ptr) c23.Ptr {
+func Newlocale(mask int32, name, base *c23.Void) *c23.Void {
 	if c23.Addr(name) == 0 || uint32(mask)&^lcAllMask != 0 || isGlobal(base) {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	m := uint32(mask) & (1<<nCategory - 1)
 	utf8, ok := resolve(m, c23.GoString(name))
 	if !ok {
 		c23.SetErrno(c23.ENOENT)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	if c23.Addr(base) == 0 {
 		return newObj(utf8)
@@ -126,7 +126,7 @@ func Newlocale(mask int32, name, base c23.Ptr) c23.Ptr {
 
 // Duplocale is duplocale: a copy of loc, or of the global locale if loc
 // is LC_GLOBAL_LOCALE.
-func Duplocale(loc c23.Ptr) c23.Ptr {
+func Duplocale(loc *c23.Void) *c23.Void {
 	if isGlobal(loc) {
 		globalMu.Lock()
 		defer globalMu.Unlock()
@@ -136,7 +136,7 @@ func Duplocale(loc c23.Ptr) c23.Ptr {
 }
 
 // Freelocale is freelocale.
-func Freelocale(loc c23.Ptr) {
+func Freelocale(loc *c23.Void) {
 	if c23.Addr(loc) != 0 && !isGlobal(loc) {
 		c23.Free(loc)
 	}
@@ -145,12 +145,12 @@ func Freelocale(loc c23.Ptr) {
 // Uselocale is uselocale: it makes loc the calling thread's locale (the
 // global one, if it is LC_GLOBAL_LOCALE), unless loc is null, and
 // returns the one the thread used, LC_GLOBAL_LOCALE if the global.
-func Uselocale(loc c23.Ptr) c23.Ptr {
+func Uselocale(loc *c23.Void) *c23.Void {
 	cur := current.Get()
 	old := c23.LoadPtr(cur)
 	switch {
 	case isGlobal(loc):
-		c23.StorePtr(cur, c23.Ptr{})
+		c23.StorePtr(cur, (*c23.Void)(nil))
 	case c23.Addr(loc) != 0:
 		c23.StorePtr(cur, loc)
 	}
@@ -161,7 +161,7 @@ func Uselocale(loc c23.Ptr) c23.Ptr {
 }
 
 // nameOf returns the C string of a locale's name, which it keeps.
-func nameOf(s string) c23.Ptr {
+func nameOf(s string) *c23.Void {
 	p, ok := names[s]
 	if !ok {
 		p = c23.CString(s)

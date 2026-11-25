@@ -70,7 +70,7 @@ var siCodeText = map[int32]string{
 // Psiginfo is psiginfo: "message: description (what sent it pid uid)"
 // on standard error (fd 2), as glibc's for a signal a process sent, or
 // "(what sent it)" for another.
-func Psiginfo(info, message c23.Ptr) {
+func Psiginfo(info, message *c23.Void) {
 	sig := int32(c23.Load32(info))
 	code := int32(c23.Load32(c23.Add(info, 8)))
 	msg := c23.Strsignal(sig)
@@ -162,7 +162,7 @@ const sigHold = 2
 // another disposition becomes sig's action (with an empty mask and no
 // flags) and sig is removed from the mask. It returns SIG_HOLD if sig
 // was blocked, its previous disposition if not, or SIG_ERR.
-func Sigset(sig int32, disp c23.Ptr) c23.Ptr {
+func Sigset(sig int32, disp *c23.Void) *c23.Void {
 	sigErr := c23.FromInt(^uintptr(0))
 	if !sigValid(sig) {
 		return sigErr

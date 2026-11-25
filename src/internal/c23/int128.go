@@ -183,15 +183,15 @@ func U128F(f float64) Uint128 {
 	return Uint128{uint64(f - float64(hi)*(1<<64)), hi}
 }
 
-func LoadI128(p Ptr) Int128 { return Int128{Load64(p), int64(Load64(Add(p, 8)))} }
-func LoadU128(p Ptr) Uint128 {
+func LoadI128(p *Void) Int128 { return Int128{Load64(p), int64(Load64(Add(p, 8)))} }
+func LoadU128(p *Void) Uint128 {
 	return Uint128{Load64(p), Load64(Add(p, 8))}
 }
-func StoreI128(p Ptr, v Int128) {
+func StoreI128(p *Void, v Int128) {
 	Store64(p, v.Lo)
 	Store64(Add(p, 8), uint64(v.Hi))
 }
-func StoreU128(p Ptr, v Uint128) {
+func StoreU128(p *Void, v Uint128) {
 	Store64(p, v.Lo)
 	Store64(Add(p, 8), v.Hi)
 }

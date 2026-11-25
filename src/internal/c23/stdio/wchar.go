@@ -8,7 +8,7 @@ import (
 	c23 "internal/c23"
 )
 
-func Fgetpos(f, pos c23.Ptr) int32 {
+func Fgetpos(f, pos *c23.Void) int32 {
 	off := Ftell(f)
 	if off < 0 {
 		return -1
@@ -17,4 +17,4 @@ func Fgetpos(f, pos c23.Ptr) int32 {
 	return 0
 }
 
-func Fsetpos(f, pos c23.Ptr) int32 { return Fseek(f, int64(c23.Load64(pos)), 0) }
+func Fsetpos(f, pos *c23.Void) int32 { return Fseek(f, int64(c23.Load64(pos)), 0) }

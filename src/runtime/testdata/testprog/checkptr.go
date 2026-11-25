@@ -11,11 +11,15 @@ import (
 )
 
 func init() {
+	register("CheckPtrBytesLonger", CheckPtrBytesLonger)
+	register("CheckPtrBytesSliced", CheckPtrBytesSliced)
+	register("CheckPtrBytesSlicedLonger", CheckPtrBytesSlicedLonger)
 	register("CheckPtrAlignmentNoPtr", CheckPtrAlignmentNoPtr)
 	register("CheckPtrAlignmentPtr", CheckPtrAlignmentPtr)
 	register("CheckPtrAlignmentNilPtr", CheckPtrAlignmentNilPtr)
 	register("CheckPtrArithmetic", CheckPtrArithmetic)
 	register("CheckPtrArithmetic2", CheckPtrArithmetic2)
+	register("CheckPtrArithmeticLeavesHeap", CheckPtrArithmeticLeavesHeap)
 	register("CheckPtrArithmeticUnsafeAdd", CheckPtrArithmeticUnsafeAdd)
 	register("CheckPtrSize", CheckPtrSize)
 	register("CheckPtrSmall", CheckPtrSmall)
@@ -73,6 +77,15 @@ func CheckPtrArithmetic() {
 	sink2 = (*int)(unsafe.Pointer(i))
 }
 
+func CheckPtrArithmeticLeavesHeap() {
+	// An address that is in no arena of the heap, and in no stack or
+	// data: the seventeenth page of memory.
+	x := new([2]int64)
+	sink2 = x
+	far := 1<<16 - uintptr(unsafe.Pointer(x))
+	sink2 = unsafe.Add(unsafe.Pointer(x), far)
+}
+
 func CheckPtrArithmetic2() {
 	var x [2]int64
 	p := unsafe.Pointer(&x[1])
@@ -117,11 +130,37 @@ func CheckPtrStringFail() {
 	sink2 = unsafe.String(p, 100)
 }
 
+// CheckPtrBytesLonger converts to a pointer to bytes that go on past
+// the object: an index would go anywhere with it.
+func CheckPtrBytesLonger() {
+	p := new([8]byte)
+	checkptrSink = p
+	sink2 = (*[1 << 20]byte)(unsafe.Pointer(checkptrSink.(*[8]byte)))
+}
+
+// CheckPtrBytesSliced slices such a pointer at once to the bytes that
+// are there, as code did before unsafe.Slice: that is those bytes.
+func CheckPtrBytesSliced() {
+	p := new([8]byte)
+	checkptrSink = p
+	n := 8
+	sink2 = (*[1 << 20]byte)(unsafe.Pointer(checkptrSink.(*[8]byte)))[:n:n]
+}
+
+// CheckPtrBytesSlicedLonger slices it to more.
+func CheckPtrBytesSlicedLonger() {
+	p := new([8]byte)
+	checkptrSink = p
+	n := 4096
+	sink2 = (*[1 << 20]byte)(unsafe.Pointer(checkptrSink.(*[8]byte)))[:n:n]
+}
+
 func CheckPtrAlignmentNested() {
-	s := make([]int8, 100)
-	p := unsafe.Pointer(&s[0])
+	// (gd: an integer, not a pointer, which integers may not be over.)
+	p := new(int64)
+	checkptrSink = p
 	n := 9
-	_ = ((*[10]int8)(unsafe.Pointer((*[10]int64)(unsafe.Pointer(&p)))))[:n:n]
+	_ = ((*[10]int8)(unsafe.Pointer((*[10]int64)(unsafe.Pointer(p)))))[:n:n]
 }
 
 func init() {
@@ -162,8 +201,7 @@ func CheckPtrPointersScalar() {
 	sink2 = y
 }
 
-// The same layout under another name, integers over pointers, and a part
-// of an array.
+// The same layout under another name, and a part of an array.
 func CheckPtrPointersOK() {
 	x := new([4]checkptrPair)
 	checkptrSink = x
@@ -173,12 +211,7 @@ func CheckPtrPointersOK() {
 	}
 	sink2 = (*pair2)(unsafe.Pointer(&x[2]))
 	sink2 = (*[2]pair2)(unsafe.Pointer(&x[2]))
-	sink2 = (*[2]uintptr)(unsafe.Pointer(&x[3]))
 	sink2 = (**int)(unsafe.Pointer(&x[3].p))
-	// A pointer over an integer that is not an address in the heap,
-	// as the first word of an interface is.
-	x[0].n = 12345
-	sink2 = (*checkptrRiap)(unsafe.Pointer(&x[0]))
 }
 
 //go:noinline

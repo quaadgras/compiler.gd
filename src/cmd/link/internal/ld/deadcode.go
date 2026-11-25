@@ -92,6 +92,11 @@ func (d *deadcodePass) init() {
 	if buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.GC {
 		// What the host calls (see cmd/link/internal/wasm/gc.go).
 		names = append(names, "runtime.linfree", "runtime.sched", "runtime.gorun", "runtime.unstart", "runtime.deadlock", "runtime.timerwait")
+		if buildcfg.GOWASM.Split {
+			// What the functions that the linker generates call
+			// (cmd/link/internal/wasm/gcsplit.go).
+			names = append(names, "runtime.splitfault")
+		}
 		if buildcfg.GOOS == "js" {
 			// syscall/js: a call from JavaScript.
 			names = append(names, "runtime.jscallback", "runtime.jscallbackdone")
@@ -296,8 +301,13 @@ func (d *deadcodePass) flood() {
 			a := d.ldr.Aux(symIdx, i)
 			if a.Type() == goobj.AuxGotype {
 				// A symbol being reachable doesn't imply we need its
-				// type descriptor. Don't mark it.
-				continue
+				// type descriptor. Don't mark it. gd: but for a
+				// variable of the program's data, whose type the
+				// runtime's checks of unsafe pointers compare
+				// with (datavars.go).
+				if !d.ctxt.dataVarTypes(symIdx) {
+					continue
+				}
 			}
 			d.mark(a.Sym(), symIdx)
 		}

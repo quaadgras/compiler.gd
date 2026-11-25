@@ -90,22 +90,30 @@ type (
 )
 
 type Types struct {
-	Bool       *types.Type
-	Int8       *types.Type
-	Int16      *types.Type
-	Int32      *types.Type
-	Int64      *types.Type
-	UInt8      *types.Type
-	UInt16     *types.Type
-	UInt32     *types.Type
-	UInt64     *types.Type
-	Int        *types.Type
-	Float32    *types.Type
-	Float64    *types.Type
-	UInt       *types.Type
-	Uintptr    *types.Type
-	String     *types.Type
-	BytePtr    *types.Type // TODO: use unsafe.Pointer instead?
+	Bool    *types.Type
+	Int8    *types.Type
+	Int16   *types.Type
+	Int32   *types.Type
+	Int64   *types.Type
+	UInt8   *types.Type
+	UInt16  *types.Type
+	UInt32  *types.Type
+	UInt64  *types.Type
+	Int     *types.Type
+	Float32 *types.Type
+	Float64 *types.Type
+	UInt    *types.Type
+	Uintptr *types.Type
+	String  *types.Type
+	BytePtr *types.Type // TODO: use unsafe.Pointer instead?
+	// ITab is the type of the word of an interface that holds its
+	// type or its table: an integer, as Go has it, which the collector
+	// does not look at. With GOWASM=gc,split it is a pointer in memory
+	// as it is in a register, so that it is read as the pointer that
+	// was stored, with the size of what it points to
+	// (cmd/compile/internal/wasm/gcsplit.go), and never made of the
+	// integer that a program may have written there.
+	ITab       *types.Type
 	Int32Ptr   *types.Type
 	UInt32Ptr  *types.Type
 	IntPtr     *types.Type
@@ -153,6 +161,16 @@ func (t *Types) SetTypPtrs() {
 	t.Uintptr = types.Types[types.TUINTPTR]
 	t.String = types.Types[types.TSTRING]
 	t.BytePtr = types.NewPtr(types.Types[types.TUINT8])
+	t.ITab = t.Uintptr
+	if buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.Split {
+		// (A pointer type that nothing else in the SSA has, so that
+		// the load of such a word is known for one: what it loads is
+		// the pointer that was stored there or nothing, and never a
+		// pointer made of the integer that a program wrote over it,
+		// which would compare equal to the address of a type. See
+		// wasm.GCSplitLoadTab.)
+		t.ITab = types.NewPtr(types.NewArray(types.Types[types.TUINT8], 0))
+	}
 	t.Int32Ptr = types.NewPtr(types.Types[types.TINT32])
 	t.UInt32Ptr = types.NewPtr(types.Types[types.TUINT32])
 	t.IntPtr = types.NewPtr(types.Types[types.TINT])

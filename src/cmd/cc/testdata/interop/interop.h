@@ -7,8 +7,12 @@ struct node {
 	struct node *next;
 };
 
+typedef struct node node_t;
+
+enum color { RED, GREEN = 5, BLUE };
+
 struct holder {
-	int *random_int;
+	int *ints;
 	long tag;
 };
 
@@ -23,38 +27,33 @@ struct variant {
 	union value v;
 };
 
+extern int counter;
+extern struct node *pool_root;
+
 struct node *make_list(int n);
 long sum_list(struct node *n);
 int read_at(int p[], int i);
-void store_past(struct holder *h, int arr[], int n);
 struct holder *new_holder(void);
-int load_back(struct holder *h, int k);
-int one_based_sum(int a[], int n);
-void pun(struct holder *h);
-int forge(long addr);
+void keep_array(struct holder *h, int a[]);
+int at(struct holder *h, int i);
 void hide(struct node *n);
-int stack_pun(void);
-void confuse(struct node *n, int *x);
-int unconfuse(struct node *n);
+long hidden_sum(void);
 void poke(void *p, int i, long v);
+void *as_void(node_t *n);
 long sum_pair(struct node *n);
 void swap_ints(int *a, int *b);
 int locals(void);
-void keep_array(struct holder *h, int a[]);
-int at(struct holder *h, int i);
+int count(void);
+enum color next_color(enum color c);
+char *shout(char *s);
+int backwards_sum(int n);
+long sum_back(int *end, int n);
 struct variant *make_variant(int n);
 long variant_sum(struct variant *v);
-void variant_set_double(struct variant *v, double d);
-long variant_misread(struct variant *v);
+void variant_set_long(struct variant *v, long i);
 struct node *in_pool(void);
 void make_pool(void);
 long pool_sum(void);
 int free_mallocd(void);
-void free_interior(void);
-void free_local(void);
-void free_lost(void);
-void realloc_lost(void);
-void realloc_interior(void);
-void free_go(int *p);
 
 #endif

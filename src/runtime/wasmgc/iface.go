@@ -19,13 +19,13 @@ import (
 // reference and two floats, which is what these mirror.
 
 type eface struct {
-	_type  uintptr
+	_type  typeWord
 	data   unsafe.Pointer
 	w0, w1 float64
 }
 
 type iface struct {
-	tab    uintptr
+	tab    typeWord
 	data   unsafe.Pointer
 	w0, w1 float64
 }
@@ -57,7 +57,7 @@ func itabsinit() {
 	p := md.types + md.itaboffset
 	end := p + md.itabsize
 	for p < end {
-		m := (*itab)(unsafe.Pointer(p))
+		m := (*itab)(staticptr(p))
 		itabs = append(itabs, m)
 		p += uintptr(m.Size())
 	}

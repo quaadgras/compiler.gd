@@ -15,7 +15,7 @@ import (
 var start = c23.MonoStart
 
 // Time is time: the seconds since the epoch, also stored at t if not null.
-func Time(t c23.Ptr) int64 {
+func Time(t *c23.Void) int64 {
 	now := time.Now().Unix()
 	if c23.Addr(t) != 0 {
 		c23.Store64(t, uint64(now))
@@ -45,20 +45,20 @@ const (
 	tmIsdst
 )
 
-func tmGet(p c23.Ptr, i int) int { return int(int32(c23.Load32(c23.Add(p, 4*i)))) }
+func tmGet(p *c23.Void, i int) int { return int(int32(c23.Load32(c23.Add(p, 4*i)))) }
 
-func tmSet(p c23.Ptr, i int, v int) { c23.Store32(c23.Add(p, 4*i), uint32(int32(v))) }
+func tmSet(p *c23.Void, i int, v int) { c23.Store32(c23.Add(p, 4*i), uint32(int32(v))) }
 
 // tmTime is the time the struct tm at p holds, in loc. Go's time.Date
 // normalizes the members as mktime does.
-func tmTime(p c23.Ptr, loc *time.Location) time.Time {
+func tmTime(p *c23.Void, loc *time.Location) time.Time {
 	return time.Date(tmGet(p, tmYear)+1900, time.Month(tmGet(p, tmMon)+1), tmGet(p, tmMday),
 		tmGet(p, tmHour), tmGet(p, tmMin), tmGet(p, tmSec), 0, loc)
 }
 
 // setTm stores t at p as a struct tm, or fails with EOVERFLOW if its
 // year is not an int.
-func setTm(p c23.Ptr, t time.Time) bool {
+func setTm(p *c23.Void, t time.Time) bool {
 	y := int64(t.Year()) - 1900
 	if y < math.MinInt32 || y > math.MaxInt32 {
 		c23.SetErrno(c23.EOVERFLOW)
@@ -80,7 +80,7 @@ func setTm(p c23.Ptr, t time.Time) bool {
 // (TZ's, local), whose members it normalizes. tm_isdst is not used:
 // a local time that a change of offset makes ambiguous is the one Go's
 // time.Date chooses.
-func Mktime(p c23.Ptr) int64 {
+func Mktime(p *c23.Void) int64 {
 	t := tmTime(p, local())
 	if !setTm(p, t) {
 		return -1
@@ -89,7 +89,7 @@ func Mktime(p c23.Ptr) int64 {
 }
 
 // Timegm is timegm: mktime in UTC.
-func Timegm(p c23.Ptr) int64 {
+func Timegm(p *c23.Void) int64 {
 	t := tmTime(p, time.UTC)
 	if !setTm(p, t) {
 		return -1
@@ -99,9 +99,9 @@ func Timegm(p c23.Ptr) int64 {
 
 var tmOnce sync.Once
 
-var tmStatic c23.Ptr // gmtime's and localtime's struct tm
+var tmStatic *c23.Void // gmtime's and localtime's struct tm
 
-var ascBuf c23.Ptr // asctime's and ctime's string
+var ascBuf *c23.Void // asctime's and ctime's string
 
 func statics() {
 	tmOnce.Do(func() {
@@ -110,27 +110,27 @@ func statics() {
 	})
 }
 
-func Gmtime(t c23.Ptr) c23.Ptr {
+func Gmtime(t *c23.Void) *c23.Void {
 	statics()
 	return GmtimeR(t, tmStatic)
 }
 
-func Localtime(t c23.Ptr) c23.Ptr {
+func Localtime(t *c23.Void) *c23.Void {
 	statics()
 	return LocaltimeR(t, tmStatic)
 }
 
-func GmtimeR(t, p c23.Ptr) c23.Ptr {
+func GmtimeR(t, p *c23.Void) *c23.Void {
 	if !setTm(p, time.Unix(int64(c23.Load64(t)), 0).UTC()) {
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	return p
 }
 
 // LocaltimeR is localtime_r, in TZ's time (local).
-func LocaltimeR(t, p c23.Ptr) c23.Ptr {
+func LocaltimeR(t, p *c23.Void) *c23.Void {
 	if !setTm(p, time.Unix(int64(c23.Load64(t)), 0).In(local())) {
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	return p
 }
@@ -140,14 +140,14 @@ var dayNames = [7]string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday",
 var monthNames = [12]string{"January", "February", "March", "April", "May", "June", "July",
 	"August", "September", "October", "November", "December"}
 
-func dayName(p c23.Ptr) string {
+func dayName(p *c23.Void) string {
 	if d := tmGet(p, tmWday); d >= 0 && d < 7 {
 		return dayNames[d]
 	}
 	return "?"
 }
 
-func monthName(p c23.Ptr) string {
+func monthName(p *c23.Void) string {
 	if m := tmGet(p, tmMon); m >= 0 && m < 12 {
 		return monthNames[m]
 	}
@@ -158,19 +158,19 @@ func abbr(s string) string { return s[:min(3, len(s))] }
 
 // Asctime is asctime: as "Sun Sep 16 01:03:52 1973\n", in an array the
 // next call of asctime or ctime reuses.
-func Asctime(p c23.Ptr) c23.Ptr {
+func Asctime(p *c23.Void) *c23.Void {
 	statics()
 	b := asctime(p)
 	if len(b) > 32 {
 		c23.SetErrno(c23.EOVERFLOW)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
-	copy(c23.BytesAt(ascBuf, uintptr(len(b))), b)
+	copy(c23.Writable(ascBuf, uintptr(len(b))), b)
 	return ascBuf
 }
 
 // asctime is asctime's string, with its null.
-func asctime(p c23.Ptr) []byte {
+func asctime(p *c23.Void) []byte {
 	b := append(strftime("%a %b", p), pad(tmGet(p, tmMday), 3, ' ')...)
 	b = append(b, ' ')
 	b = append(b, strftime("%H:%M:%S ", p)...)
@@ -179,10 +179,10 @@ func asctime(p c23.Ptr) []byte {
 }
 
 // Ctime is ctime: asctime(localtime(t)).
-func Ctime(t c23.Ptr) c23.Ptr {
+func Ctime(t *c23.Void) *c23.Void {
 	p := Localtime(t)
 	if c23.Addr(p) == 0 {
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	return Asctime(p)
 }
@@ -190,12 +190,12 @@ func Ctime(t c23.Ptr) c23.Ptr {
 // Strftime is strftime, in the C locale: the E and O modifiers have no
 // effect, and %z and %Z are those of TZ's zone (local) at the time p holds
 // (none if tm_isdst is negative): struct tm has no zone.
-func Strftime(s c23.Ptr, max uint64, format, p c23.Ptr) uint64 {
+func Strftime(s *c23.Void, max uint64, format, p *c23.Void) uint64 {
 	b := strftime(c23.GoString(format), p)
 	if uint64(len(b)) >= max {
 		return 0
 	}
-	copy(c23.BytesAt(s, uintptr(len(b)+1)), append(b, 0))
+	copy(c23.Writable(s, uintptr(len(b)+1)), append(b, 0))
 	return uint64(len(b))
 }
 
@@ -230,7 +230,7 @@ func isoWeeks(y int) int {
 }
 
 // isoWeek is the ISO 8601 year and week of the struct tm at p.
-func isoWeek(p c23.Ptr) (year, week int) {
+func isoWeek(p *c23.Void) (year, week int) {
 	year = tmGet(p, tmYear) + 1900
 	wdm := (tmGet(p, tmWday) + 6) % 7 // Monday is 0
 	week = floorDiv(tmGet(p, tmYday)-wdm+10, 7)
@@ -245,7 +245,7 @@ func isoWeek(p c23.Ptr) (year, week int) {
 	return year, week
 }
 
-func strftime(f string, p c23.Ptr) []byte {
+func strftime(f string, p *c23.Void) []byte {
 	var b []byte
 	for i := 0; i < len(f); i++ {
 		if f[i] != '%' || i+1 >= len(f) {
@@ -362,7 +362,7 @@ func strftime(f string, p c23.Ptr) []byte {
 
 // TimespecGet is timespec_get: the time of base TIME_UTC (1), as a
 // struct timespec (tv_sec, tv_nsec).
-func TimespecGet(ts c23.Ptr, base int32) int32 {
+func TimespecGet(ts *c23.Void, base int32) int32 {
 	if base != 1 {
 		return 0
 	}
@@ -374,7 +374,7 @@ func TimespecGet(ts c23.Ptr, base int32) int32 {
 
 // TimespecGetres is timespec_getres: TIME_UTC's resolution, which Go
 // gives in nanoseconds.
-func TimespecGetres(ts c23.Ptr, base int32) int32 {
+func TimespecGetres(ts *c23.Void, base int32) int32 {
 	if base != 1 {
 		return 0
 	}

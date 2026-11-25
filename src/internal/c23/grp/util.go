@@ -18,12 +18,12 @@ import (
 type group struct {
 	name, passwd unsafe.Pointer
 	gid          uint32
-	mem          unsafe.Pointer
+	mem          **int8 // (as C has it: the type is what C's pointer to a group is compared with)
 }
 
 var grMu sync.Mutex
 
-var grBuf c23.Ptr
+var grBuf *c23.Void
 
 // lookupGroup finds the group of the name, or of gid if the name is "",
 // in /etc/group: its fields.
@@ -52,13 +52,13 @@ func lookupGroup(name string, gid uint32) ([]string, bool) {
 }
 
 // grResult returns the static struct group of e, or null.
-func grResult(e []string, ok bool) c23.Ptr {
+func grResult(e []string, ok bool) *c23.Void {
 	if !ok {
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	grMu.Lock()
 	defer grMu.Unlock()
-	if grBuf.Obj == nil {
+	if grBuf == nil {
 		grBuf = c23.New[group]()
 	}
 	gid, _ := strconv.ParseUint(e[2], 10, 32)
@@ -79,13 +79,13 @@ func grResult(e []string, ok bool) c23.Ptr {
 }
 
 // Getgrnam is getgrnam: the group of the name in /etc/group, or null.
-func Getgrnam(name c23.Ptr) c23.Ptr {
+func Getgrnam(name *c23.Void) *c23.Void {
 	n := c23.GoString(name)
 	if n == "" {
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	return grResult(lookupGroup(n, 0))
 }
 
 // Getgrgid is getgrgid: the group of gid in /etc/group, or null.
-func Getgrgid(gid uint32) c23.Ptr { return grResult(lookupGroup("", gid)) }
+func Getgrgid(gid uint32) *c23.Void { return grResult(lookupGroup("", gid)) }

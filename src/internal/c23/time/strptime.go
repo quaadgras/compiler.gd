@@ -15,12 +15,12 @@ import (
 // members the string gives (and, as glibc does, the day of the week and
 // of the year from a date), and returns where it stopped, or null if the
 // string does not match.
-func Strptime(buf, format, p c23.Ptr) c23.Ptr {
+func Strptime(buf, format, p *c23.Void) *c23.Void {
 	st := &ptime{tm: p, century: -1}
 	s := c23.GoString(buf)
 	rest, ok := st.parse(s, c23.GoString(format))
 	if !ok {
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	st.finish()
 	return c23.Add(buf, len(s)-len(rest))
@@ -29,7 +29,7 @@ func Strptime(buf, format, p c23.Ptr) c23.Ptr {
 // ptime is strptime's state, which the conversions that are formats
 // (%c, %D, %T and the like) share.
 type ptime struct {
-	tm                                    c23.Ptr
+	tm                                    *c23.Void
 	haveI, isPM                           bool
 	century                               int
 	wantCentury, wantXday                 bool

@@ -61,31 +61,27 @@ type iconvT struct {
 	bomDone   bool     // the output's byte order mark is written
 }
 
-var iconvInfo = c23.TinfoOf[iconvT]()
-
 // IconvOpen is iconv_open: a conversion from fromcode to tocode, or
 // (iconv_t)-1 (errno EINVAL) if one is not a character set iconv has.
-func IconvOpen(tocode, fromcode c23.Ptr) c23.Ptr {
+func IconvOpen(tocode, fromcode *c23.Void) *c23.Void {
 	to, translit, ignore, ok1 := encodingOf(c23.GoString(tocode))
 	from, _, _, ok2 := encodingOf(c23.GoString(fromcode))
 	if !ok1 || !ok2 {
 		c23.SetErrno(c23.EINVAL)
 		return c23.FromInt(^uintptr(0))
 	}
-	p := c23.New[iconvT]()
-	*(*iconvT)(p.Obj) = iconvT{from: from, to: to, translit: translit, ignore: ignore}
-	return p
+	return c23.NewHandle(&iconvT{from: from, to: to, translit: translit, ignore: ignore})
 }
 
-func iconvOf(p c23.Ptr) *iconvT {
-	if p.Obj == nil || p.Info() != iconvInfo || p.Off != 0 {
-		return nil
-	}
-	return (*iconvT)(p.Obj)
+// iconvOf returns the conversion that p, an iconv_t, is the pointer to
+// the c23.Handle of, or nil.
+func iconvOf(p *c23.Void) *iconvT {
+	cv, _ := c23.HandleOf[*iconvT](p)
+	return cv
 }
 
 // IconvClose is iconv_close.
-func IconvClose(cd c23.Ptr) int32 {
+func IconvClose(cd *c23.Void) int32 {
 	if iconvOf(cd) == nil {
 		c23.SetErrno(c23.EBADF)
 		return -1
@@ -227,7 +223,7 @@ func (cv *iconvT) encodeIn(b []byte, to encoding, r rune) []byte {
 // set lacks), EINVAL (an incomplete one at the end of the input) or E2BIG
 // (no room in the output); *inbuf is then at that character. A null
 // inbuf or *inbuf resets the conversion's state.
-func Iconv(cd, inbuf, inleft, outbuf, outleft c23.Ptr) uint64 {
+func Iconv(cd, inbuf, inleft, outbuf, outleft *c23.Void) uint64 {
 	cv := iconvOf(cd)
 	if cv == nil {
 		c23.SetErrno(c23.EBADF)
@@ -242,7 +238,7 @@ func Iconv(cd, inbuf, inleft, outbuf, outleft c23.Ptr) uint64 {
 	in := c23.BytesAt(inp, uintptr(nin))
 	var out []byte
 	if nout > 0 {
-		out = c23.BytesAt(outp, uintptr(nout))
+		out = c23.Writable(outp, uintptr(nout))
 	}
 	i, o := 0, 0
 	irreversible := uint64(0)

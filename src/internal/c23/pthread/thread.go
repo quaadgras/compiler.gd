@@ -16,8 +16,8 @@ import (
 // honors the detach state, and the scheduling policy and priority (kept,
 // changing nothing) if it says PTHREAD_EXPLICIT_SCHED; the stack's size
 // and address are not used (a goroutine's stack grows).
-func PthreadCreate(thr, attr, start, arg c23.Ptr) int32 {
-	f := c23.FuncOf[func(c23.Ptr) c23.Ptr](start)
+func PthreadCreate(thr, attr, start, arg *c23.Void) int32 {
+	f := c23.FuncOf[func(*c23.Void) *c23.Void](start)
 	a := defaultAttr
 	if c23.Addr(attr) != 0 {
 		a = loadAttr(attr)
@@ -33,10 +33,10 @@ func PthreadCreate(thr, attr, start, arg c23.Ptr) int32 {
 
 // PthreadExit is pthread_exit: the thread's cleanup handlers run, the
 // last pushed first, then its thread-specific data's destructors.
-func PthreadExit(ret c23.Ptr) { c23.ExitThread(ret) }
+func PthreadExit(ret *c23.Void) { c23.ExitThread(ret) }
 
 // PthreadJoin is pthread_join, a cancellation point.
-func PthreadJoin(id uint64, ret c23.Ptr) int32 {
+func PthreadJoin(id uint64, ret *c23.Void) int32 {
 	t, e := c23.JoinErr(id)
 	if e != 0 {
 		return e
@@ -55,7 +55,7 @@ const PTHREAD_MUTEX_ERRORCHECK = 2
 
 var conds sync.Map // uintptr -> *cond
 
-func mutexOf(p c23.Ptr) *c23.Mutex {
+func mutexOf(p *c23.Void) *c23.Mutex {
 	c23.Check(p, 4)
 	a := c23.Addr(p)
 	if m, ok := c23.Mutexes.Load(a); ok {
@@ -68,7 +68,7 @@ func mutexOf(p c23.Ptr) *c23.Mutex {
 // PthreadMutexInit is pthread_mutex_init, of the type, robustness,
 // protocol and priority ceiling attr has (a normal mutex if attr is
 // null).
-func PthreadMutexInit(m, attr c23.Ptr) int32 {
+func PthreadMutexInit(m, attr *c23.Void) int32 {
 	c23.Check(m, 4)
 	mu := new(c23.Mutex)
 	if c23.Addr(attr) != 0 {
@@ -82,20 +82,20 @@ func PthreadMutexInit(m, attr c23.Ptr) int32 {
 	return 0
 }
 
-func PthreadMutexDestroy(m c23.Ptr) int32 {
+func PthreadMutexDestroy(m *c23.Void) int32 {
 	if mu, ok := c23.Mutexes.Load(c23.Addr(m)); ok && mu.(*c23.Mutex).Owner.Load() == nil && mu.(*c23.Mutex).Mu.TryLock() {
 		c23.Mutexes.Delete(c23.Addr(m))
 	}
 	return 0
 }
 
-func PthreadMutexLock(m c23.Ptr) int32 { return mutexOf(m).Lock(c23.LockWait, time.Time{}) }
+func PthreadMutexLock(m *c23.Void) int32 { return mutexOf(m).Lock(c23.LockWait, time.Time{}) }
 
-func PthreadMutexTrylock(m c23.Ptr) int32 { return mutexOf(m).Lock(c23.LockTry, time.Time{}) }
+func PthreadMutexTrylock(m *c23.Void) int32 { return mutexOf(m).Lock(c23.LockTry, time.Time{}) }
 
 // PthreadMutexTimedlock is pthread_mutex_timedlock, which gives up at
 // the CLOCK_REALTIME time at ts.
-func PthreadMutexTimedlock(m, ts c23.Ptr) int32 {
+func PthreadMutexTimedlock(m, ts *c23.Void) int32 {
 	d, ok := c23.LoadDeadline(ts)
 	if !ok {
 		return c23.EINVAL
@@ -103,14 +103,14 @@ func PthreadMutexTimedlock(m, ts c23.Ptr) int32 {
 	return mutexOf(m).Lock(c23.LockUntil, d)
 }
 
-func PthreadMutexUnlock(m c23.Ptr) int32 { return mutexOf(m).Unlock() }
+func PthreadMutexUnlock(m *c23.Void) int32 { return mutexOf(m).Unlock() }
 
 // PthreadMutexConsistent is pthread_mutex_consistent.
-func PthreadMutexConsistent(m c23.Ptr) int32 { return mutexOf(m).Consistent() }
+func PthreadMutexConsistent(m *c23.Void) int32 { return mutexOf(m).Consistent() }
 
 // PthreadMutexGetprioceiling is pthread_mutex_getprioceiling: EINVAL
 // unless the mutex's protocol is PTHREAD_PRIO_PROTECT, as glibc's.
-func PthreadMutexGetprioceiling(m, ceiling c23.Ptr) int32 {
+func PthreadMutexGetprioceiling(m, ceiling *c23.Void) int32 {
 	mu := mutexOf(m)
 	if mu.Protocol != PTHREAD_PRIO_PROTECT {
 		return c23.EINVAL
@@ -122,7 +122,7 @@ func PthreadMutexGetprioceiling(m, ceiling c23.Ptr) int32 {
 // PthreadMutexSetprioceiling is pthread_mutex_setprioceiling, which
 // locks the mutex to change its ceiling, and stores the old one at old
 // (if not null). Priorities change nothing.
-func PthreadMutexSetprioceiling(m c23.Ptr, ceiling int32, old c23.Ptr) int32 {
+func PthreadMutexSetprioceiling(m *c23.Void, ceiling int32, old *c23.Void) int32 {
 	mu := mutexOf(m)
 	if mu.Protocol != PTHREAD_PRIO_PROTECT || ceiling < prioMin || ceiling > prioMax {
 		return c23.EINVAL
@@ -159,11 +159,14 @@ func maCeiling(a uint32) int32 {
 }
 
 // PthreadMutexattrInit is pthread_mutexattr_init.
-func PthreadMutexattrInit(attr c23.Ptr) int32 { c23.Store32(attr, c23.PTHREAD_MUTEX_NORMAL); return 0 }
+func PthreadMutexattrInit(attr *c23.Void) int32 {
+	c23.Store32(attr, c23.PTHREAD_MUTEX_NORMAL)
+	return 0
+}
 
-func PthreadMutexattrDestroy(attr c23.Ptr) int32 { return 0 }
+func PthreadMutexattrDestroy(attr *c23.Void) int32 { return 0 }
 
-func PthreadMutexattrSettype(attr c23.Ptr, kind int32) int32 {
+func PthreadMutexattrSettype(attr *c23.Void, kind int32) int32 {
 	if kind < c23.PTHREAD_MUTEX_NORMAL || kind > PTHREAD_MUTEX_ERRORCHECK {
 		return c23.EINVAL
 	}
@@ -171,7 +174,7 @@ func PthreadMutexattrSettype(attr c23.Ptr, kind int32) int32 {
 	return 0
 }
 
-func PthreadMutexattrGettype(attr, kind c23.Ptr) int32 {
+func PthreadMutexattrGettype(attr, kind *c23.Void) int32 {
 	c23.Store32(kind, c23.Load32(attr)&maTypeMask)
 	return 0
 }
@@ -189,11 +192,11 @@ const (
 )
 
 // setBits sets the bits of mask in the int at attr to v.
-func setBits(attr c23.Ptr, mask, v uint32) {
+func setBits(attr *c23.Void, mask, v uint32) {
 	c23.Store32(attr, c23.Load32(attr)&^mask|v)
 }
 
-func PthreadMutexattrSetrobust(attr c23.Ptr, robust int32) int32 {
+func PthreadMutexattrSetrobust(attr *c23.Void, robust int32) int32 {
 	if robust != PTHREAD_MUTEX_STALLED && robust != PTHREAD_MUTEX_ROBUST {
 		return c23.EINVAL
 	}
@@ -201,14 +204,14 @@ func PthreadMutexattrSetrobust(attr c23.Ptr, robust int32) int32 {
 	return 0
 }
 
-func PthreadMutexattrGetrobust(attr, robust c23.Ptr) int32 {
+func PthreadMutexattrGetrobust(attr, robust *c23.Void) int32 {
 	c23.Store32(robust, c23.Load32(attr)&maRobust/maRobust)
 	return 0
 }
 
 // PthreadMutexattrSetpshared is pthread_mutexattr_setpshared: a shared
 // mutex is the program's, as there are no other processes to share it.
-func PthreadMutexattrSetpshared(attr c23.Ptr, pshared int32) int32 {
+func PthreadMutexattrSetpshared(attr *c23.Void, pshared int32) int32 {
 	if pshared != PTHREAD_PROCESS_PRIVATE && pshared != PTHREAD_PROCESS_SHARED {
 		return c23.EINVAL
 	}
@@ -216,14 +219,14 @@ func PthreadMutexattrSetpshared(attr c23.Ptr, pshared int32) int32 {
 	return 0
 }
 
-func PthreadMutexattrGetpshared(attr, pshared c23.Ptr) int32 {
+func PthreadMutexattrGetpshared(attr, pshared *c23.Void) int32 {
 	c23.Store32(pshared, c23.Load32(attr)&maPshared/maPshared)
 	return 0
 }
 
 // PthreadMutexattrSetprotocol is pthread_mutexattr_setprotocol: the
 // protocol is kept, and priorities change nothing.
-func PthreadMutexattrSetprotocol(attr c23.Ptr, protocol int32) int32 {
+func PthreadMutexattrSetprotocol(attr *c23.Void, protocol int32) int32 {
 	if protocol < PTHREAD_PRIO_NONE || protocol > PTHREAD_PRIO_PROTECT {
 		return c23.EINVAL
 	}
@@ -231,14 +234,14 @@ func PthreadMutexattrSetprotocol(attr c23.Ptr, protocol int32) int32 {
 	return 0
 }
 
-func PthreadMutexattrGetprotocol(attr, protocol c23.Ptr) int32 {
+func PthreadMutexattrGetprotocol(attr, protocol *c23.Void) int32 {
 	c23.Store32(protocol, c23.Load32(attr)>>maProtocolShift&3)
 	return 0
 }
 
 // PthreadMutexattrSetprioceiling is pthread_mutexattr_setprioceiling: a
 // SCHED_FIFO priority.
-func PthreadMutexattrSetprioceiling(attr c23.Ptr, ceiling int32) int32 {
+func PthreadMutexattrSetprioceiling(attr *c23.Void, ceiling int32) int32 {
 	if ceiling < prioMin || ceiling > prioMax {
 		return c23.EINVAL
 	}
@@ -246,7 +249,7 @@ func PthreadMutexattrSetprioceiling(attr c23.Ptr, ceiling int32) int32 {
 	return 0
 }
 
-func PthreadMutexattrGetprioceiling(attr, ceiling c23.Ptr) int32 {
+func PthreadMutexattrGetprioceiling(attr, ceiling *c23.Void) int32 {
 	c23.Store32(ceiling, uint32(maCeiling(c23.Load32(attr))))
 	return 0
 }
@@ -260,7 +263,7 @@ type cond struct {
 	clock   int32
 }
 
-func condOf(c c23.Ptr) *cond {
+func condOf(c *c23.Void) *cond {
 	c23.Check(c, 4)
 	a := c23.Addr(c)
 	if v, ok := conds.Load(a); ok {
@@ -272,7 +275,7 @@ func condOf(c c23.Ptr) *cond {
 
 // PthreadCondInit is pthread_cond_init, with the clock attr has (if not
 // null) for pthread_cond_timedwait.
-func PthreadCondInit(c, attr c23.Ptr) int32 {
+func PthreadCondInit(c, attr *c23.Void) int32 {
 	c23.Check(c, 4)
 	cv := new(cond)
 	if c23.Addr(attr) != 0 {
@@ -282,7 +285,7 @@ func PthreadCondInit(c, attr c23.Ptr) int32 {
 	return 0
 }
 
-func PthreadCondDestroy(c c23.Ptr) int32 {
+func PthreadCondDestroy(c *c23.Void) int32 {
 	if v, ok := conds.Load(c23.Addr(c)); ok {
 		cv := v.(*cond)
 		cv.mu.Lock()
@@ -296,12 +299,12 @@ func PthreadCondDestroy(c c23.Ptr) int32 {
 
 // PthreadCondWait is pthread_cond_wait, a cancellation point: a
 // canceled thread locks the mutex again before its cleanup handlers run.
-func PthreadCondWait(c, m c23.Ptr) int32 { return condOf(c).wait(mutexOf(m), time.Time{}) }
+func PthreadCondWait(c, m *c23.Void) int32 { return condOf(c).wait(mutexOf(m), time.Time{}) }
 
 // PthreadCondTimedwait is pthread_cond_timedwait, which gives up at the
 // time at ts on the condition variable's clock (CLOCK_REALTIME unless
 // pthread_condattr_setclock chose CLOCK_MONOTONIC).
-func PthreadCondTimedwait(c, m, ts c23.Ptr) int32 {
+func PthreadCondTimedwait(c, m, ts *c23.Void) int32 {
 	cv := condOf(c)
 	d, ok := c23.LoadClockDeadline(cv.clock, ts)
 	if !ok {
@@ -364,7 +367,7 @@ func (cv *cond) forget(ch chan struct{}) bool {
 	return false
 }
 
-func PthreadCondSignal(c c23.Ptr) int32 {
+func PthreadCondSignal(c *c23.Void) int32 {
 	if v, ok := conds.Load(c23.Addr(c)); ok {
 		cv := v.(*cond)
 		cv.mu.Lock()
@@ -377,7 +380,7 @@ func PthreadCondSignal(c c23.Ptr) int32 {
 	return 0
 }
 
-func PthreadCondBroadcast(c c23.Ptr) int32 {
+func PthreadCondBroadcast(c *c23.Void) int32 {
 	if v, ok := conds.Load(c23.Addr(c)); ok {
 		cv := v.(*cond)
 		cv.mu.Lock()
@@ -393,7 +396,8 @@ func PthreadCondBroadcast(c c23.Ptr) int32 {
 var onces sync.Map
 
 // PthreadOnce is pthread_once.
-func PthreadOnce(once, f c23.Ptr) int32 {
+func PthreadOnce(once, f *c23.Void) int32 {
+	c23.Check(once, 4)
 	if c23.AtomicLoad[int32](once) != 0 {
 		return 0
 	}
@@ -406,7 +410,7 @@ func PthreadOnce(once, f c23.Ptr) int32 {
 }
 
 // PthreadKeyCreate is pthread_key_create.
-func PthreadKeyCreate(k, destructor c23.Ptr) int32 {
+func PthreadKeyCreate(k, destructor *c23.Void) int32 {
 	c23.KeysMu.Lock()
 	defer c23.KeysMu.Unlock()
 	if len(c23.Keys) >= 1024 { // PTHREAD_KEYS_MAX
@@ -427,11 +431,11 @@ func PthreadKeyDelete(k uint32) int32 {
 	return 0
 }
 
-func PthreadGetspecific(k uint32) c23.Ptr {
+func PthreadGetspecific(k uint32) *c23.Void {
 	return c23.GSelf().Keys[k]
 }
 
-func PthreadSetspecific(k uint32, v c23.Ptr) int32 {
+func PthreadSetspecific(k uint32, v *c23.Void) int32 {
 	c23.KeysMu.Lock()
 	ok := int(k) < len(c23.Keys) && c23.Keys[k].Live
 	c23.KeysMu.Unlock()
@@ -440,7 +444,7 @@ func PthreadSetspecific(k uint32, v c23.Ptr) int32 {
 	}
 	tb := c23.GSelf()
 	if tb.Keys == nil {
-		tb.Keys = map[uint32]c23.Ptr{}
+		tb.Keys = map[uint32]*c23.Void{}
 	}
 	tb.Keys[k] = v
 	return 0

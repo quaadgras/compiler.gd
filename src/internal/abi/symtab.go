@@ -125,6 +125,7 @@ const (
 	FUNCDATA_ArgInfo            = 5
 	FUNCDATA_ArgLiveInfo        = 6
 	FUNCDATA_WrapInfo           = 7
+	FUNCDATA_StackVars          = 8
 )
 
 // Special values for the PCDATA_UnsafePoint table.

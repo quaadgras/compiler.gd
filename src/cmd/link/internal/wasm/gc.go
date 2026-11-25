@@ -229,9 +229,9 @@ func (l *gcLinker) writeType(w *bytes.Buffer, name string) {
 			// writeSplitTypes), with the value after its fields.
 			w.Write([]byte{0x4F, 0x01}) // final, with one supertype
 			writeUleb128(w, uint64(l.typeIndex(wasm.GCPtr)))
-			w.Write([]byte{0x5F, 0x04, wasm.GCTypeI32, 0x01, wasm.GCRefNull})
+			w.Write([]byte{0x5F, 0x05, wasm.GCTypeI32, 0x01, wasm.GCRefNull})
 			writeSleb128(w, int64(l.typeIndex(wasm.GCSlots)))
-			w.Write([]byte{0x00, wasm.GCTypeI32, 0x01, ExternRef, 0x00})
+			w.Write([]byte{0x00, wasm.GCTypeI32, 0x01, wasm.GCTypeI32, 0x00, ExternRef, 0x00})
 			break
 		}
 		w.Write([]byte{0x5F, 0x01, ExternRef, 0x00})
@@ -1086,15 +1086,19 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	// first: it may add layouts.
 	var init *wasmFunc
 	var ctors [][]byte
-	var splitWords []uint32
-	var splitEnd, splitWordsAddr int64
+	var splitWords, splitExact []uint32
+	var splitEnd, splitWordsAddr, splitRO int64
 	if splitMode() {
 		v, _ := dataSects.Load(ctxt)
 		sects, _ := v.([]wasmDataSect)
 		splitEnd = int64(gcDataEnd(ldr, sects))
-		splitWords = l.splitDataSlots(sects, uint64(splitEnd))
+		splitRO = int64(l.splitROEnd(uint64(splitEnd)))
+		splitWords, splitExact = l.splitDataSlots(sects, uint64(splitEnd), uint64(splitRO))
 		splitWordsAddr = (splitEnd + 7) &^ 7
-		init = &wasmFunc{Name: "go.initdata", Type: l.typeIndex(wasm.GCFuncPrefix + "."), Code: l.splitInit(splitWordsAddr, int64(len(splitWords)))}
+		init = &wasmFunc{Name: "go.initdata", Type: l.typeIndex(wasm.GCFuncPrefix + "."), Code: l.splitInit(splitWordsAddr, int64(len(splitWords)), int64(len(splitExact)/3), splitRO)}
+		if os.Getenv("GOWASMGC_NOTES") != "" {
+			fmt.Fprintf(os.Stderr, "GOWASM=gc,split: data to %#x, of which nothing changes below %#x; %d pointers into that, %d to variables\n", splitEnd, splitRO, len(splitWords), len(splitExact)/3)
+		}
 	} else {
 		init = &wasmFunc{Name: "go.initglobals", Type: l.typeIndex(wasm.GCFuncPrefix + "."), Code: l.initGlobals()}
 		ctors = l.constructors()
@@ -1110,7 +1114,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	if splitMode() {
 		first := len(hostImports) + len(fns)
 		l.helperFirst = first
-		helpers := l.splitHelpers(first, splitEnd)
+		helpers := l.splitHelpers(first, splitEnd, splitRO)
 		fns = append(fns, helpers...)
 		// (wasm.reflectcall and wasm.makefunc follow: see
 		// splitHelperIndex.)
@@ -1211,7 +1215,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	if splitMode() {
 		// The list of the words of data that are pointers, which the
 		// start function reads, follows the data.
-		end = uint64(splitWordsAddr) + 4*uint64(len(splitWords))
+		end = uint64(splitWordsAddr) + 4*uint64(len(splitWords)+len(splitExact))
 	} else {
 		layouts = l.layoutTable()
 	}
@@ -1233,7 +1237,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	})
 	section(sectionGlobal, func(w *bytes.Buffer) {
 		if splitMode() {
-			l.splitGlobals(w, stackTop, uint64(splitEnd))
+			l.splitGlobals(w, stackTop, uint64(splitEnd), uint64(splitRO))
 			return
 		}
 		writeUleb128(w, uint64(wasm.GCGlobals+len(l.globals)))
@@ -1336,7 +1340,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		chunks = gcDataChunks(chunks, int64(ds.sect.Vaddr), ds.data)
 	}
 	nseg := 1 + len(chunks)
-	if len(layouts) > 0 || len(splitWords) > 0 {
+	if len(layouts) > 0 || len(splitWords)+len(splitExact) > 0 {
 		nseg++
 	}
 	section(sectionDataCount, func(w *bytes.Buffer) {
@@ -1367,12 +1371,15 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 			writeUleb128(w, uint64(len(c.data)))
 			w.Write(c.data)
 		}
-		if len(splitWords) > 0 {
+		if len(splitWords)+len(splitExact) > 0 {
 			writeUleb128(w, 0) // active, memory 0
 			writeI32Const(w, int32(splitWordsAddr))
 			w.WriteByte(0x0b) // end
-			writeUleb128(w, uint64(4*len(splitWords)))
+			writeUleb128(w, uint64(4*(len(splitWords)+len(splitExact))))
 			for _, word := range splitWords {
+				w.Write(binary.LittleEndian.AppendUint32(nil, word))
+			}
+			for _, word := range splitExact {
 				w.Write(binary.LittleEndian.AppendUint32(nil, word))
 			}
 		}

@@ -120,7 +120,7 @@ func mqdOf(fd int32) (*mqd, bool) {
 // queueName is the name of a queue, as glibc and Linux take it: it must
 // begin with a slash (EINVAL), and what follows must be a file's name
 // (EACCES), of at most NAME_MAX bytes (ENAMETOOLONG).
-func queueName(name c23.Ptr) (string, int32) {
+func queueName(name *c23.Void) (string, int32) {
 	n := c23.GoString(name)
 	if !strings.HasPrefix(n, "/") {
 		return "", c23.EINVAL
@@ -139,7 +139,7 @@ func queueName(name c23.Ptr) (string, int32) {
 // for Linux's defaults, 10 messages of 8192 bytes) are its third and
 // fourth arguments. The descriptor is close-on-exec, as Linux's.
 // Permissions are checked as Linux checks them for the process's user.
-func MqOpen(name c23.Ptr, oflag int32, va ...any) int32 {
+func MqOpen(name *c23.Void, oflag int32, va ...any) int32 {
 	n, e := queueName(name)
 	if e != 0 {
 		c23.SetErrno(e)
@@ -175,7 +175,7 @@ func MqOpen(name c23.Ptr, oflag int32, va ...any) int32 {
 			q.mode = uint32(c23.ToInt64(va[0])) & 0o777
 		}
 		if len(va) > 1 {
-			if attr, ok := va[1].(c23.Ptr); ok && c23.Addr(attr) != 0 {
+			if attr, ok := va[1].(*c23.Void); ok && c23.Addr(attr) != 0 {
 				q.maxmsg = c23.LoadLong(c23.Add(attr, int(c23.LongSize)))
 				q.msgsize = c23.LoadLong(c23.Add(attr, 2*int(c23.LongSize)))
 				if q.maxmsg <= 0 || q.msgsize <= 0 || q.maxmsg > hardMaxmsg || q.msgsize > hardMsgsize {
@@ -205,7 +205,7 @@ func MqClose(fd int32) int32 {
 
 // MqUnlink is mq_unlink: the name goes, and the queue with its last
 // descriptor.
-func MqUnlink(name c23.Ptr) int32 {
+func MqUnlink(name *c23.Void) int32 {
 	n, e := queueName(name)
 	if e != 0 {
 		c23.SetErrno(e)
@@ -234,7 +234,7 @@ func wait(deadline time.Time) bool {
 // loadDeadline reads mq_timedsend's and mq_timedreceive's absolute
 // CLOCK_REALTIME timeout, if ts is not null: as Linux, an invalid one is
 // EINVAL whether or not the call would wait.
-func loadDeadline(ts c23.Ptr) (time.Time, int32) {
+func loadDeadline(ts *c23.Void) (time.Time, int32) {
 	if c23.Addr(ts) == 0 {
 		return time.Time{}, 0
 	}
@@ -249,7 +249,7 @@ func loadDeadline(ts c23.Ptr) (time.Time, int32) {
 // priority and before those of lower ones, waiting while the queue is
 // full, unless the descriptor is non-blocking (EAGAIN), until the
 // absolute time at ts (ETIMEDOUT).
-func MqTimedsend(fd int32, msg c23.Ptr, n uint64, prio uint32, ts c23.Ptr) int32 {
+func MqTimedsend(fd int32, msg *c23.Void, n uint64, prio uint32, ts *c23.Void) int32 {
 	d, nonblock := mqdOf(fd)
 	if d == nil {
 		return -1
@@ -307,14 +307,14 @@ func MqTimedsend(fd int32, msg c23.Ptr, n uint64, prio uint32, ts c23.Ptr) int32
 	return 0
 }
 
-func MqSend(fd int32, msg c23.Ptr, n uint64, prio uint32) int32 {
-	return MqTimedsend(fd, msg, n, prio, c23.Ptr{})
+func MqSend(fd int32, msg *c23.Void, n uint64, prio uint32) int32 {
+	return MqTimedsend(fd, msg, n, prio, (*c23.Void)(nil))
 }
 
 // MqTimedreceive is mq_timedreceive: it takes the oldest message of the
 // highest priority, storing its priority at prio (if not null), waiting
 // while there is none as mq_timedsend waits.
-func MqTimedreceive(fd int32, msg c23.Ptr, n uint64, prio, ts c23.Ptr) int64 {
+func MqTimedreceive(fd int32, msg *c23.Void, n uint64, prio, ts *c23.Void) int64 {
 	d, nonblock := mqdOf(fd)
 	if d == nil {
 		return -1
@@ -355,7 +355,7 @@ func MqTimedreceive(fd int32, msg c23.Ptr, n uint64, prio, ts c23.Ptr) int64 {
 	mu.Unlock()
 	c23.PollNotify()
 	if len(m.data) > 0 {
-		copy(c23.BytesAt(msg, uintptr(len(m.data))), m.data)
+		copy(c23.Writable(msg, uintptr(len(m.data))), m.data)
 	}
 	if c23.Addr(prio) != 0 {
 		c23.Store32(prio, m.prio)
@@ -363,15 +363,15 @@ func MqTimedreceive(fd int32, msg c23.Ptr, n uint64, prio, ts c23.Ptr) int64 {
 	return int64(len(m.data))
 }
 
-func MqReceive(fd int32, msg c23.Ptr, n uint64, prio c23.Ptr) int64 {
-	return MqTimedreceive(fd, msg, n, prio, c23.Ptr{})
+func MqReceive(fd int32, msg *c23.Void, n uint64, prio *c23.Void) int64 {
+	return MqTimedreceive(fd, msg, n, prio, (*c23.Void)(nil))
 }
 
 // MqNotify is mq_notify: the process registers for a notification
 // (struct sigevent at sev) of the next message to arrive at the empty
 // queue, or (sev null) removes its registration. Only one process may
 // register (EBUSY), and every registration here is the process's.
-func MqNotify(fd int32, sev c23.Ptr) int32 {
+func MqNotify(fd int32, sev *c23.Void) int32 {
 	d, _ := mqdOf(fd)
 	if d == nil {
 		return -1
@@ -400,7 +400,7 @@ func MqNotify(fd int32, sev c23.Ptr) int32 {
 // storeAttr stores the queue's attributes as struct mq_attr at p:
 // long mq_flags, mq_maxmsg, mq_msgsize, mq_curmsgs, __pad[4]. mu is
 // held.
-func storeAttr(p c23.Ptr, q *queue, nonblock bool) {
+func storeAttr(p *c23.Void, q *queue, nonblock bool) {
 	l := int(c23.LongSize)
 	c23.Memset(p, 0, uint64(8*l))
 	if nonblock {
@@ -412,7 +412,7 @@ func storeAttr(p c23.Ptr, q *queue, nonblock bool) {
 }
 
 // MqGetattr is mq_getattr.
-func MqGetattr(fd int32, attr c23.Ptr) int32 {
+func MqGetattr(fd int32, attr *c23.Void) int32 {
 	d, nonblock := mqdOf(fd)
 	if d == nil {
 		return -1
@@ -425,7 +425,7 @@ func MqGetattr(fd int32, attr c23.Ptr) int32 {
 
 // MqSetattr is mq_setattr: of the new attributes, only mq_flags's
 // O_NONBLOCK changes anything (other flags are EINVAL, as Linux's).
-func MqSetattr(fd int32, attr, old c23.Ptr) int32 {
+func MqSetattr(fd int32, attr, old *c23.Void) int32 {
 	d, nonblock := mqdOf(fd)
 	if d == nil {
 		return -1

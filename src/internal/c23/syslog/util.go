@@ -24,7 +24,7 @@ const logPID = 0x01
 
 const logPerror = 0x20
 
-func Openlog(ident c23.Ptr, option, facility int32) {
+func Openlog(ident *c23.Void, option, facility int32) {
 	st := &syslogState
 	st.Lock()
 	defer st.Unlock()
@@ -56,10 +56,10 @@ func Setlogmask(mask int32) int32 {
 	return old
 }
 
-func Syslog(priority int32, format c23.Ptr, va ...any) { Vsyslog(priority, format, c23.VaStart(va)) }
+func Syslog(priority int32, format *c23.Void, va ...any) { Vsyslog(priority, format, c23.VaStart(va)) }
 
 // Vsyslog is vsyslog. The format's %m is the message of errno.
-func Vsyslog(priority int32, format, ap c23.Ptr) {
+func Vsyslog(priority int32, format, ap *c23.Void) {
 	e := c23.Errno()
 	st := &syslogState
 	st.Lock()

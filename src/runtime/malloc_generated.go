@@ -78,6 +78,14 @@ func mallocgcSmallScanNoHeaderSC1(size uintptr, typ *_type, needzero bool) unsaf
 	if span.needzero != 0 {
 		memclrNoHeapPointers(x, elemsize)
 	}
+	if objTypesEnabled {
+
+		if t := span.otypes; t != nil {
+			*t.word((uintptr(x) - span.base()) / elemsize) = objTypeID(typ)
+		} else {
+			span.setObjType((uintptr(x)-span.base())/elemsize, typ)
+		}
+	}
 	if goarch.PtrSize == 8 && elemsize == 8 {
 
 		c.scanAlloc += 8
@@ -234,6 +242,14 @@ func mallocgcSmallScanNoHeaderSC2(size uintptr, typ *_type, needzero bool) unsaf
 
 	if span.needzero != 0 {
 		memclrNoHeapPointers(x, elemsize)
+	}
+	if objTypesEnabled {
+
+		if t := span.otypes; t != nil {
+			*t.word((uintptr(x) - span.base()) / elemsize) = objTypeID(typ)
+		} else {
+			span.setObjType((uintptr(x)-span.base())/elemsize, typ)
+		}
 	}
 	if goarch.PtrSize == 8 && elemsize == 8 {
 
@@ -392,6 +408,14 @@ func mallocgcSmallScanNoHeaderSC3(size uintptr, typ *_type, needzero bool) unsaf
 	if span.needzero != 0 {
 		memclrNoHeapPointers(x, elemsize)
 	}
+	if objTypesEnabled {
+
+		if t := span.otypes; t != nil {
+			*t.word((uintptr(x) - span.base()) / elemsize) = objTypeID(typ)
+		} else {
+			span.setObjType((uintptr(x)-span.base())/elemsize, typ)
+		}
+	}
 	if goarch.PtrSize == 8 && elemsize == 8 {
 
 		c.scanAlloc += 8
@@ -548,6 +572,14 @@ func mallocgcSmallScanNoHeaderSC4(size uintptr, typ *_type, needzero bool) unsaf
 
 	if span.needzero != 0 {
 		memclrNoHeapPointers(x, elemsize)
+	}
+	if objTypesEnabled {
+
+		if t := span.otypes; t != nil {
+			*t.word((uintptr(x) - span.base()) / elemsize) = objTypeID(typ)
+		} else {
+			span.setObjType((uintptr(x)-span.base())/elemsize, typ)
+		}
 	}
 	if goarch.PtrSize == 8 && elemsize == 8 {
 
@@ -706,6 +738,14 @@ func mallocgcSmallScanNoHeaderSC5(size uintptr, typ *_type, needzero bool) unsaf
 	if span.needzero != 0 {
 		memclrNoHeapPointers(x, elemsize)
 	}
+	if objTypesEnabled {
+
+		if t := span.otypes; t != nil {
+			*t.word((uintptr(x) - span.base()) / elemsize) = objTypeID(typ)
+		} else {
+			span.setObjType((uintptr(x)-span.base())/elemsize, typ)
+		}
+	}
 	if goarch.PtrSize == 8 && elemsize == 8 {
 
 		c.scanAlloc += 8
@@ -863,6 +903,14 @@ func mallocgcSmallScanNoHeaderSC6(size uintptr, typ *_type, needzero bool) unsaf
 	if span.needzero != 0 {
 		memclrNoHeapPointers(x, elemsize)
 	}
+	if objTypesEnabled {
+
+		if t := span.otypes; t != nil {
+			*t.word((uintptr(x) - span.base()) / elemsize) = objTypeID(typ)
+		} else {
+			span.setObjType((uintptr(x)-span.base())/elemsize, typ)
+		}
+	}
 	if goarch.PtrSize == 8 && elemsize == 8 {
 
 		c.scanAlloc += 8
@@ -1019,6 +1067,14 @@ func mallocgcSmallScanNoHeaderSC7(size uintptr, typ *_type, needzero bool) unsaf
 
 	if span.needzero != 0 {
 		memclrNoHeapPointers(x, elemsize)
+	}
+	if objTypesEnabled {
+
+		if t := span.otypes; t != nil {
+			*t.word((uintptr(x) - span.base()) / elemsize) = objTypeID(typ)
+		} else {
+			span.setObjType((uintptr(x)-span.base())/elemsize, typ)
+		}
 	}
 	if goarch.PtrSize == 8 && elemsize == 8 {
 
@@ -2027,6 +2083,14 @@ func mallocgcSmallScanSlowPath(size uintptr, typ *_type, needzero bool, spc span
 
 	if span.needzero != 0 {
 		memclrNoHeapPointers(x, elemsize)
+	}
+	if objTypesEnabled {
+
+		if t := span.otypes; t != nil {
+			*t.word((uintptr(x) - span.base()) / elemsize) = objTypeID(typ)
+		} else {
+			span.setObjType((uintptr(x)-span.base())/elemsize, typ)
+		}
 	}
 	if goarch.PtrSize == 8 && elemsize == 8 {
 

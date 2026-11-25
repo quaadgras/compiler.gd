@@ -22,6 +22,7 @@
 #define FUNCDATA_ArgInfo 5
 #define FUNCDATA_ArgLiveInfo 6
 #define FUNCDATA_WrapInfo 7
+#define FUNCDATA_StackVars 8
 
 // Pseudo-assembly statements.
 

@@ -103,6 +103,7 @@ func convTnoptr(typ *byte, elem *any) unsafe.Pointer
 
 // gd escape-bits helpers. See doc/gd/escape-bits.md.
 func materializeToHeap(src unsafe.Pointer, typ *byte) unsafe.Pointer
+func materializeToHeapC(src unsafe.Pointer, typ *byte, padded *byte) unsafe.Pointer
 func maybeEscapeArg(mask uint64, argIdx int, src unsafe.Pointer, typ *byte) unsafe.Pointer
 func resolveMaskSlow(rawMask uint64, carrier unsafe.Pointer, heapMask uint64, depth int) uint64
 func isOnHeap(p unsafe.Pointer) bool
@@ -112,6 +113,7 @@ func resolveForwardedRecvFieldMask(carrier unsafe.Pointer, fieldOffset uintptr, 
 // (zeroed), else heap-allocates. See doc/gd/escape-bits.md and
 // runtime/escape_bits.go.
 func maybeInPlace(outBuf unsafe.Pointer, typ *byte) unsafe.Pointer
+func maybeInPlaceC(outBuf unsafe.Pointer, typ *byte, padded *byte) unsafe.Pointer
 
 // Specialized versions of convT for specific types.
 // These functions take concrete types in the runtime. But they may
@@ -304,9 +306,14 @@ func asanread(addr, size uintptr)
 func asanwrite(addr, size uintptr)
 
 func checkptrAlignment(unsafe.Pointer, *byte, uintptr)
+func checkptrAlignmentLoad(unsafe.Pointer, *byte, uintptr)
 func checkptrArithmetic(unsafe.Pointer, []unsafe.Pointer)
+func checkptrArithmeticC(unsafe.Pointer, []unsafe.Pointer) unsafe.Pointer
+func c23slow(unsafe.Pointer, unsafe.Pointer) bool
 func checkptrPartial(unsafe.Pointer)
+func checkptrIncompat(unsafe.Pointer, int)
 func checkptrView(unsafe.Pointer, *byte, uintptr)
+func checkptrViewKept(unsafe.Pointer, *byte, uintptr)
 func exposeptr(unsafe.Pointer)
 
 func libfuzzerTraceCmp1(uint8, uint8, uint)

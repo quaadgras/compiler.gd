@@ -220,6 +220,10 @@ func addGCLocals(gd *base.Invocation) {
 			objw.Global(gd, x, int32(len(x.P)), obj.RODATA)
 			x.Set(obj.AttrStatic, true)
 		}
+		if x := fn.StackVars; x != nil {
+			objw.Global(gd, x, int32(len(x.P)), obj.RODATA)
+			x.Set(obj.AttrStatic, true)
+		}
 		if x := fn.OpenCodedDeferInfo; x != nil {
 			objw.Global(gd, x, int32(len(x.P)), obj.RODATA|obj.DUPOK)
 		}

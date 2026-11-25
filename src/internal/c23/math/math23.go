@@ -192,7 +192,7 @@ func Compoundn(x float64, n int64) float64 {
 
 // Remquo is remquo: remainder, and in *quo the low bits of the quotient
 // with its sign.
-func Remquo(x, y float64, quo c23.Ptr) float64 {
+func Remquo(x, y float64, quo *c23.Void) float64 {
 	r := Remainder(x, y)
 	q := int64(0)
 	if !math.IsNaN(r) && !math.IsInf(x, 0) && y != 0 {
@@ -422,12 +422,12 @@ func Dfmal(x, y, z float64) float64 { return Fma(x, y, z) }
 func Dsqrtl(x float64) float64 { return Sqrt(x) }
 
 // Canonicalize is canonicalize: every encoding is canonical.
-func Canonicalize(cx, x c23.Ptr) int32 {
+func Canonicalize(cx, x *c23.Void) int32 {
 	c23.StoreF64(cx, c23.LoadF64(x))
 	return 0
 }
 
-func Canonicalizef(cx, x c23.Ptr) int32 {
+func Canonicalizef(cx, x *c23.Void) int32 {
 	c23.StoreF32(cx, c23.LoadF32(x))
 	return 0
 }
@@ -436,7 +436,7 @@ const payload64 = 1<<51 - 1
 
 const payload32 = 1<<22 - 1
 
-func Getpayload(x c23.Ptr) float64 {
+func Getpayload(x *c23.Void) float64 {
 	v := c23.LoadF64(x)
 	if !math.IsNaN(v) {
 		return -1
@@ -444,7 +444,7 @@ func Getpayload(x c23.Ptr) float64 {
 	return float64(math.Float64bits(v) & payload64)
 }
 
-func Getpayloadf(x c23.Ptr) float32 {
+func Getpayloadf(x *c23.Void) float32 {
 	v := c23.LoadF32(x)
 	if v == v {
 		return -1
@@ -452,7 +452,7 @@ func Getpayloadf(x c23.Ptr) float32 {
 	return float32(math.Float32bits(v) & payload32)
 }
 
-func setpayload(res c23.Ptr, pl float64, quiet bool) int32 {
+func setpayload(res *c23.Void, pl float64, quiet bool) int32 {
 	if pl < 0 || pl != math.Trunc(pl) || pl > payload64 || !quiet && pl == 0 {
 		c23.StoreF64(res, 0)
 		return 1
@@ -465,7 +465,7 @@ func setpayload(res c23.Ptr, pl float64, quiet bool) int32 {
 	return 0
 }
 
-func setpayloadf(res c23.Ptr, pl float32, quiet bool) int32 {
+func setpayloadf(res *c23.Void, pl float32, quiet bool) int32 {
 	if pl < 0 || pl != float32(math.Trunc(float64(pl))) || pl > payload32 || !quiet && pl == 0 {
 		c23.StoreF32(res, 0)
 		return 1
@@ -478,13 +478,13 @@ func setpayloadf(res c23.Ptr, pl float32, quiet bool) int32 {
 	return 0
 }
 
-func Setpayload(res c23.Ptr, pl float64) int32 { return setpayload(res, pl, true) }
+func Setpayload(res *c23.Void, pl float64) int32 { return setpayload(res, pl, true) }
 
-func Setpayloadsig(res c23.Ptr, pl float64) int32 { return setpayload(res, pl, false) }
+func Setpayloadsig(res *c23.Void, pl float64) int32 { return setpayload(res, pl, false) }
 
-func Setpayloadf(res c23.Ptr, pl float32) int32 { return setpayloadf(res, pl, true) }
+func Setpayloadf(res *c23.Void, pl float32) int32 { return setpayloadf(res, pl, true) }
 
-func Setpayloadsigf(res c23.Ptr, pl float32) int32 { return setpayloadf(res, pl, false) }
+func Setpayloadsigf(res *c23.Void, pl float32) int32 { return setpayloadf(res, pl, false) }
 
 // totalKey orders float64s as IEEE 754's totalOrder does, as integers.
 func totalKey(v float64, mag bool) int64 {
@@ -509,19 +509,19 @@ func totalKeyf(v float32, mag bool) int64 {
 	return int64(b)
 }
 
-func Totalorder(x, y c23.Ptr) int32 {
+func Totalorder(x, y *c23.Void) int32 {
 	return c23.B2I(totalKey(c23.LoadF64(x), false) <= totalKey(c23.LoadF64(y), false))
 }
 
-func Totalordermag(x, y c23.Ptr) int32 {
+func Totalordermag(x, y *c23.Void) int32 {
 	return c23.B2I(totalKey(c23.LoadF64(x), true) <= totalKey(c23.LoadF64(y), true))
 }
 
-func Totalorderf(x, y c23.Ptr) int32 {
+func Totalorderf(x, y *c23.Void) int32 {
 	return c23.B2I(totalKeyf(c23.LoadF32(x), false) <= totalKeyf(c23.LoadF32(y), false))
 }
 
-func Totalordermagf(x, y c23.Ptr) int32 {
+func Totalordermagf(x, y *c23.Void) int32 {
 	return c23.B2I(totalKeyf(c23.LoadF32(x), true) <= totalKeyf(c23.LoadF32(y), true))
 }
 
@@ -607,7 +607,7 @@ func Nexttowardf(x float32, y float64) float32 {
 	return float32(y)
 }
 
-func Remquof(x, y float32, quo c23.Ptr) float32 {
+func Remquof(x, y float32, quo *c23.Void) float32 {
 	return float32(Remquo(float64(x), float64(y), quo))
 }
 

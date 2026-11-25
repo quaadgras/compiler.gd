@@ -6,66 +6,29 @@ package ccmain
 
 import (
 	"fmt"
+	"go/scanner"
+	gotoken "go/token"
+	"regexp"
 	"strings"
 )
 
 // Functions and statements.
 
-// local is how a local is held.
-type localKind uint8
-
-const (
-	lkVar     localKind = iota // a Go variable of its value
-	lkCell                     // a c23.Obj on the stack; the Go variable is its c23.Ptr
-	lkHeap                     // a variable length array: the Go variable is its c23.Ptr
-	lkAligned                  // aligned more than Go aligns: in the heap (c23.NewAligned)
-)
-
-func localKindOf(s *symbol) localKind {
-	switch {
-	case s.t.isVLA():
-		return lkHeap
-	case s.t.alignof() > 8 && (s.t.align > 0 || s.addr || s.t.isAggregate()):
-		return lkAligned
-	case s.addr || s.t.isAggregate():
-		return lkCell
-	}
-	return lkVar
-}
-
 // funcSig is the Go type of a C function of type ft.
 func (g *gen) funcSig(ft *funcType, names []string) string {
-	var ps []string
-	if ft.ret.kind == kStruct {
-		ps = append(ps, "sret c23.Ptr")
-	}
-	for i, pt := range ft.params {
-		if names != nil {
-			ps = append(ps, names[i]+" "+goType(pt))
-		} else {
-			ps = append(ps, goType(pt))
-		}
-	}
-	if ft.variadic || !ft.proto && len(ft.params) == 0 {
-		if names != nil {
-			ps = append(ps, "va ...any")
-		} else {
-			ps = append(ps, "...any")
-		}
-	}
-	res := ""
-	if ft.ret.kind != kVoid && ft.ret.kind != kStruct {
-		res = " " + goType(ft.ret)
-	}
-	return fmt.Sprintf("func(%s)%s", strings.Join(ps, ", "), res)
+	return g.tfuncSig(ft, names)
+
 }
 
 // tmp declares a temporary of Go type t at the top of the function.
 func (g *gen) tmp(t string) string {
 	g.tmpN++
-	n := fmt.Sprintf("t%d", g.tmpN)
+	n := fmt.Sprintf("__%d", g.tmpN)
 	if g.fn == nil {
-		// File scope (an initializer): declared where it is.
+		// File scope (an initializer): declared where it is, in the
+		// function that all of them are in.
+		g.fileTmpN++
+		n = fmt.Sprintf("__g%d", g.fileTmpN)
 		g.p("var %s %s", n, t)
 		g.p("_ = %s", n)
 		return n
@@ -74,50 +37,85 @@ func (g *gen) tmp(t string) string {
 	return n
 }
 
-// cellTmp makes a temporary object of type t on the stack: its c23.Ptr.
+// cellTmp makes a temporary object of type t on the stack: its *c23.Void.
 func (g *gen) cellTmp(t *ctype) string {
 	g.tmpN++
 	if g.fn == nil {
-		n := fmt.Sprintf("t%d", g.tmpN)
+		g.fileTmpN++
+		n := fmt.Sprintf("__g%d", g.fileTmpN)
 		g.p("%s := c23.New[%s]()", n, g.mirror(t))
 		g.p("_ = %s", n)
 		return n
 	}
-	fmt.Fprintf(&g.cells, "var o%d c23.Obj[%s]\nt%d := c23.LocalT(&o%d, %s)\n_ = t%d\n", g.tmpN, g.mirror(t), g.tmpN, g.tmpN, g.typeDesc(g.mirror(t)), g.tmpN)
-	return fmt.Sprintf("t%d", g.tmpN)
+	fmt.Fprintf(&g.cells, "var __o%d c23.Obj[%s]\n__%d := c23.LocalT(&__o%d, %s)\n_ = __%d\n", g.tmpN, g.mirror(t), g.tmpN, g.tmpN, g.typeDesc(g.mirror(t)), g.tmpN)
+	return fmt.Sprintf("__%d", g.tmpN)
 }
 
+// localName is the Go name of the local s: C's name for it, unless Go
+// or the generated code has another use for that name, or another local
+// of the function has it already. What the translation adds has names
+// that C's cannot be: they begin with two underscores.
 func (g *gen) localName(s *symbol) string {
 	if n, ok := g.names[s]; ok {
 		return n
 	}
-	g.tmpN++
-	n := fmt.Sprintf("v%d_%s", g.tmpN, goIdent(strings.ReplaceAll(s.name, ".", "_")))
+	var n string
+	if strings.Contains(s.name, ".") || s.name == "" {
+		// One the parser made: tmp.3, vla.7.
+		n = "__" + goIdent(strings.ReplaceAll(s.name, ".", ""))
+		if s.name == "" {
+			n = "__arg"
+		}
+	} else {
+		n = goIdent(s.name)
+	}
+	if g.localNames == nil {
+		g.localNames = map[string]bool{}
+	}
+	if base := n; goReserved[n] || generatedName.MatchString(n) || g.localNames[n] {
+		for i := 2; ; i++ {
+			if n = fmt.Sprintf("%s_%d", base, i); !g.localNames[n] {
+				break
+			}
+		}
+	}
+	g.localNames[n] = true
 	g.names[s] = n
 	return n
 }
 
+// goReserved are the names that a local cannot have in the generated Go:
+// Go's keywords, what Go declares, whose meaning the generated code
+// counts on (int, nil, len), and the names it gives its own.
+var goReserved = func() map[string]bool {
+	m := map[string]bool{}
+	for _, n := range strings.Fields(`
+		break case chan const continue default defer else fallthrough for func go goto if import
+		interface map package range return select struct switch type var
+		any bool byte comparable complex64 complex128 error float32 float64 int int8 int16 int32 int64
+		rune string uint uint8 uint16 uint32 uint64 uintptr true false iota nil
+		append cap clear close complex copy delete imag len make max min new panic print println real recover
+		c23 unsafe math bits atomic init main sret va`) {
+		m[n] = true
+	}
+	return m
+}()
+
+// generatedName matches the names the generated Go gives what is not
+// local: functions (c_f, c0_f), objects (g_x), types, the descriptors of
+// functions, string literals and the library's packages.
+var generatedName = regexp.MustCompile(`^(_C23)?(c[0-9]*_|g[0-9]*_|struct_|union_|enum_|fd_|s_[0-9]|c23_|[LJF][0-9_])`)
+
 // declareLocal declares a local at the top of the function.
 func (g *gen) declareLocal(s *symbol) {
-	n := g.localName(s)
-	switch localKindOf(s) {
-	case lkVar:
-		fmt.Fprintf(&g.locals, "var %s %s\n_ = %s\n", n, goType(s.t), n)
-	case lkCell:
-		g.tmpN++
-		fmt.Fprintf(&g.cells, "var o%d c23.Obj[%s]\n%s := c23.LocalT(&o%d, %s)\n_ = %s\n", g.tmpN, g.objMirror(s.t), n, g.tmpN, g.typeDesc(g.objMirror(s.t)), n)
-		if g.objMirror(s.t) == g.mirror(s.t) {
-			g.objs[s] = fmt.Sprintf("o%d.V", g.tmpN)
-		}
-	case lkHeap:
-		fmt.Fprintf(&g.locals, "var %s c23.Ptr\n_ = %s\n", n, n)
-	case lkAligned:
-		fmt.Fprintf(&g.cells, "%s := c23.NewAlignedT(%s, %d)\n_ = %s\n", n, g.typeDesc(g.objMirror(s.t)), s.t.alignof(), n)
-	}
+	g.tdeclareLocal(s)
+	return
+
 }
 
 func (g *gen) function(f *funcDecl) {
 	g.tmpN = 0
+	g.localNames = nil
 	lit := g.funcLit(f)
 	fmt.Fprintf(&g.funcs, "func %s%s\n\n", g.names[f.sym], strings.TrimPrefix(lit, "func"))
 	g.fn = nil
@@ -128,6 +126,11 @@ func (g *gen) funcLit(f *funcDecl) string {
 	g.fn = f
 	g.locals.Reset()
 	g.cells.Reset()
+	g.pending, g.inBody = nil, map[string]bool{}
+	// A goto may not jump over a Go declaration, and setjmp's and a flat
+	// function's code is entered at labels: there the locals are all
+	// declared at the top.
+	g.inPlace = !needsFlat(f) && f.setjmps == 0 && len(f.labels) == 0 && len(f.addrLabels) == 0
 	var fb strings.Builder
 	ft := f.sym.t.fn
 	var body strings.Builder
@@ -135,15 +138,26 @@ func (g *gen) funcLit(f *funcDecl) string {
 	g.sret = ft.ret.kind == kStruct
 	names := []string{} // not nil: named
 	for _, ps := range f.params {
-		if localKindOf(ps) == lkVar {
-			names = append(names, g.localName(ps))
+		if ps.t.kind != kStruct {
+			names = append(names, g.localName(ps)) // the Go parameter is the object
 			continue
 		}
 		g.tmpN++
-		pn := fmt.Sprintf("p%d", g.tmpN)
+		pn := fmt.Sprintf("__p%d", g.tmpN)
 		names = append(names, pn)
+		if ps.noCopy {
+			g.names[ps] = "(*" + pn + ")" // C++: the caller's object
+			continue
+		}
 		g.declareLocal(ps)
-		g.store(g.localName(ps), ps.t, pn, nil)
+		if overAligned(ps) {
+			g.p("%s = %s", g.localName(ps), allocAligned(ps))
+			g.p("%s = *%s", g.held(g.localName(ps), ps.t), pn)
+			continue
+		}
+		g.p("%s = *%s", g.localName(ps), pn)
+		continue
+
 	}
 	for _, s := range f.locals {
 		g.declareLocal(s)
@@ -162,40 +176,267 @@ func (g *gen) funcLit(f *funcDecl) string {
 	sig := g.funcSig(ft, names)
 	hasRes := ft.ret.kind != kVoid && ft.ret.kind != kStruct
 	fmt.Fprintf(&fb, "%s {\n", sig)
-	fb.WriteString(g.locals.String())
-	fb.WriteString(g.cells.String())
+	for _, s := range g.pending {
+		g.thoist(s)
+	}
 	text := body.String()
+	locals := g.locals.String()
+
+	locals, text = usedLocals(locals, g.cells.String(), text, g.inBody)
+
+	fb.WriteString(locals)
+	fb.WriteString(g.cells.String())
 	if g.flatSt != nil {
 		text = dropUnusedLabels(text)
 	}
 	if !g.jmp {
+		if !hasRes {
+			text = dropLastReturn(text)
+		}
 		fb.WriteString(text)
-		if hasRes {
-			fmt.Fprintf(&fb, "\treturn %s\n", zeroOf(ft.ret))
+		if hasRes && !endsInReturn(text) && (needsFlat(f) || !terminates(f.body)) {
+			fmt.Fprintf(&fb, "\treturn %s\n", g.zero(ft.ret))
 		}
 	} else {
 		// setjmp: the body runs again from a setjmp's site when longjmp
 		// unwinds to it (c23.Longjmp).
-		fb.WriteString("jf := c23.NewJmpFrame()\ndefer jf.Done()\nvar jsite, jval int32\n_ = jval\nfor {\n")
+		fb.WriteString("__jf := c23.NewJmpFrame()\ndefer __jf.Done()\nvar __jsite, __jval int32\n_ = __jval\nfor {\n")
 		if hasRes {
-			fmt.Fprintf(&fb, "r, ok := func() (r %s, ok bool) {\n", goType(ft.ret))
+			fmt.Fprintf(&fb, "__r, __ok := func() (__r %s, __ok bool) {\n", g.gt(ft.ret))
 		} else {
-			fb.WriteString("ok := func() (ok bool) {\n")
+			fb.WriteString("__ok := func() (__ok bool) {\n")
 		}
-		fb.WriteString("defer func() {\nif x := recover(); x != nil {\ns, v, mine := jf.Catch(x)\nif !mine {\npanic(x)\n}\njsite, jval = s, v\n}\n}()\nswitch jsite {\n")
+		fb.WriteString("defer func() {\nif x := recover(); x != nil {\ns, v, mine := __jf.Catch(x)\nif !mine {\npanic(x)\n}\n__jsite, __jval = s, v\n}\n}()\nswitch __jsite {\n")
 		for k := 1; k <= f.setjmps; k++ {
 			fmt.Fprintf(&fb, "case %d:\ngoto J%d\n", k, k)
 		}
 		fb.WriteString("}\n")
 		fb.WriteString(text)
 		if hasRes {
-			fmt.Fprintf(&fb, "return %s, true\n}()\nif ok {\nreturn r\n}\n}\n", zeroOf(ft.ret))
+			fmt.Fprintf(&fb, "return %s, true\n}()\nif __ok {\nreturn __r\n}\n}\n", g.zero(ft.ret))
 		} else {
-			fb.WriteString("return true\n}()\nif ok {\nreturn\n}\n}\n")
+			fb.WriteString("return true\n}()\nif __ok {\nreturn\n}\n}\n")
 		}
 	}
 	fb.WriteString("}")
 	return fb.String()
+}
+
+// usedLocals takes out of a function's Go what Go's rule that a variable
+// be used made it carry. locals are the declarations at its top, each
+// "var x T" followed by "_ = x"; cells and body are the rest; inBody
+// are the variables body declares itself, each also followed by
+// "_ = x". A variable that is read needs no blank use; one at the top
+// that is never named needs no declaration; one that is only assigned
+// keeps both (what is assigned may have effects).
+func usedLocals(locals, cells, body string, inBody map[string]bool) (string, string) {
+	reads, writes := varUses(cells + body)
+	var out strings.Builder
+	lines := strings.SplitAfter(locals, "\n")
+	for i := 0; i < len(lines); i++ {
+		l := lines[i]
+		name, ok := "", false
+		if f := strings.Fields(l); len(f) >= 3 && f[0] == "var" && i+1 < len(lines) && strings.TrimSpace(lines[i+1]) == "_ = "+f[1] {
+			name, ok = f[1], true
+		}
+		switch {
+		case !ok:
+			out.WriteString(l)
+		case reads[name] > 0:
+			out.WriteString(l)
+			i++
+		case writes[name] == 0:
+			i++
+		default:
+			out.WriteString(l)
+			out.WriteString(lines[i+1])
+			i++
+		}
+	}
+	if len(inBody) == 0 {
+		return out.String(), body
+	}
+	var b strings.Builder
+	for _, l := range strings.SplitAfter(body, "\n") {
+		// Its own blank use is one of the reads counted.
+		if name, ok := strings.CutPrefix(strings.TrimSpace(l), "_ = "); ok && inBody[name] && reads[name] > 1 {
+			continue
+		}
+		b.WriteString(l)
+	}
+	return out.String(), b.String()
+}
+
+// varUses counts, for each identifier of the Go statements src, where
+// it is read and where it is only assigned (x = v, x++, x += v at the
+// start of a statement, which Go does not take for a use). A
+// declaration's own name and a selector's field are neither.
+func varUses(src string) (reads, writes map[string]int) {
+	reads, writes = map[string]int{}, map[string]int{}
+	fset := gotoken.NewFileSet()
+	var sc scanner.Scanner
+	sc.Init(fset.AddFile("", fset.Base(), len(src)), []byte(src), nil, 0)
+	type tok struct {
+		t   gotoken.Token
+		lit string
+	}
+	var toks []tok
+	for {
+		_, t, lit := sc.Scan()
+		if t == gotoken.EOF {
+			break
+		}
+		toks = append(toks, tok{t, lit})
+	}
+	for i, k := range toks {
+		if k.t != gotoken.IDENT {
+			continue
+		}
+		prev := gotoken.SEMICOLON
+		if i > 0 {
+			prev = toks[i-1].t
+		}
+		if prev == gotoken.VAR || prev == gotoken.PERIOD {
+			continue
+		}
+		if i+1 < len(toks) && toks[i+1].t == gotoken.DEFINE {
+			continue // x := v declares it
+		}
+		next := gotoken.EOF
+		if i+1 < len(toks) {
+			next = toks[i+1].t
+		}
+		if next == gotoken.COLON && (prev == gotoken.LBRACE || prev == gotoken.COMMA) {
+			continue // a field's name in a composite literal
+		}
+		start := prev == gotoken.SEMICOLON || prev == gotoken.LBRACE || prev == gotoken.RBRACE || prev == gotoken.COLON
+		assigned := next == gotoken.ASSIGN || next == gotoken.INC || next == gotoken.DEC || next >= gotoken.ADD_ASSIGN && next <= gotoken.AND_NOT_ASSIGN
+		if start && assigned {
+			writes[k.lit]++
+		} else {
+			reads[k.lit]++
+		}
+	}
+	return reads, writes
+}
+
+// terminates reports whether the Go of the statement s is one that Go
+// takes for the end of a function, with no return after it: a return,
+// an if whose branches both are, a switch with a default that nothing
+// breaks out of and whose clauses are (Go's terminating statements).
+func terminates(s stmt) bool {
+	switch s := s.(type) {
+	case *returnStmt:
+		return true
+	case *block:
+		list := live(s.list)
+		if len(list) == 0 {
+			return false
+		}
+		for _, x := range list {
+			switch x := x.(type) {
+			case *deferStmt:
+				return false // what runs when the block is left comes after
+			case *declStmt:
+				for _, sym := range x.syms {
+					if sym.dtor != nil || sym.cleanup != nil {
+						return false
+					}
+				}
+			}
+		}
+		return terminates(list[len(list)-1])
+	case *ifStmt:
+		if _, _, ok := constCond(s.c); ok {
+			return false // one branch only is generated: not looked into
+		}
+		return s.els != nil && terminates(s.then) && terminates(s.els)
+	case *switchStmt:
+		var clauses [][]stmt
+		dflt := false
+		var add func(st stmt)
+		add = func(st stmt) {
+			if c, ok := st.(*caseStmt); ok && c.sw == s {
+				clauses = append(clauses, nil)
+				dflt = dflt || c.dflt
+				add(c.body)
+				return
+			}
+			if len(clauses) > 0 && st != nil {
+				clauses[len(clauses)-1] = append(clauses[len(clauses)-1], st)
+			}
+		}
+		if b, ok := s.body.(*block); ok {
+			for _, st := range b.list {
+				add(st)
+			}
+		} else {
+			add(s.body)
+		}
+		if !dflt || breaksOut(s.body) {
+			return false
+		}
+		for i, body := range clauses {
+			last := i == len(clauses)-1
+			switch {
+			case len(body) > 0 && terminates(body[len(body)-1]):
+			case !last && !endsJump(body):
+				// It falls through to the next.
+			default:
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// breaksOut reports whether a break in s leaves the switch that s is the
+// body of.
+func breaksOut(s stmt) bool {
+	switch s := s.(type) {
+	case *breakStmt:
+		return true
+	case *block:
+		for _, x := range s.list {
+			if breaksOut(x) {
+				return true
+			}
+		}
+	case *ifStmt:
+		return breaksOut(s.then) || breaksOut(s.els)
+	case *caseStmt:
+		return breaksOut(s.body)
+	case *labelStmt:
+		return breaksOut(s.body)
+	case *exprStmt, *declStmt, *returnStmt, *continueStmt, *gotoStmt, *whileStmt, *doStmt, *forStmt, *switchStmt, nil:
+		return false
+	default:
+		return true // not known: as if it did
+	}
+	return false
+}
+
+// dropLastReturn takes the return that ends body, the statements of a
+// function with no result, out of it: Go returns there anyway.
+func dropLastReturn(body string) string {
+	trimmed := strings.TrimRight(body, " \t\n")
+	i := strings.LastIndexByte(trimmed, '\n') + 1
+	if strings.TrimSpace(trimmed[i:]) != "return" {
+		return body
+	}
+	if before := strings.TrimRight(trimmed[:i], " \t\n"); strings.HasSuffix(before, ":") {
+		return body // a label's statement
+	}
+	return trimmed[:i]
+}
+
+// endsInReturn reports whether the last statement of body, a function's,
+// is a return: Go then wants none after it.
+func endsInReturn(body string) bool {
+	body = strings.TrimRight(body, " \t\n")
+	last := body[strings.LastIndexByte(body, '\n')+1:]
+	return strings.HasPrefix(strings.TrimSpace(last), "return")
 }
 
 // nestedFunc generates GNU's nested function f where it is defined: a
@@ -203,6 +444,7 @@ func (g *gen) funcLit(f *funcDecl) string {
 func (g *gen) nestedFunc(f *funcDecl) {
 	saveFn, saveOut, saveInd := g.fn, g.out, g.ind
 	saveLocals, saveCells := g.locals.String(), g.cells.String()
+	savePending, saveInPlace, saveInBody := g.pending, g.inPlace, g.inBody
 	saveSret, saveJmp, saveFlat, saveFrames := g.sret, g.jmp, g.flatSt, g.frames
 	g.frames = nil
 	lit := g.funcLit(f)
@@ -212,6 +454,7 @@ func (g *gen) nestedFunc(f *funcDecl) {
 	g.cells.Reset()
 	g.cells.WriteString(saveCells)
 	g.sret, g.jmp, g.flatSt, g.frames = saveSret, saveJmp, saveFlat, saveFrames
+	g.pending, g.inPlace, g.inBody = savePending, saveInPlace, saveInBody
 	name := g.localName(f.sym)
 	fmt.Fprintf(&g.locals, "var %s %s\n_ = %s\n", name, g.funcSig(f.sym.t.fn, nil), name)
 	g.p("%s = %s", name, lit)
@@ -221,7 +464,7 @@ func (g *gen) nestedFunc(f *funcDecl) {
 func (g *gen) ret(v string) {
 	if g.hasExits(0) {
 		if v != "" {
-			t := g.tmp(goType(g.fn.sym.t.fn.ret))
+			t := g.tmp(g.gt(g.fn.sym.t.fn.ret))
 			g.p("%s = %s", t, v)
 			v = t
 		}
@@ -240,7 +483,10 @@ func (g *gen) ret(v string) {
 }
 
 func zeroOf(t *ctype) string {
-	if goType(t) == "c23.Ptr" || is128(t) {
+	if goType(t) == "*c23.Void" {
+		return "(*c23.Void)(nil)"
+	}
+	if is128(t) {
 		return goType(t) + "{}"
 	}
 	return "0"
@@ -259,9 +505,12 @@ func (g *gen) stmt(s stmt) {
 	case *exprStmt:
 		g.effect(s.x)
 	case *declStmt:
+		save := g.declSyms
+		g.declSyms = s.syms
 		for _, sym := range s.syms {
 			g.localInit(sym)
 		}
+		g.declSyms = save
 	case *ifStmt:
 		if eff, v, ok := constCond(s.c); ok && !hasTarget(s) {
 			if eff != nil {
@@ -304,7 +553,7 @@ func (g *gen) stmt(s stmt) {
 			return
 		}
 		g.tmpN++
-		f := fmt.Sprintf("f%d", g.tmpN)
+		f := fmt.Sprintf("__f%d", g.tmpN)
 		g.p("for %s := true; ; %s = false {", f, f)
 		g.p("if !%s {", f)
 		g.out.WriteString(pre)
@@ -334,7 +583,7 @@ func (g *gen) stmt(s stmt) {
 			}
 		default:
 			g.tmpN++
-			f := fmt.Sprintf("f%d", g.tmpN)
+			f := fmt.Sprintf("__f%d", g.tmpN)
 			g.p("for %s := true; ; %s = false {", f, f)
 			if post != "" {
 				g.p("if !%s {", f)
@@ -365,13 +614,17 @@ func (g *gen) stmt(s stmt) {
 		switch {
 		case s.x == nil:
 			if g.fn.sym.t.fn.ret.kind != kVoid && g.fn.sym.t.fn.ret.kind != kStruct {
-				g.ret(zeroOf(g.fn.sym.t.fn.ret))
+				g.ret(g.zero(g.fn.sym.t.fn.ret))
 			} else {
 				g.ret("")
 			}
 		case s.x.ty().kind == kStruct:
 			v := g.rv(s.x)
-			g.p("%s", moveCode("sret", v, s.x.ty()))
+
+			if v != "sret" {
+				g.p("*sret = %s", star(v))
+			}
+
 			g.ret("")
 		default:
 			g.ret(g.rv(s.x))
@@ -379,7 +632,9 @@ func (g *gen) stmt(s stmt) {
 	case *gotoStmt:
 		if s.x != nil {
 			// goto *x: to the label whose address x is.
-			g.p("switch c23.Addr(%s) {", g.rv(s.x))
+
+			g.p("switch c23.LabelOf(%s) {", g.vptr(g.rv(s.x), s.x.ty()))
+
 			for _, l := range g.fn.addrLabels {
 				g.p("case %d:", l.id)
 				g.p("goto L_%s", l.goName())
@@ -487,8 +742,6 @@ func (g *gen) capture(f func()) string {
 
 func (g *gen) switchStmt(s *switchStmt) {
 	x := g.rv(s.x)
-	t := g.tmp(goType(s.x.ty()))
-	g.p("%s = %s", t, x)
 	// The clauses: each case label starts one, with the statements up to
 	// the next.
 	type clause struct {
@@ -525,6 +778,69 @@ func (g *gen) switchStmt(s *switchStmt) {
 	for _, st := range list {
 		add(st)
 	}
+	// Go's switch on the value, each clause with the values of its
+	// labels: those of the labels in front of it that have no
+	// statements are its own too.
+	const maxRange = 16 // the most values that case lo ... hi is written out as
+	st := s.x.ty()
+	type group struct {
+		vals []string
+		dflt bool
+		body []stmt
+	}
+	var groups []*group
+	byValue := true
+	cur := &group{}
+	for i, cl := range clauses {
+		switch {
+		case cl.c.dflt:
+			cur.dflt = true
+		case uint64(cl.c.hi-cl.c.lo) >= maxRange:
+			byValue = false
+		default:
+			for v := cl.c.lo; ; v++ {
+				lit := constLit(st, v)
+				if m := constConv.FindStringSubmatch(lit); m != nil && m[1] == goType(st) {
+					lit = m[2] // a constant has the type of what it is compared with
+				}
+				cur.vals = append(cur.vals, lit)
+				if v == cl.c.hi {
+					break
+				}
+			}
+		}
+		if len(cl.body) == 0 && i < len(clauses)-1 {
+			continue
+		}
+		cur.body = cl.body
+		groups = append(groups, cur)
+		cur = &group{}
+	}
+	if byValue {
+		g.p("switch %s {", x)
+		g.pushFrame(frSwitch, nil)
+		defer g.popFrame()
+		for i, gr := range groups {
+			if gr.dflt {
+				// Every value that no other clause has, the ones its
+				// labels name among them.
+				g.p("default:")
+			} else {
+				g.p("case %s:", strings.Join(gr.vals, ", "))
+			}
+			for _, st := range gr.body {
+				g.stmt(st)
+			}
+			if i < len(groups)-1 && !endsJump(gr.body) {
+				g.p("fallthrough")
+			}
+		}
+		g.p("}")
+		return
+	}
+	// With a range of many values: a switch on conditions.
+	t := g.tmp(g.gt(st))
+	g.p("%s = %s", t, x)
 	g.p("switch {")
 	g.pushFrame(frSwitch, nil)
 	defer g.popFrame()
@@ -609,42 +925,9 @@ func containsLabel(s stmt) bool {
 
 // localInit runs a local's declaration: allocates a VLA, and initializes.
 func (g *gen) localInit(s *symbol) {
-	n := g.localName(s)
-	switch localKindOf(s) {
-	case lkHeap:
-		size := g.vlaSize(s.t)
-		if a := s.t.alignof(); a > 8 {
-			// _Alignas
-			g.p("%s = c23.NewArrayAlignedT(%s, uintptr(%s), %d)", n, g.typeDesc(g.mirror(baseElem(s.t))), size, a)
-			return
-		}
-		g.p("%s = c23.NewArrayT(%s, uintptr(%s))", n, g.typeDesc(g.mirror(baseElem(s.t))), size)
-		return
-	case lkVar:
-		if s.init != nil {
-			if s.init.scalar == nil {
-				g.errorf(s.p, "internal error: %s has an aggregate initializer", s.name)
-			}
-			g.p("%s = %s", n, g.rv(s.init.scalar))
-		} else if !s.global {
-			// Without an initializer, its value becomes indeterminate
-			// each time the declaration is reached (C11 6.2.4): zero.
-			// The Go variable is the function's, declared at its top; set
-			// here, it does not carry a value from one pass of a loop to
-			// the next, which Go's compiler would otherwise keep live
-			// around the loop (and in registers at its head): Lua's
-			// interpreter loop reloaded 15 such floats each instruction.
-			g.p("%s = %s", n, zeroOf(s.t))
-		}
-		return
-	}
-	if s.init == nil {
-		return
-	}
-	if s.init.scalar == nil {
-		g.p("c23.Memset(%s, 0, %d)", n, s.t.sizeof())
-	}
-	g.initObject(n, s.t, s.init)
+	g.tlocalInit(s)
+	return
+
 }
 
 func baseElem(t *ctype) *ctype {
@@ -667,31 +950,6 @@ func (g *gen) vlaSize(t *ctype) string {
 		n = fmt.Sprintf("%s(%d)", goType(tULong), t.n)
 	}
 	return fmt.Sprintf("(%s * %s)", n, g.vlaSize(t.elem))
-}
-
-// initObject stores an initializer into the object of type t at addr,
-// which is zero.
-func (g *gen) initObject(addr string, t *ctype, in *initializer) {
-	if in.scalar != nil {
-		g.store(addr, t, g.rv(in.scalar), in.scalar)
-		return
-	}
-	for _, it := range in.items {
-		dst := addOff(addr, it.off)
-		switch {
-		case it.zero:
-			g.p("c23.Memset(%s, 0, %d)", dst, it.t.sizeof())
-		case it.f != nil && it.f.bits >= 0:
-			g.bitStore(dst, it.f, g.rv(it.x), it.x)
-		default:
-			if s, ok := it.x.(*strLit); ok && it.t.kind == kArray {
-				n := min(it.t.sizeof(), s.t.sizeof())
-				g.p("c23.Memmove(%s, %s, %d)", dst, g.str(s), n)
-				continue
-			}
-			g.store(dst, it.t, g.rv(it.x), it.x)
-		}
-	}
 }
 
 func addOff(addr string, off int64) string {

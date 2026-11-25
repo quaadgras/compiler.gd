@@ -11,12 +11,12 @@ import (
 // GetoptLong is getopt_long: getopt, and the long options --name,
 // --name=value and --name value (or abbreviations of name that are not
 // ambiguous) of longopts.
-func GetoptLong(argc int32, argv, optstring, longopts, longind c23.Ptr) int32 {
+func GetoptLong(argc int32, argv, optstring, longopts, longind *c23.Void) int32 {
 	return c23.Getopt(argc, argv, optstring, longopts, longind, false)
 }
 
 // GetoptLongOnly is getopt_long_only: getopt_long, where -name is a long
 // option too, unless it is a short option of optstring.
-func GetoptLongOnly(argc int32, argv, optstring, longopts, longind c23.Ptr) int32 {
+func GetoptLongOnly(argc int32, argv, optstring, longopts, longind *c23.Void) int32 {
 	return c23.Getopt(argc, argv, optstring, longopts, longind, true)
 }

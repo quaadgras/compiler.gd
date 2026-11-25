@@ -180,7 +180,7 @@
 
 (Load <t> ptr mem) && t.IsInterface() =>
   (IMake
-    (Load <typ.Uintptr> ptr mem)
+    (Load <typ.ITab> ptr mem)
     (Load <typ.BytePtr>
       (OffPtr <typ.BytePtrPtr> [config.PtrSize] ptr)
       mem)
@@ -200,7 +200,7 @@
       (Store {typ.BytePtr}
         (OffPtr <typ.BytePtrPtr> [config.PtrSize] dst)
         data
-        (Store {typ.Uintptr} dst itab mem))))
+        (Store {typ.ITab} dst itab mem))))
 
 // Helpers for expand calls
 // Some of these are copied from generic.rules
@@ -259,7 +259,7 @@
 (StructSelect [i] x:(Load <t> ptr mem)) =>
   @x.Block (Load <v.Type> (OffPtr <v.Type.PtrTo()> [t.FieldOff(int(i))] ptr) mem)
 
-(ITab x:(Load <t> ptr mem)) && t.IsInterface() => @x.Block (Load <typ.Uintptr> ptr mem)
+(ITab x:(Load <t> ptr mem)) && t.IsInterface() => @x.Block (Load <typ.ITab> ptr mem)
 
 (IData x:(Load <t> ptr mem)) && t.IsInterface() => @x.Block (Load <typ.BytePtr>
       (OffPtr <typ.BytePtrPtr> [config.PtrSize] ptr)

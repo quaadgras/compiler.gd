@@ -126,7 +126,7 @@ func Eventfd(initval uint32, flags int32) int32 {
 }
 
 // EventfdRead is eventfd_read: a read of the counter into *value.
-func EventfdRead(fd int32, value c23.Ptr) int32 {
+func EventfdRead(fd int32, value *c23.Void) int32 {
 	of := c23.FdFile(fd)
 	if of == nil {
 		c23.SetErrno(c23.EBADF)

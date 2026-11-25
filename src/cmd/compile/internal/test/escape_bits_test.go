@@ -548,6 +548,11 @@ func (d *doublerImpl) Name() string  { return "doubler" }
 // checks expect it at offset PtrSize — so a regression in closure
 // layout (e.g. a future optimizer reshuffling fields) would silently
 // corrupt the call site once Phase D lands. Lock it now.
+//
+// (gd: it looks at a func value as the words of its closure, which the
+// checks of unsafe.Pointer refuse: doc/gd/unsafe.md.)
+//
+//go:nocheckptr
 func TestEscapeBitsClosureLayout(t *testing.T) {
 	captured := 0
 	c := func(x int) int { captured = x; return x }

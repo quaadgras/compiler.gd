@@ -139,9 +139,11 @@ func viewSame() {
 		sink2 = *(*struct{ s string })(unsafe.Pointer(&s))
 	})
 	viewCase("CheckPtrWholeSlice", func() {
+		// A slice of elements of the same size, with pointers where
+		// they are: its length is in those (checkptr_compat.go).
 		b := []byte("a slice")
-		sink2 = *(*[]int)(unsafe.Pointer(&b))
-		sink2 = *(*[]string)(unsafe.Pointer(&b))
+		sink2 = *(*[]int8)(unsafe.Pointer(&b))
+		sink2 = *(*[]bool)(unsafe.Pointer(&b))
 	})
 	viewCase("CheckPtrWholeIface", func() {
 		var e any = 1
@@ -164,10 +166,11 @@ func viewSame() {
 		})(unsafe.Pointer(&v))
 	})
 	viewCase("CheckPtrWholePointerWord", func() {
-		// A plain pointer is not a whole value.
+		// A plain pointer is not a whole value: its bytes may be
+		// looked at. (As an integer it may not: checkptr_compat.go.)
 		p := new(int)
 		sink2 = p
-		viewWord = uint64(*(*uintptr)(unsafe.Pointer(&p)))
+		viewWord = uint64((*[8]byte)(unsafe.Pointer(&p))[0])
 	})
 	viewCase("CheckPtrWholeZeroSize", func() {
 		var s string
@@ -284,22 +287,16 @@ func viewLong() {
 		sink2 = q.Load()
 		viewShapeStatic[abi.EmptyInterface]()
 	})
-	viewCase("CheckPtrWholePastObject", func() {
-		// A view whose type is longer than the object is of the
-		// object up to its end.
-		x := new(struct {
-			s   string
-			pad [1000]byte
-		})
-		sink2 = x
-		viewAs[[1 << 20]byte](viewPlain(&x.pad[990]))
-		y := new(struct {
-			s   string
-			pad [64]byte
-		})
-		sink2 = y
-		viewAs[[1 << 20]byte](viewPlain(&y.pad[60]))
-	})
+}
+
+// viewPast returns p moved by n bytes to where its span has no object,
+// which checked arithmetic does not do: a pointer that leaves its
+// object for nothing that the runtime knows is refused.
+//
+//go:nocheckptr
+//go:noinline
+func viewPast(p unsafe.Pointer, n uintptr) unsafe.Pointer {
+	return unsafe.Add(p, n)
 }
 
 //go:noinline
@@ -411,7 +408,7 @@ func viewSmall() {
 		const pageSize, size = 8192, unsafe.Sizeof([3]string{})
 		x := new([3]string)
 		p := viewPlain(x)
-		viewAs[[size]byte](unsafe.Add(p, pageSize/size*size-uintptr(p)%pageSize))
+		viewAs[[size]byte](viewPast(p, pageSize/size*size-uintptr(p)%pageSize))
 		runtime.KeepAlive(x)
 	})
 	viewCase(W+"ABIInterface", func() {
@@ -432,10 +429,18 @@ func viewSmall() {
 		viewAs[byte](viewPlain(&v.n))
 	})
 	viewCase(W+"PlainMemory", func() {
-		// A string's type over memory that holds no whole value, in
-		// a span that has a bitmap.
+		// A string's type over memory of a type that the program
+		// made as it ran, of which the span has only where the
+		// pointers are. (Over a struct of a pointer and an integer
+		// that it was compiled with, it is refused:
+		// checkptr_compat.go.)
 		sink2 = new([2]string)
-		viewAs[[2]string](viewPlain(new(viewPlainWords)))
+		v := reflect.New(reflect.StructOf([]reflect.StructField{
+			{Name: "P", Type: reflect.TypeFor[*byte]()},
+			{Name: "N", Type: reflect.TypeFor[uint64]()},
+		}))
+		sink2 = v.Interface()
+		viewAs[string](v.UnsafePointer())
 	})
 	viewCase(W+"Reflect", func() {
 		t := reflect.StructOf([]reflect.StructField{
@@ -462,8 +467,8 @@ func viewSmall() {
 			runtime.GC()
 			runtime.GC()
 			for range 2000 {
-				viewAs[[unsafe.Sizeof(viewPlainWords{})]byte](viewPlain(new(viewPlainWords)))
-				viewAs[[unsafe.Sizeof(viewPadded{})]byte](viewPlain(new(viewPadded)))
+				viewAs[viewPlainWords](viewPlain(new(viewPlainWords)))
+				viewAs[viewPadded](viewPlain(new(viewPadded)))
 			}
 		}
 	})

@@ -121,10 +121,12 @@ int main() {
 
   1 ? -2 : (void)-1;
 
-  ASSERT(20, ({ int x; int *p=&x; p+20-p; }));
-  ASSERT(1, ({ int x; int *p=&x; p+20-p>0; }));
-  ASSERT(-20, ({ int x; int *p=&x; p-20-p; }));
-  ASSERT(1, ({ int x; int *p=&x; p-20-p<0; }));
+  // (gd: these were of an int x, whose pointer C lets go no further
+  // than its end: the checks of pointer arithmetic stop it there.)
+  ASSERT(20, ({ int x[20]; int *p=x; p+20-p; }));
+  ASSERT(1, ({ int x[20]; int *p=x; p+20-p>0; }));
+  ASSERT(-20, ({ int x[20]; int *p=x+20; p-20-p; }));
+  ASSERT(1, ({ int x[20]; int *p=x+20; p-20-p<0; }));
 
   EASSERT(15, (char *)0xffffffffffffffff - (char *)0xfffffffffffffff0);
   EASSERT(-15, (char *)0xfffffffffffffff0 - (char *)0xffffffffffffffff);

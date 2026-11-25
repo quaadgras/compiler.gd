@@ -38,8 +38,12 @@ func splitslots(n uintptr) uintptr {
 // The compiler replaces calls to these by instructions.
 
 // newblockptr returns a pointer to the block of linear memory at addr,
-// with a new array of nslots nil pointers.
-func newblockptr(addr, nslots uintptr) unsafe.Pointer
+// of size bytes, with a new array of nslots nil pointers.
+func newblockptr(addr, nslots, size uintptr) unsafe.Pointer
+
+// ptrlim returns the size of what p points into, from where element 0
+// of its array is: 0 for a pointer that was made of an integer.
+func ptrlim(p unsafe.Pointer) uintptr
 
 // ptroff returns how far the address of p is from where element 0 of
 // its array is.
@@ -53,6 +57,28 @@ func ptrnslots(p unsafe.Pointer) uintptr
 func splitmove(dst, src unsafe.Pointer, n uintptr)
 func splitzero(p unsafe.Pointer, n uintptr)
 
+// splitmovec and splitzeroc are splitmove and splitzero for pointers of
+// the program's: the n bytes are in what each points into, or the
+// program stops.
+func splitmovec(dst, src unsafe.Pointer, n uintptr)
+func splitzeroc(p unsafe.Pointer, n uintptr)
+
+// splitcheck stops the program unless the n bytes at p are in what p
+// points into, and splitcheckw unless they are also bytes that may be
+// stored in: for what the runtime loads and stores by its address
+// (linaddr), where no load through the pointer asks.
+func splitcheck(p unsafe.Pointer, n uintptr)
+func splitcheckw(p unsafe.Pointer, n uintptr)
+
+// splitsetlim returns p as a pointer to something of lim bytes: for
+// what the runtime gives the program a pointer to that it must not look
+// into (lim 0), and for making that the pointer to it again.
+func splitsetlim(p unsafe.Pointer, lim uintptr) unsafe.Pointer
+
+// splitintptr returns the integer v as a pointer of the program's: one
+// with no size, which nothing is loaded or stored through (nil for 0).
+func splitintptr(v uintptr) unsafe.Pointer
+
 // splitalloc returns a pointer to n zeroed bytes in a new block, which
 // has an array for the pointers of its first nslots words.
 func splitalloc(n, nslots uintptr) unsafe.Pointer {
@@ -60,7 +86,7 @@ func splitalloc(n, nslots uintptr) unsafe.Pointer {
 		return unsafe.Pointer(&zerobase)
 	}
 	addr := linalloc(n)
-	p := newblockptr(addr, nslots)
+	p := newblockptr(addr, nslots, n)
 	linregister(p, addr)
 	return p
 }
@@ -143,4 +169,47 @@ func splitbase(p unsafe.Pointer) uintptr {
 		return 0
 	}
 	return a - ptroff(p)
+}
+
+// typeWord is the word of an interface that holds its type or its
+// table. With split it is a pointer in memory, as the compiler has it
+// (cmd/compile/internal/ssa's Types.ITab): it is read as the pointer
+// that was stored there, and not made of an integer.
+type typeWord = unsafe.Pointer
+
+func typeWordOf(p unsafe.Pointer) typeWord  { return p }
+func typeWordPtr(w typeWord) unsafe.Pointer { return w }
+
+// splitfault is what code that is not the runtime's calls where it
+// would load or store through a pointer something that is not in what
+// the pointer points into (cmd/compile/internal/wasm/gcsplit.go): the
+// program stops, and cannot recover.
+func splitfault() {
+	fatal("load or store through a pointer that is not in what it points into, or through one that the program made of an integer")
+}
+
+// staticptr returns the pointer to the address addr of the program's
+// data: for the runtime's walks of what the linker laid out (the itabs,
+// the descriptors of types by their offsets), which it has as integers.
+// The pointer is one into all of the data. An integer that is no
+// address of the data gives a pointer that nothing is loaded through.
+//
+// It is the one conversion of an integer to a pointer that the runtime
+// makes for itself: the code of the runtime is checked as any other
+// (cmd/compile/internal/wasm/gcsplit.go), and a conversion elsewhere is
+// to a pointer with no size.
+//
+//go:nocheckptr
+//go:noinline
+func staticptr(addr uintptr) unsafe.Pointer { return unsafe.Pointer(addr) }
+
+// syscall_hostBytes stops the program unless the n bytes at p are in
+// what p points into: package syscall gives the host their address
+// (GOOS=wasip1; syscall/js has its own, in jscall.go).
+//
+//go:linkname syscall_hostBytes syscall.hostBytes
+func syscall_hostBytes(p unsafe.Pointer, n int) {
+	if n > 0 {
+		splitcheck(p, uintptr(n))
+	}
 }

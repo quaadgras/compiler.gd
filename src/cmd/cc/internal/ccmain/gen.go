@@ -7,7 +7,10 @@ package ccmain
 import (
 	"fmt"
 	"go/format"
+	"go/scanner"
+	gotoken "go/token"
 	"math"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,11 +21,11 @@ import (
 //
 // C's objects are Go allocations of mirror types (the Go type with the
 // C type's layout, unions as bytes) and every access goes through a
-// c23.Ptr. A local whose address is never taken is a Go variable; one
+// *c23.Void. A local whose address is never taken is a Go variable; one
 // whose address is, or an array or struct, is a c23.Obj on the Go
 // stack. Every local is declared at the top of its function, so that
 // goto may jump anywhere Go lets it. A struct value is always in memory:
-// as an rvalue it is the c23.Ptr to it, a parameter is copied in by the
+// as an rvalue it is the *c23.Void to it, a parameter is copied in by the
 // callee, and a result is written to memory the caller passes.
 
 // options says what to generate.
@@ -31,40 +34,60 @@ type options struct {
 	main   bool   // C's main becomes the program's main
 	prefix string // of every package-level name: "_C23" in a package that
 	// imports "C", so that nothing clashes with the package's own names
+	undef bool // a call of an undefined function panics, instead of being an error
+	debug bool // write the assertions that Go lays each record out as C does
 }
 
 type genError struct{ msg string }
 
 // pkgGen generates the Go of a package: one or more units.
 type pkgGen struct {
-	o        options
-	libcPkgs map[string]bool // the packages of internal/c23/... it calls (libcpkg.go)
-	file     string
-	units    []*unit
-	types    strings.Builder   // the mirror types
-	vars     strings.Builder   // package-level variables
-	inits    strings.Builder   // func init's statements
-	tdescs   map[string]string // the variable holding each mirror type's c23.Type
-	tdVars   strings.Builder   // their declarations
-	descInit strings.Builder   // the function descriptors' assignments
-	funcs    strings.Builder
-	mirrors  map[string]string // a record's layout key to its mirror's name
-	strs     map[string]string
-	ext      map[string]*symbol // the definitions with external linkage
-	names    map[*symbol]string
-	descs    map[string]bool    // function descriptors made
-	objs     map[*symbol]string // the Go expression of an object's value, known statically
-	recN     int
-	uses     map[string]bool // imports used
+	hasUnions bool // a union with pointers was declared: see mirror
+	o         options
+	libcPkgs  map[string]bool // the packages of internal/c23/... it calls (libcpkg.go)
+	file      string
+	units     []*unit
+	types     strings.Builder   // the mirror types
+	vars      strings.Builder   // package-level variables
+	inits     strings.Builder   // func init's statements
+	tdescs    map[string]string // the variable holding each mirror type's c23.Type
+	tdVars    strings.Builder   // their declarations
+	descInit  strings.Builder   // the function descriptors' assignments
+	funcs     strings.Builder
+	mirrors   map[string]string // a record's layout key to its mirror's name
+	strs      map[string]string
+	ext       map[string]*symbol // the definitions with external linkage
+	names     map[*symbol]string
+	descs     map[string]bool    // function descriptors made
+	objs      map[*symbol]string // the Go expression of an object's value, known statically
+	recN      int
+	uses      map[string]bool  // imports used
+	stubs     map[*symbol]bool // undefined functions that have a stub (options.undef)
+	// The 1:1 translation's objects whose initializer is in their Go
+	// declaration (thin.go's staticInit), and, while one's is being made,
+	// what it refers to.
+	declared map[*symbol]bool
+	refs     map[*symbol]bool // nil: not being made
+	refFunc  bool             // it refers to a function
+
+	// The struct and union types that a unit completes, by what names
+	// them in every unit (completeKey): a pointer to one is a pointer
+	// to its mirror in a unit that only declares it too. nil for a
+	// name that two units give different types.
+	complete map[string]*ctype
+	fileTmpN int // temporaries of file-scope code, which is all in one function
 }
 
 // gen generates one function, or file-scope code, of a unit.
 type gen struct {
 	*pkgGen
-	u     *unit
-	unitN int
-	out   *strings.Builder
-	ind   int
+	// The member that each union of the object being initialized is
+	// initialized as, by offset (initializer.unions): for tat.
+	initUnion map[int64]*field
+	u         *unit
+	unitN     int
+	out       *strings.Builder
+	ind       int
 
 	fn      *funcDecl
 	locals  strings.Builder // the function's hoisted declarations
@@ -76,6 +99,16 @@ type gen struct {
 	flatSt  *flatState // a flat function's (flat.go)
 	jmp     bool       // the function calls setjmp: its body is a closure
 	frames  []*frame   // the blocks, loops and switches being generated (cleanup.go)
+
+	// The 1:1 translation's locals (thin.go): the ones not declared yet,
+	// which are declared where C declares them if nothing can jump
+	// over that (inPlace), and at the function's top otherwise; and
+	// the names of those declared in place (inBody).
+	pending    []*symbol
+	inPlace    bool
+	inBody     map[string]bool
+	declSyms   []*symbol       // of the declaration that is being generated
+	localNames map[string]bool // the Go names of the function\'s locals (localName)
 }
 
 func (g *gen) errorf(at pos, format string, args ...any) {
@@ -106,31 +139,18 @@ func newPkgGen(file string, o options) *pkgGen {
 // generate translates units, one program or package, to Go source.
 func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, err error) {
 	defer catch(&err)
+	if os.Getenv("CCDEBUG") == "layout" {
+		o.debug = true
+	}
 	pg = newPkgGen(file, o)
 	pg.units = units
 	pg.link()
+	pg.completed()
 	for i, u := range units {
 		g := &gen{pkgGen: pg, u: u, unitN: i}
-		for _, t := range u.records {
-			if t.rec.complete {
-				g.record(t)
-			}
-		}
 		g.unit()
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "// Code generated by cmd/cc from %s. DO NOT EDIT.\n\npackage %s\n\n", file, o.pkg)
-	b.WriteString("import (\n\t\"math\"\n\t\"os\"\n\t\"unsafe\"\n\n\t\"internal/c23\"\n")
-	var paths []string
-	for path := range pg.libcPkgs {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	for _, path := range paths {
-		fmt.Fprintf(&b, "\t%s %q\n", libcAlias(path), "internal/c23/"+path)
-	}
-	b.WriteString(")\n\n")
-	b.WriteString("var _ = math.Inf\nvar _ = os.Exit\nvar _ unsafe.Pointer\nvar _ c23.Ptr\n\n")
 	b.WriteString(pg.types.String())
 	b.WriteString(pg.tdVars.String())
 	b.WriteString(pg.vars.String())
@@ -154,23 +174,79 @@ func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, er
 		args := ""
 		if len(m.t.fn.params) >= 2 {
 			args = "int32(len(os.Args)), c23.Args()"
+			{
+				g := &gen{pkgGen: pg, u: units[0]}
+				args = "int32(len(os.Args)), " + g.retype("c23.Args()", voidPtr, g.gt(m.t.fn.params[1]))
+			}
 		}
 		ret := fmt.Sprintf("%s(%s)", pg.names[m], args)
 		// C's streams are flushed if main panics (a fault): what it
 		// printed before is not lost. c23.Exit flushes them, and ends in
 		// os.Exit, which runs no deferred call: this one runs only then.
-		const flush = "\n\tdefer c23.Fflush(c23.Ptr{}) // if main panics"
+		const flush = "\n\tdefer c23.Fflush(nil) // if main panics"
 		if m.t.fn.ret.kind == kVoid {
 			fmt.Fprintf(&b, "\nfunc main() {%s\n\t%s\n\tc23.Exit(0)\n}\n", flush, ret)
 		} else {
 			fmt.Fprintf(&b, "\nfunc main() {%s\n\tc23.Exit(int32(%s))\n}\n", flush, ret)
 		}
 	}
-	out, ferr := format.Source([]byte(b.String()))
+	// The header, with the imports of what the Go above uses.
+	body := b.String()
+	var hdr strings.Builder
+	fmt.Fprintf(&hdr, "// Code generated by cmd/cc from %s. DO NOT EDIT.\n\npackage %s\n\n", file, o.pkg)
+	used := usedPackages(body)
+	hdr.WriteString("import (\n")
+	for _, std := range []string{"math", "os", "unsafe"} {
+		if used[std] {
+			fmt.Fprintf(&hdr, "\t%q\n", std)
+		}
+	}
+	hdr.WriteString("\n")
+	if used["c23"] {
+		hdr.WriteString("\t\"internal/c23\"\n")
+	}
+	var paths []string
+	for path := range pg.libcPkgs {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		if used[libcAlias(path)] {
+			fmt.Fprintf(&hdr, "\t%s %q\n", libcAlias(path), "internal/c23/"+path)
+		}
+	}
+	hdr.WriteString(")\n\n")
+	out, ferr := format.Source([]byte(hdr.String() + body))
 	if ferr != nil {
-		return []byte(b.String()), pg, fmt.Errorf("formatting the output: %v", ferr)
+		return []byte(hdr.String() + body), pg, fmt.Errorf("formatting the output: %v", ferr)
 	}
 	return out, pg, nil
+}
+
+// usedPackages are the names that src, Go source without its package
+// clause, uses as packages: each identifier that a selector follows and
+// that nothing selects.
+func usedPackages(src string) map[string]bool {
+	used := map[string]bool{}
+	fset := gotoken.NewFileSet()
+	var sc scanner.Scanner
+	sc.Init(fset.AddFile("", fset.Base(), len(src)), []byte(src), nil, 0)
+	prev, name := gotoken.ILLEGAL, ""
+	for {
+		_, tok, lit := sc.Scan()
+		if tok == gotoken.EOF {
+			break
+		}
+		if tok == gotoken.PERIOD && name != "" {
+			used[name] = true
+		}
+		name = ""
+		if tok == gotoken.IDENT && prev != gotoken.PERIOD {
+			name = lit
+		}
+		prev = tok
+	}
+	return used
 }
 
 // link names every symbol with linkage, across the units: one definition
@@ -180,6 +256,9 @@ func (pg *pkgGen) link() {
 		for _, s := range u.syms {
 			if s.linkage == 'e' {
 				if old := pg.ext[s.name]; old != nil {
+					if old.defined && s.defined && old.comdat && s.comdat {
+						continue // C++'s inline: the first definition
+					}
 					if old.defined && s.defined && !(s.kind == symVar && (old.init == nil || s.init == nil)) {
 						panic(genError{fmt.Sprintf("%s:%d: multiple definition of %q", s.p.file, s.p.line, s.name)})
 					}
@@ -263,7 +342,7 @@ func (g *gen) unit() {
 	// Compound literals at file scope first: initializers use them.
 	var lits, rest []*symbol
 	for _, s := range g.u.statics {
-		if strings.HasPrefix(s.name, "complit.") {
+		if strings.HasPrefix(s.name, "complit.") || strings.HasPrefix(s.name, "pmf.") {
 			lits = append(lits, s)
 		} else {
 			rest = append(rest, s)
@@ -281,96 +360,65 @@ func (g *gen) unit() {
 		g.globalVar(s)
 	}
 	for _, f := range g.u.funcs {
+		if f.sym.comdat && f.sym.linkage == 'e' && g.ext[f.sym.name] != f.sym {
+			continue // C++'s inline: defined by another unit
+		}
 		g.function(f)
 	}
 }
 
 func (g *gen) globalVar(s *symbol) {
-	if v, ok := libcVars[s.name]; ok && s.storage == sExtern && !s.defined {
-		// The library's object (headers_env.go).
-		fmt.Fprintf(&g.vars, "var %s = %s()\n", g.names[s], g.libcFunc(v))
-		return
-	}
-	if s.t.kind == kArray && s.t.n < 0 {
-		g.errorf(s.p, "array %q has no length", s.name)
-	}
-	if !s.t.isComplete() {
-		if s.storage == sExtern && !s.defined {
-			// Declared, never defined: an error only if used.
-			return
-		}
-		g.errorf(s.p, "storage size of %q isn't known", s.name)
-	}
-	name := g.names[s]
-	if s.tls {
-		// Each thread's, made when it first uses it.
-		fmt.Fprintf(&g.vars, "var %s = c23.NewTLS(func() c23.Ptr {\n", name)
-		fmt.Fprintf(&g.vars, "p := c23.New[%s]()\n", g.objMirror(s.t))
-		if s.init != nil {
-			save, saveInd := g.out, g.ind
-			g.out = &g.vars
-			g.initObject("p", s.t, s.init)
-			g.out, g.ind = save, saveInd
-		}
-		g.vars.WriteString("return p\n})\n")
-		return
-	}
-	if s.allocSize > s.t.sizeof() {
-		m := g.mirror(s.t)
-		if s.t.sizeof() == 0 {
-			// No members but a flexible array: an array of its elements.
-			for _, f := range s.t.rec.fields {
-				if f.t.kind == kArray && f.t.n == 0 {
-					m = g.mirror(f.t.elem)
-				}
-			}
-		}
-		fmt.Fprintf(&g.vars, "var %s = c23.NewArray[%s](%d)\n", name, m, s.allocSize)
-	} else if a := s.t.alignof(); a > 8 {
-		fmt.Fprintf(&g.vars, "var %s = c23.NewAligned[%s](%d)\n", name, g.objMirror(s.t), a)
-	} else {
-		if m := g.objMirror(s.t); m == g.mirror(s.t) {
-			// A Go object that Go code can reach directly.
-			fmt.Fprintf(&g.vars, "var o_%s = new(c23.Obj[%s])\nvar %s = c23.Local(o_%s)\n", name, m, name, name)
-			g.objs[s] = "o_" + name + ".V"
-		} else {
-			fmt.Fprintf(&g.vars, "var %s = c23.New[%s]()\n", name, m)
-		}
-	}
-	if s.init != nil {
-		save, saveInd := g.out, g.ind
-		g.out, g.ind = &g.inits, 1
-		g.initObject(name, s.t, s.init)
-		g.out, g.ind = save, saveInd
-	}
+	g.tglobalVar(s)
+	return
+
 }
 
 // Types.
 
-// goType is the Go type of a C value in a Go variable.
+// goType is the Go type of a C value in a Go variable: for C's
+// arithmetic types, by the name internal/c23 gives it (c23.Int,
+// c23.ULong), which is an alias of the Go type that the data model
+// makes it. So the Go says what the C said, and is the same Go whatever
+// the size of long.
 func goType(t *ctype) string {
+	switch t.chr {
+	case 'w':
+		return "c23.Wchar"
+	case 's':
+		return "c23.Char16"
+	case 'i':
+		return "c23.Char32"
+	}
 	switch t.kind {
-	case kBool, kUChar:
-		return "uint8"
-	case kChar, kSChar:
-		return "int8"
+	case kBool:
+		return "c23.Bool"
+	case kUChar:
+		return "c23.UChar"
+	case kChar:
+		return "c23.Char"
+	case kSChar:
+		return "c23.SChar"
 	case kShort:
-		return "int16"
+		return "c23.Short"
 	case kUShort:
-		return "uint16"
+		return "c23.UShort"
 	case kInt:
-		return "int32"
+		return "c23.Int"
 	case kUInt:
-		return "uint32"
-	case kLong, kLLong:
-		return fmt.Sprintf("int%d", t.sizeof()*8)
-	case kULong, kULLong:
-		return fmt.Sprintf("uint%d", t.sizeof()*8)
+		return "c23.UInt"
+	case kLong:
+		return "c23.Long"
+	case kULong:
+		return "c23.ULong"
+	case kLLong:
+		return "c23.LongLong"
+	case kULLong:
+		return "c23.ULongLong"
 	case kComplex:
 		if t.elem.kind == kFloat {
-			return "complex64"
+			return "c23.ComplexFloat"
 		}
-		return "complex128"
+		return "c23.ComplexDouble"
 	case kInt128:
 		return "c23.Int128"
 	case kUInt128:
@@ -382,11 +430,11 @@ func goType(t *ctype) string {
 		}
 		return fmt.Sprintf("%sint%d", u, t.sizeof()*8)
 	case kFloat:
-		return "float32"
+		return "c23.Float"
 	case kDouble, kLDouble:
-		return "float64"
+		return "c23.Double" // long double's value is a double
 	case kPtr, kNullptr, kVaList, kStruct, kArray, kIntCap, kUIntCap:
-		return "c23.Ptr"
+		return "*c23.Void"
 	}
 	panic(fmt.Sprintf("no Go type for %s", t))
 }
@@ -401,9 +449,17 @@ func (g *gen) mirror(t *ctype) string {
 		e := t.elem
 		switch {
 		case e.kind == kFunc:
-			return "*c23.Func"
-		case e.kind == kVoid || e.kind == kStruct && !e.rec.complete || e.kind == kArray && e.n < 0:
-			return "unsafe.Pointer"
+			// To a function's descriptor (c23.Func), or an integer C
+			// keeps in its place (SIG_IGN).
+			return voidPtr
+		case e.kind == kStruct && !e.rec.complete:
+			// Declared only, here: another unit may complete it.
+			if c := g.complete[completeKey(e)]; c != nil {
+				return "*" + g.mirror(c)
+			}
+			return voidPtr
+		case e.kind == kVoid || e.kind == kArray && e.n < 0:
+			return voidPtr
 		}
 		return "*" + g.mirror(e)
 	case kArray:
@@ -416,9 +472,9 @@ func (g *gen) mirror(t *ctype) string {
 	case kVoid:
 		return "byte"
 	case kNullptr:
-		return "unsafe.Pointer"
+		return voidPtr
 	case kVaList:
-		return "*c23.VaList"
+		return voidPtr
 	case kLDouble:
 		return "c23.LDouble"
 	case kComplex:
@@ -448,12 +504,27 @@ func (g *gen) record(t *ctype) string {
 			bytes = true
 		}
 	}
-	// The key: the layout, which identifies the mirror.
+	// The key: the layout, which identifies the mirror. A C++ class's
+	// tag does not say which class it is (a template's instances share
+	// it, and classes of several scopes may), nor do its fields' types'
+	// tags: there the names are the mangled ones.
 	var key strings.Builder
-	fmt.Fprintf(&key, "%s|%d|%d|%v|", r.tag, r.size, r.align, bytes)
-	if !bytes {
+	keyTag, typeKey := r.tag, (*ctype).String
+	if r.sc != nil {
+		keyTag, typeKey = rawType(t.unqual()), cxxTypeKey
+		if unnamedMember(t) {
+			// It has no name of its own, and the number that stands
+			// for one is its translation unit's: the scope it is
+			// declared in, and below its members, say which it is.
+			keyTag = strings.Join(scopeNames(r.sc), "::") + "::"
+		}
+	} else if keyTag == "" {
+		keyTag = r.tdName // div_t and ldiv_t are not one mirror
+	}
+	fmt.Fprintf(&key, "%s|%d|%d|%v|%v|", keyTag, r.size, r.align, bytes, r.uptr)
+	if !bytes || unnamedMember(t) {
 		for _, f := range r.fields {
-			fmt.Fprintf(&key, "%s:%d:%s;", f.name, f.off, f.t)
+			fmt.Fprintf(&key, "%s:%d:%s;", f.name, f.off, typeKey(f.t))
 		}
 	}
 	if n, ok := g.mirrors[key.String()]; ok {
@@ -465,9 +536,12 @@ func (g *gen) record(t *ctype) string {
 	if r.union {
 		kw = "union"
 	}
-	tag := r.tag
+	tag, what := r.tag, kw+" "+r.tag
+	if tag == "" && r.tdName != "" {
+		tag, what = r.tdName, r.tdName
+	}
 	if tag == "" {
-		tag = "anon"
+		tag, what = "anon", "unnamed "+kw
 	}
 	name := fmt.Sprintf("%s%s_%s", g.o.prefix, kw, goIdent(tag))
 	if g.mirrorTaken(name) {
@@ -481,27 +555,144 @@ func (g *gen) record(t *ctype) string {
 		}
 	}
 	var b strings.Builder
-	if bytes {
+	if r.uptr {
+		// The members without pointers are in the bytes, and what
+		// has one is in an object that the pointer points to: no
+		// word is an integer to one member and a pointer to
+		// another (types.go's unionPtr).
+		own := ""
+		if r.ubytes > 0 {
+			own = fmt.Sprintf("\tb [%d]byte\n", r.ubytes)
+		}
+		fmt.Fprintf(&b, "// %s is C's %s, as Go sees it: the bytes of its members that have no\n// pointer, and the pointer to what of it has one.\ntype %s struct {\n\t_ [0]uint64\n%s\tp c23.UnionRef\n}\n\n",
+			name, what, name, own)
+		if !g.hasUnions {
+			// The runtime looks for the unions that pointers are
+			// the addresses of in a program that has one.
+			g.hasUnions = true
+			b.WriteString("var _ = c23.HasUnions()\n\n")
+		}
+	} else if bytes {
 		// As cgo does for unions, Go sees the bytes. The tag tells
 		// internal/c23 that they may hold pointers C stores, whose
 		// capabilities it keeps aside.
-		fmt.Fprintf(&b, "// %s is C's %s %s, as Go sees it: its bytes.\ntype %s struct {\n%s\tb [%d]byte `c23:\"union\"`\n}\n\n",
-			name, kw, r.tag, name, unionAlign(r.align), r.size)
+		if w := target.ptrSize; hasPointers(t) && r.size > 0 && r.size%w == 0 && r.align%w == 0 {
+			// A member may be a pointer: Go sees words, each of which
+			// the collector takes for one.
+			fmt.Fprintf(&b, "// %s is C's %s, as Go sees it: its words, which may hold pointers.\ntype %s struct {\n%s\tb [%d]unsafe.Pointer\n}\n\n",
+				name, what, name, unionAlign(r.align), r.size/w)
+		} else {
+			fmt.Fprintf(&b, "// %s is C's %s, as Go sees it: its bytes.\ntype %s struct {\n%s\tb [%d]byte `c23:\"union\"`\n}\n\n",
+				name, what, name, unionAlign(r.align), r.size)
+		}
 	} else {
-		fmt.Fprintf(&b, "// %s is C's %s %s, as Go sees it.\ntype %s struct {\n", name, kw, r.tag, name)
+		fmt.Fprintf(&b, "// %s is C's %s, as Go sees it.\ntype %s struct {\n", name, what, name)
 		for _, f := range fields {
 			fmt.Fprintf(&b, "\t%s\n", f)
 		}
 		b.WriteString("}\n\n")
-		for i, f := range r.fields {
-			fn := g.fieldName(f, i)
-			fmt.Fprintf(&b, "var _ [unsafe.Offsetof(%s{}.%s) - %d]byte\nvar _ [%d - unsafe.Offsetof(%s{}.%s)]byte\n",
-				name, fn, f.off, f.off, name, fn)
+		if g.o.debug {
+			for i, f := range r.fields {
+				fn := g.fieldName(f, i)
+				fmt.Fprintf(&b, "var _ [unsafe.Offsetof(%s{}.%s) - %d]byte\nvar _ [%d - unsafe.Offsetof(%s{}.%s)]byte\n",
+					name, fn, f.off, f.off, name, fn)
+			}
 		}
 	}
-	fmt.Fprintf(&b, "var _ [unsafe.Sizeof(%s{}) - %d]byte\nvar _ [%d - unsafe.Sizeof(%s{})]byte\n\n", name, r.size, r.size, name)
+	if g.o.debug {
+		// Go lays the mirror out as C lays the record out, or the
+		// package does not compile (cc -debug).
+		fmt.Fprintf(&b, "var _ [unsafe.Sizeof(%s{}) - %d]byte\nvar _ [%d - unsafe.Sizeof(%s{})]byte\n\n", name, r.size, r.size, name)
+	}
 	g.types.WriteString(b.String())
 	return name
+}
+
+// completeKey is what names the struct or union type t in every unit of
+// the program: a C++ class's mangled name, a C tag of file scope. "" if
+// nothing does.
+func completeKey(t *ctype) string {
+	r := t.rec
+	if r.tag == "" {
+		return ""
+	}
+	for sc := r.sc; sc != nil; sc = sc.parent {
+		if sc.kind == skBlock {
+			return "" // a block's: its function's only
+		}
+	}
+	if r.sc != nil {
+		return "c++:" + rawType(t.unqual())
+	}
+	return "c:" + r.tag
+}
+
+// completed finds the types that each unit completes.
+func (pg *pkgGen) completed() {
+	pg.complete = map[string]*ctype{}
+	layout := map[string]string{}
+	for _, u := range pg.units {
+		for _, t := range u.records {
+			k := completeKey(t)
+			if k == "" || !t.rec.complete {
+				continue
+			}
+			if t.rec.sc == nil && u.tags[t.rec.tag] != t && (u.tags[t.rec.tag] == nil || u.tags[t.rec.tag].rec != t.rec) {
+				continue // a tag of a block's scope
+			}
+			// Two units' types of one name are one type if they are
+			// laid out alike: else the name says nothing.
+			var l strings.Builder
+			fmt.Fprintf(&l, "%d|%d|", t.rec.size, t.rec.align)
+			for _, f := range t.rec.fields {
+				fmt.Fprintf(&l, "%s:%d:%d;", f.name, f.off, f.t.sizeof())
+			}
+			if old, ok := layout[k]; ok && old != l.String() {
+				pg.complete[k] = nil
+				continue
+			} else if ok {
+				continue
+			}
+			layout[k] = l.String()
+			pg.complete[k] = t.unqual()
+		}
+	}
+}
+
+// unnamedMember reports whether t is a struct or union with no name that
+// a class or a namespace declares: one that every unit that includes
+// its declaration has, as the same type. (One that a block declares is
+// its function's only.)
+func unnamedMember(t *ctype) bool {
+	if t.kind != kStruct || t.rec.tag != "" || t.rec.sc == nil {
+		return false
+	}
+	for sc := t.rec.sc; sc != nil; sc = sc.parent {
+		if sc.kind == skBlock {
+			return false
+		}
+	}
+	return true
+}
+
+// cxxTypeKey is what says which type t is in the key of a C++ class's
+// mirror: its mangled name, but for a class with no name, which is its
+// members.
+func cxxTypeKey(t *ctype) string {
+	switch {
+	case unnamedMember(t):
+		var b strings.Builder
+		fmt.Fprintf(&b, "{%d|%d|%v|", t.rec.size, t.rec.align, t.rec.union)
+		for _, f := range t.rec.fields {
+			fmt.Fprintf(&b, "%s:%d:%s;", f.name, f.off, cxxTypeKey(f.t))
+		}
+		return b.String() + "}"
+	case t.kind == kArray:
+		return fmt.Sprintf("A%d_%s", t.n, cxxTypeKey(t.elem))
+	case t.kind == kPtr && unnamedMember(t.elem):
+		return "P" + cxxTypeKey(t.elem)
+	}
+	return rawType(t)
 }
 
 func (g *gen) mirrorTaken(name string) bool {
@@ -566,11 +757,17 @@ func constLit(t *ctype, v int64) string {
 		return fmt.Sprintf("%s(%d)", goType(t), uint64(wrap(t, v)))
 	case t.isPtr() || t.kind == kNullptr || t.kind == kVaList || t.isCap():
 		if v == 0 {
-			return "c23.Ptr{}"
+			return "(*c23.Void)(nil)"
+		}
+		if t.isCap() && target.ptrSize == 8 {
+			// An integer of an intptr_t: its low 63 bits.
+			return fmt.Sprintf("c23.FromInt(%d)", uint64(v)&(1<<63-1))
 		}
 		return fmt.Sprintf("c23.FromInt(%d)", uint64(v)&(1<<(8*target.ptrSize)-1))
 	case t.isFloat():
 		return fmt.Sprintf("%s(%d)", goType(t), v)
+	case t.isUnsigned() && t.sizeof() == 8 && !t.isBitInt():
+		return fmt.Sprintf("%s(%d)", goType(t), uint64(v))
 	case t.isUnsigned() && t.sizeof() == 8:
 		return fmt.Sprintf("uint64(%d)", uint64(v))
 	}
@@ -606,6 +803,11 @@ func (g *gen) str(s *strLit) string {
 	esz := s.t.elem.sizeof()
 	data := s.data + strings.Repeat("\x00", int(esz))
 	el := g.mirror(s.t.elem)
+	if esz == 1 {
+		// The Go constant itself: a 0 byte follows it.
+		delete(g.strs, key)
+		return fmt.Sprintf("(*c23.Void)(unsafe.Pointer(c23.String(%s)))", strconv.Quote(s.data))
+	}
 	fmt.Fprintf(&g.vars, "var %s = c23.StringOf[%s, [%d]%s](%s)\n", n, el, int64(len(data))/esz, el, strconv.Quote(data))
 	return n
 }
@@ -655,17 +857,6 @@ func constLitStr(t *ctype, s string) string {
 		return fmt.Sprintf("c23.U128U(%d)", u)
 	}
 	return constLit(t, v)
-}
-
-// objMirror is the Go type of an object of type t: its mirror, but for
-// an array of chars, which is untyped memory, so that C may keep
-// pointers in it (a struct copied there and back, as in Fil-C).
-func (g *gen) objMirror(t *ctype) string {
-	b := baseElem(t)
-	if t.kind == kArray && t.n > 0 && (b.kind == kChar || b.kind == kSChar || b.kind == kUChar) {
-		return fmt.Sprintf("[%d]c23.Raw", t.sizeof())
-	}
-	return g.mirror(t)
 }
 
 // typeDesc returns the package variable that holds the c23.Type of the

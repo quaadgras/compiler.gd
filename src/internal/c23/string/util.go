@@ -11,16 +11,16 @@ import (
 
 // Strsep is strsep: the token at *stringp, which it ends at the first
 // byte of delim with a null, and *stringp past that (or null).
-func Strsep(stringp, delim c23.Ptr) c23.Ptr {
+func Strsep(stringp, delim *c23.Void) *c23.Void {
 	s := c23.LoadPtr(stringp)
 	if c23.Addr(s) == 0 {
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	d := c23.GoString(delim)
 	for p := s; ; p = c23.Add(p, 1) {
 		c := c23.Load8(p)
 		if c == 0 {
-			c23.StorePtr(stringp, c23.Ptr{})
+			c23.StorePtr(stringp, (*c23.Void)(nil))
 			return s
 		}
 		if strings.IndexByte(d, c) >= 0 {

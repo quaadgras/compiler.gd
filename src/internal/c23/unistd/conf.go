@@ -73,7 +73,7 @@ func pathconf(name int32) int64 {
 
 // Pathconf is pathconf: Linux's limits (pathconfValues) of a file that
 // exists.
-func Pathconf(path c23.Ptr, name int32) int64 {
+func Pathconf(path *c23.Void, name int32) int64 {
 	if _, err := os.Stat(c23.GoString(path)); err != nil {
 		c23.SetErrnoOf(err)
 		return -1
@@ -106,7 +106,7 @@ const (
 // width-restricted programs the target's (LP64_OFF64 or ILP32_OFFBIG),
 // and the compilation flags none (""). The result is the size the value
 // needs, with its NUL; what fits of it is stored in buf.
-func Confstr(name int32, buf c23.Ptr, n uint64) uint64 {
+func Confstr(name int32, buf *c23.Void, n uint64) uint64 {
 	var v string
 	env := "LP64_OFF64"
 	if c23.LongSize == 4 {
@@ -128,7 +128,7 @@ func Confstr(name int32, buf c23.Ptr, n uint64) uint64 {
 	}
 	if n > 0 && c23.Addr(buf) != 0 {
 		k := min(uint64(len(v)), n-1)
-		b := c23.BytesAt(buf, uintptr(k+1))
+		b := c23.Writable(buf, uintptr(k+1))
 		copy(b, v[:k])
 		b[k] = 0
 	}
@@ -147,7 +147,7 @@ func Gethostid() int64 {
 	return int64(id)
 }
 
-var loginBuf c23.Ptr
+var loginBuf *c23.Void
 
 // login is the name of the user logged in: $LOGNAME, as musl's getlogin
 // (glibc finds the controlling terminal's in utmp).
@@ -157,11 +157,11 @@ func login() (string, bool) {
 }
 
 // Getlogin is getlogin: null (errno ENXIO) if there is no login name.
-func Getlogin() c23.Ptr {
+func Getlogin() *c23.Void {
 	name, ok := login()
 	if !ok {
 		c23.SetErrno(c23.ENXIO)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	if c23.Addr(loginBuf) == 0 {
 		loginBuf = c23.Malloc(256)
@@ -169,12 +169,12 @@ func Getlogin() c23.Ptr {
 	if len(name) > 255 {
 		name = name[:255]
 	}
-	copy(c23.BytesAt(loginBuf, uintptr(len(name)+1)), name+"\x00")
+	copy(c23.Writable(loginBuf, uintptr(len(name)+1)), name+"\x00")
 	return loginBuf
 }
 
 // GetloginR is getlogin_r: an errno value (ENXIO, ERANGE) or 0.
-func GetloginR(buf c23.Ptr, n uint64) int32 {
+func GetloginR(buf *c23.Void, n uint64) int32 {
 	name, ok := login()
 	if !ok {
 		return c23.ENXIO
@@ -182,13 +182,13 @@ func GetloginR(buf c23.Ptr, n uint64) int32 {
 	if uint64(len(name)) >= n {
 		return c23.ERANGE
 	}
-	copy(c23.BytesAt(buf, uintptr(len(name)+1)), name+"\x00")
+	copy(c23.Writable(buf, uintptr(len(name)+1)), name+"\x00")
 	return 0
 }
 
 // Getgroups is getgroups: the supplementary groups (none where the
 // system has no groups), their number if n is 0, EINVAL if more than n.
-func Getgroups(n int32, list c23.Ptr) int32 {
+func Getgroups(n int32, list *c23.Void) int32 {
 	gs, err := os.Getgroups()
 	if err != nil {
 		gs = nil
@@ -206,29 +206,29 @@ func Getgroups(n int32, list c23.Ptr) int32 {
 	return int32(len(gs))
 }
 
-var ttyBuf c23.Ptr
+var ttyBuf *c23.Void
 
 // Ttyname is ttyname: the name of the terminal fd is a descriptor of, in
 // an array the next call reuses; null with errno EBADF or ENOTTY.
-func Ttyname(fd int32) c23.Ptr {
+func Ttyname(fd int32) *c23.Void {
 	name, e := ttynameOf(fd)
 	if e != 0 {
 		c23.SetErrno(e)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	if c23.Addr(ttyBuf) == 0 {
 		ttyBuf = c23.Malloc(4096)
 	}
 	if len(name) >= 4096 {
 		c23.SetErrno(c23.ERANGE)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
-	copy(c23.BytesAt(ttyBuf, uintptr(len(name)+1)), name+"\x00")
+	copy(c23.Writable(ttyBuf, uintptr(len(name)+1)), name+"\x00")
 	return ttyBuf
 }
 
 // TtynameR is ttyname_r: an errno value (EBADF, ENOTTY, ERANGE) or 0.
-func TtynameR(fd int32, buf c23.Ptr, n uint64) int32 {
+func TtynameR(fd int32, buf *c23.Void, n uint64) int32 {
 	name, e := ttynameOf(fd)
 	if e != 0 {
 		return e
@@ -236,7 +236,7 @@ func TtynameR(fd int32, buf c23.Ptr, n uint64) int32 {
 	if uint64(len(name)) >= n {
 		return c23.ERANGE
 	}
-	copy(c23.BytesAt(buf, uintptr(len(name)+1)), name+"\x00")
+	copy(c23.Writable(buf, uintptr(len(name)+1)), name+"\x00")
 	return 0
 }
 

@@ -652,7 +652,7 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 	}
 
 	// Copy over and clear the inline mark bits if necessary.
-	if gcUsesSpanInlineMarkBits(s.elemsize) {
+	if s.usesInlineMarkBits() {
 		s.moveInlineMarks(s.gcmarkBits)
 	}
 

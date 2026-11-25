@@ -134,10 +134,21 @@ func (g *gen) blockStmts(b *block, gen func(stmt)) {
 		case *declStmt:
 			gen(s)
 			for _, sym := range s.syms {
+				if sym.dtor != nil {
+					d := sym.dtor
+					f.exits = append(f.exits, func() { gen(d) })
+				}
 				if sym.cleanup != nil {
 					sym := sym
 					f.exits = append(f.exits, func() {
-						g.p("%s(%s)", g.funcName(sym.cleanup, sym.p), g.lv(&varRef{node{sym.t, sym.p}, sym}).addr)
+						l := g.lv(&varRef{node{sym.t, sym.p}, sym})
+						// To the type of the function's parameter.
+						addr := taddr(l.x)
+						if ft := sym.cleanup.t.fn; ft != nil && len(ft.params) == 1 {
+							addr = g.retype(addr, "*"+g.mirror(sym.t), g.gt(ft.params[0]))
+						}
+
+						g.p("%s(%s)", g.funcName(sym.cleanup, sym.p), addr)
 					})
 				}
 			}

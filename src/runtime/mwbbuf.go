@@ -237,6 +237,20 @@ func wbBufFlush1(pp *p) {
 			// path to reduce the rate of flushes?
 			continue
 		}
+		if cSpansUsed {
+			// (A pointer of C's to a union has a bit that no
+			// address has: cclaim.go's cPtrBits.)
+			ptr &^= cPtrBits
+			// What was in a word of C's, or is stored in one,
+			// may be an integer, and an integer may be the
+			// address of an object that is free: it is a
+			// pointer if it is to one that is allocated, as
+			// for a word of a frame without a map
+			// (scanConservative).
+			if s := spanOfHeap(ptr); s == nil || s.isFreeOrNewlyAllocated(s.objIndex(ptr)) {
+				continue
+			}
+		}
 		if tryDeferToSpanScan(ptr, gcw) {
 			continue
 		}
@@ -258,7 +272,7 @@ func wbBufFlush1(pp *p) {
 			atomic.Or8(&arena.pageMarks[pageIdx], pageMask)
 		}
 
-		if span.spanclass.noscan() {
+		if span.spanclass.noscan() && !span.spanclass.c() {
 			gcw.bytesMarked += uint64(span.elemsize)
 			continue
 		}

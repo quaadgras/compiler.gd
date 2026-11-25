@@ -8,18 +8,18 @@ import (
 	c23 "internal/c23"
 )
 
-func OptargLoc() c23.Ptr { return c23.OptargObj }
+func OptargLoc() *c23.Void { return c23.OptargObj }
 
-func OptindLoc() c23.Ptr { return c23.OptindObj }
+func OptindLoc() *c23.Void { return c23.OptindObj }
 
-func OpterrLoc() c23.Ptr { return c23.OpterrObj }
+func OpterrLoc() *c23.Void { return c23.OpterrObj }
 
-func OptoptLoc() c23.Ptr { return c23.OptoptObj }
+func OptoptLoc() *c23.Void { return c23.OptoptObj }
 
 // Getopt is glibc's getopt: it permutes argv so that the non-options come
 // last, unless optstring starts with + or POSIXLY_CORRECT is set; with -
 // it returns each non-option as the option 1, in optarg. Setting optind to
 // 0 starts over.
-func Getopt(argc int32, argv, optstring c23.Ptr) int32 {
-	return c23.Getopt(argc, argv, optstring, c23.Ptr{}, c23.Ptr{}, false)
+func Getopt(argc int32, argv, optstring *c23.Void) int32 {
+	return c23.Getopt(argc, argv, optstring, (*c23.Void)(nil), (*c23.Void)(nil), false)
 }

@@ -64,41 +64,36 @@ type regexT struct {
 
 // regex_t is { size_t re_nsub; void *__opaque; ... }: the C sees
 // re_nsub, and __opaque is a regexT.
-func opaque(preg c23.Ptr) c23.Ptr { return c23.Add(preg, int(c23.LongSize)) }
+func opaque(preg *c23.Void) *c23.Void { return c23.Add(preg, int(c23.LongSize)) }
 
 // regexOf returns preg's regexT, or nil if regcomp did not make it (or
-// regfree freed it).
-func regexOf(preg c23.Ptr) *regexT {
-	p := c23.LoadPtr(opaque(preg))
-	if p.Obj == nil || p.Info() != c23.TinfoOf[regexT]() || p.Off != 0 {
-		return nil
-	}
-	return (*regexT)(p.Obj)
+// regfree freed it): __opaque is the pointer to a c23.Handle of it.
+func regexOf(preg *c23.Void) *regexT {
+	re, _ := c23.HandleOf[*regexT](c23.LoadPtr(opaque(preg)))
+	return re
 }
 
 // Regcomp is regcomp.
-func Regcomp(preg, pattern c23.Ptr, cflags int32) int32 {
+func Regcomp(preg, pattern *c23.Void, cflags int32) int32 {
 	re, code := compile(c23.GoString(pattern), cflags)
 	if code != 0 {
-		c23.StorePtr(opaque(preg), c23.Ptr{})
+		c23.StorePtr(opaque(preg), (*c23.Void)(nil))
 		return code
 	}
-	p := c23.New[regexT]()
-	*(*regexT)(p.Obj) = *re
 	c23.StoreLong(preg, int64(re.nsub))
-	c23.StorePtr(opaque(preg), p)
+	c23.StorePtr(opaque(preg), c23.NewHandle(re))
 	return 0
 }
 
 // Regfree is regfree.
-func Regfree(preg c23.Ptr) {
-	c23.StorePtr(opaque(preg), c23.Ptr{})
+func Regfree(preg *c23.Void) {
+	c23.StorePtr(opaque(preg), (*c23.Void)(nil))
 }
 
 // Regexec is regexec. With REG_STARTEND (glibc's), the string is
 // string[pmatch[0].rm_so:pmatch[0].rm_eo], NULs included, and offsets
 // are string's.
-func Regexec(preg, str c23.Ptr, nmatch uint64, pmatch c23.Ptr, eflags int32) int32 {
+func Regexec(preg, str *c23.Void, nmatch uint64, pmatch *c23.Void, eflags int32) int32 {
 	re := regexOf(preg)
 	if re == nil {
 		return REG_BADPAT
@@ -166,7 +161,7 @@ var messages = [...]string{
 // Regerror is regerror: it writes errcode's message to errbuf (as much
 // of it as errbuf_size holds, with a NUL) and returns the size the whole
 // takes. An unknown code is "Unknown error" (glibc aborts).
-func Regerror(errcode int32, preg, errbuf c23.Ptr, errbufSize uint64) uint64 {
+func Regerror(errcode int32, preg, errbuf *c23.Void, errbufSize uint64) uint64 {
 	msg := "Unknown error"
 	if errcode >= 0 && int(errcode) < len(messages) {
 		msg = messages[errcode]

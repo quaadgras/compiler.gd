@@ -5,7 +5,6 @@
 package ssagen
 
 import (
-	"cmd/internal/obj"
 	"fmt"
 	"internal/abi"
 	"internal/buildcfg"
@@ -143,50 +142,6 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 		intrinsics.addForFamilies(pkg, fn, b, archFamilies...)
 	}
 
-	/******** internal/c23 ********/
-	// check(p Ptr, n uintptr) unsafe.Pointer: the address of n bytes at
-	// p, which p's capability must cover: 0 <= off, and off+n <= size
-	// without overflow. As Go's tests of a slice's bounds, which prove
-	// reasons about as it does for slices, so that a check another
-	// implies goes; a failure calls c23.boundsPanic in a block that does
-	// not return. No object is 2^48 bytes or more, so on 64-bit targets
-	// the size is masked to 48 bits, which tells prove that off+k cannot
-	// overflow when off is in bounds and k is a small constant (a field's
-	// offset, an element's size): then a check of p->d covers p->a.
-	add("internal/c23", "check",
-		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
-			p, nb := args[0], args[1]
-			pt := p.Type
-			fail := s.gd.PkgLinksym("internal/c23", "boundsPanic", obj.ABIInternal)
-			base := s.newValue1I(ssa.OpStructSelect, pt.Field(0).Type, 0, p)
-			size := s.newValue1I(ssa.OpStructSelect, pt.Field(1).Type, 1, p)
-			off := s.newValue1I(ssa.OpStructSelect, pt.Field(2).Type, 2, p)
-			ti := s.newValue1I(ssa.OpStructSelect, pt.Field(3).Type, 3, p)
-			uptr := types.Types[types.TUINTPTR]
-			tbool := types.Types[types.TBOOL]
-			const small = 1 << 32
-			sz := size
-			constN := false
-			if s.gd.Ctxt.Arch.PtrSize == 8 {
-				sz = s.newValue2(ssa.OpAnd64, uptr, size, s.constInt64(uptr, 1<<48-1))
-				constN = nb.Op == ssa.OpConst64 && uint64(nb.AuxInt) < small // and off+n cannot overflow
-			}
-			if !constN {
-				s.c23Check(s.newValue2(ssa.OpIsSliceInBounds, tbool, nb, sz), fail, base, size, ti, nb, off)
-			}
-			s.c23Check(s.newValue2(ssa.OpIsSliceInBounds, tbool, off, sz), fail, base, size, ti, nb, off)
-			// off+n in off's type, int, as c23.Add computes the offset
-			// of the next field: the same value, for prove.
-			it := pt.Field(2).Type
-			ni := s.newValue1(ssa.OpCopy, it, nb)
-			if nb.Op == ssa.OpConst64 || nb.Op == ssa.OpConst32 {
-				ni = s.constInt(it, nb.AuxInt)
-			}
-			end := s.newValue2(s.ssaOp(ir.OADD, it), it, off, ni)
-			s.c23Check(s.newValue2(ssa.OpIsSliceInBounds, tbool, end, sz), fail, base, size, ti, nb, off)
-			return s.newValue2(ssa.OpAddPtr, pt.Field(0).Type, base, off)
-		},
-		all...)
 	alias := func(pkg, fn, pkg2, fn2 string, archs ...*sys.Arch) {
 		intrinsics.alias(pkg, fn, pkg2, fn2, archs...)
 	}
@@ -218,6 +173,13 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 	add("internal/abi", "NoEscape",
 		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 			return args[0]
+		},
+		all...)
+	// The check of pointer arithmetic that walk asks for where C's
+	// pointers are checked: what ssa's cheaders knows of it.
+	add("runtime", "c23slow",
+		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+			return s.newValue3I(ssa.OpC23Slow, types.Types[types.TBOOL], ssa.CSlowArith, args[0], args[1], s.mem())
 		},
 		all...)
 	add("runtime", "KeepAlive",

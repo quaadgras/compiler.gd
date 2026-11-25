@@ -1,8 +1,10 @@
 // <threads.h>, and C23 library functions cmd/cc lacked before: the
 // float complex functions, iseqsig, and stdatomic.h's functions as
-// functions. TestThreads diffs the output with gcc's (and musl's).
+// functions, and errno in threads. TestThreads diffs the output with
+// gcc's (and musl's).
 
 #include <complex.h>
+#include <errno.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -223,8 +225,64 @@ static void library(void) {
 	printf(" %d\n", atomic_flag_test_and_set(&f));
 }
 
+// errno is each thread's own: a new thread's is 0, and what one thread
+// sets another does not see.
+
+static atomic_int step;
+
+static void await(int n) {
+	while (atomic_load(&step) < n)
+		thrd_yield();
+}
+
+static int errno_first(void *arg) {
+	int was = errno;
+	errno = EDOM;
+	atomic_store(&step, 1);
+	await(2); // errno_second has set its own
+	int *res = arg;
+	res[0] = was;
+	res[1] = errno == EDOM;
+	return 0;
+}
+
+static int errno_second(void *arg) {
+	await(1);
+	int was = errno;
+	errno = ERANGE;
+	atomic_store(&step, 2);
+	await(3); // main has read its own
+	int *res = arg;
+	res[0] = was;
+	res[1] = errno == ERANGE;
+	return 0;
+}
+
+static int *main_errno;
+
+static int errno_addr(void *arg) { return &errno != main_errno; }
+
+static void errnos(void) {
+	thrd_t a, b;
+	int ra[2] = {-1, -1}, rb[2] = {-1, -1}, r;
+	errno = ENOENT;
+	thrd_create(&a, errno_first, ra);
+	thrd_create(&b, errno_second, rb);
+	await(2);
+	printf("errno main %d", errno == ENOENT);
+	atomic_store(&step, 3);
+	thrd_join(a, NULL);
+	thrd_join(b, NULL);
+	printf(" new %d %d kept %d %d main %d", ra[0], rb[0], ra[1], rb[1], errno == ENOENT);
+	main_errno = &errno;
+	thrd_create(&a, errno_addr, NULL);
+	thrd_join(a, &r);
+	printf(" own %d\n", r);
+}
+
 int main(void) {
 	threads();
+	errnos();
 	library();
 	return 0;
 }

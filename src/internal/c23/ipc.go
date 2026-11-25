@@ -51,7 +51,7 @@ func NewIpcPerm(key, flg int32) IpcPerm {
 }
 
 // Store stores p as struct ipc_perm at q.
-func (p *IpcPerm) Store(q Ptr) {
+func (p *IpcPerm) Store(q *Void) {
 	Memset(q, 0, uint64(IpcPermSize))
 	Store32(q, uint32(p.Key))
 	Store32(Add(q, 4), p.Uid)
@@ -64,7 +64,7 @@ func (p *IpcPerm) Store(q Ptr) {
 
 // Set is IPC_SET's: the owner and the permissions of the struct
 // ipc_perm at q.
-func (p *IpcPerm) Set(q Ptr) {
+func (p *IpcPerm) Set(q *Void) {
 	p.Uid = Load32(Add(q, 4))
 	p.Gid = Load32(Add(q, 8))
 	p.Mode = p.Mode&^0o777 | Load32(Add(q, 20))&0o777
@@ -223,7 +223,7 @@ func (b *Broadcast) Notify() {
 
 // LoadTimeout reads the struct timespec at ts, a relative timeout, as a
 // deadline from now; false if it is not a valid one.
-func LoadTimeout(ts Ptr) (time.Time, bool) {
+func LoadTimeout(ts *Void) (time.Time, bool) {
 	sec, nsec := int64(Load64(ts)), LoadLong(Add(ts, 8))
 	if sec < 0 || nsec < 0 || nsec >= 1e9 {
 		return time.Time{}, false
@@ -250,29 +250,39 @@ const (
 
 // A SigEvent is a struct sigevent:
 //
-//	union sigval sigev_value; int sigev_signo; int sigev_notify;	// 0, 8, 12 (0, 4, 8 on wasm32)
-//	void (*sigev_notify_function)(union sigval);			// 16 (12)
-//	pthread_attr_t *sigev_notify_attributes;			// 24 (16)
+//	union sigval sigev_value; int sigev_signo; int sigev_notify;	// 0, 16, 20 (0, 4, 8 on wasm32)
+//	void (*sigev_notify_function)(union sigval);			// 24 (12)
+//	void *sigev_notify_attributes;					// 32 (16)
+//	pid_t sigev_notify_thread_id;					// 40 (20)
 //
-// in 64 bytes.
+// in 64 bytes. It is the library's own layout, which no system call
+// is given: glibc's and musl's have the function and the thread's id
+// in a union.
 type SigEvent struct {
-	Value    Ptr
+	Value    SigVal
 	Signo    int32
 	Notify   int32
-	Function Ptr
+	Function *Void
 }
 
 // SigEventSize is sizeof(struct sigevent).
 const SigEventSize = 64
 
+// The offsets of sigev_signo, sigev_notify and sigev_notify_function
+// in a struct sigevent.
+const (
+	SigEventSignoOff  = int(SigValSize)
+	SigEventNotifyOff = int(SigValSize) + 4
+	SigEventFuncOff   = int(SigValSize) + 8
+)
+
 // LoadSigEvent reads the struct sigevent at p.
-func LoadSigEvent(p Ptr) SigEvent {
-	fn := (int(WordSize) + 8 + int(WordSize) - 1) &^ (int(WordSize) - 1)
+func LoadSigEvent(p *Void) SigEvent {
 	return SigEvent{
-		Value:    LoadPtr(p),
-		Signo:    int32(Load32(Add(p, int(WordSize)))),
-		Notify:   int32(Load32(Add(p, int(WordSize)+4))),
-		Function: LoadPtr(Add(p, fn)),
+		Value:    LoadSigVal(p),
+		Signo:    int32(Load32(Add(p, SigEventSignoOff))),
+		Notify:   int32(Load32(Add(p, SigEventNotifyOff))),
+		Function: LoadPtr(Add(p, SigEventFuncOff)),
 	}
 }
 
@@ -315,9 +325,7 @@ func (ev *SigEvent) Fire(code int32, self *SigThread) {
 			ThreadsMu.Lock()
 			delete(Threads, uint64(LoadLong(thr)))
 			ThreadsMu.Unlock()
-			v := Malloc(uint64(WordSize)) // the union sigval, by value
-			StorePtr(v, val)
-			FuncOf[func(Ptr)](fn)(v)
+			FuncOf[func(*Void)](fn)(NewSigVal(val)) // the union sigval, by value
 		})
 	}
 }

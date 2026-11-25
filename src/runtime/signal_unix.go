@@ -939,6 +939,11 @@ func sigpanic() {
 			// but the fact that we faulted on accessing it is enough to prove
 			// that it is.
 			print("accessed data from freed user arena ", hex(gp.sigcode1), "\n")
+		} else if cSpansUsed && (gp.sigcode1&(cEnd|cPoison) != 0 || GOARCH == "amd64" && gp.sigcode1 == 0 && gp.sigcode0 == 0x80) {
+			// gd: the address is one that no memory has (an amd64
+			// does not say which): a pointer of C's with cEnd or
+			// cPoison (cclaim.go).
+			throw("checkptr: load or store through a pointer to the end of its object, or through one that the program made of an integer")
 		} else {
 			print("unexpected fault address ", hex(gp.sigcode1), "\n")
 		}

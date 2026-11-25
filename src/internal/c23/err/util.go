@@ -11,7 +11,7 @@ import (
 // warnf writes the program's name, then what fmt formats (unless fmt is
 // null), then, if errno is true, ": " and the message of errno, on
 // stderr.
-func warnf(format, ap c23.Ptr, errno bool) {
+func warnf(format, ap *c23.Void, errno bool) {
 	e := c23.Errno()
 	msg := c23.Progname() + ": "
 	if c23.Addr(format) != 0 {
@@ -27,24 +27,24 @@ func warnf(format, ap c23.Ptr, errno bool) {
 	c23.FileOf(c23.Stdio(2)).Write([]byte(msg + "\n"))
 }
 
-func Warn(format c23.Ptr, va ...any) { warnf(format, c23.VaStart(va), true) }
+func Warn(format *c23.Void, va ...any) { warnf(format, c23.VaStart(va), true) }
 
-func Vwarn(format, ap c23.Ptr) { warnf(format, ap, true) }
+func Vwarn(format, ap *c23.Void) { warnf(format, ap, true) }
 
-func Warnx(format c23.Ptr, va ...any) { warnf(format, c23.VaStart(va), false) }
+func Warnx(format *c23.Void, va ...any) { warnf(format, c23.VaStart(va), false) }
 
-func Vwarnx(format, ap c23.Ptr) { warnf(format, ap, false) }
+func Vwarnx(format, ap *c23.Void) { warnf(format, ap, false) }
 
-func Err(eval int32, format c23.Ptr, va ...any) { Verr(eval, format, c23.VaStart(va)) }
+func Err(eval int32, format *c23.Void, va ...any) { Verr(eval, format, c23.VaStart(va)) }
 
-func Verr(eval int32, format, ap c23.Ptr) {
+func Verr(eval int32, format, ap *c23.Void) {
 	warnf(format, ap, true)
 	c23.Exit(eval)
 }
 
-func Errx(eval int32, format c23.Ptr, va ...any) { Verrx(eval, format, c23.VaStart(va)) }
+func Errx(eval int32, format *c23.Void, va ...any) { Verrx(eval, format, c23.VaStart(va)) }
 
-func Verrx(eval int32, format, ap c23.Ptr) {
+func Verrx(eval int32, format, ap *c23.Void) {
 	warnf(format, ap, false)
 	c23.Exit(eval)
 }

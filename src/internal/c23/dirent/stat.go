@@ -34,7 +34,7 @@ type Dir struct {
 	path   string
 	ents   []fs.DirEntry
 	i      int
-	ent    c23.Ptr // the struct dirent readdir returns
+	ent    *c23.Void // the struct dirent readdir returns
 	closed bool
 	fd     int32 // dirfd's descriptor, or -1 before dirfd makes one
 }
@@ -42,11 +42,14 @@ type Dir struct {
 // dirOf looks Dir's type up when called, not in a package variable:
 // made at init, it would link what Dir's fields reach (fs.DirEntry's
 // FileInfo, its time.Time, time's formatting) into every program.
-func dirOf(p c23.Ptr) *Dir {
-	if p.Obj == nil || p.Info() != c23.TinfoOf[Dir]() || p.Off != 0 {
+//
+// A DIR * is the pointer to a c23.Handle of the Dir: what C made to
+// look like one is not a DIR.
+func dirOf(p *c23.Void) *Dir {
+	d, ok := c23.HandleOf[*Dir](p)
+	if !ok {
 		c23.RaiseFault("not a DIR", c23.Addr(p))
 	}
-	d := (*Dir)(p.Obj)
 	if d.closed {
 		c23.RaiseFault("use of a closed DIR", c23.Addr(p))
 	}
@@ -80,25 +83,22 @@ func (d *Dir) read() error {
 	return nil
 }
 
-func Opendir(path c23.Ptr) c23.Ptr {
+func Opendir(path *c23.Void) *c23.Void {
 	name := c23.GoString(path)
 	fi, err := os.Stat(name)
 	if err == nil && !fi.IsDir() {
 		err = c23.ErrnoErr(c23.ENOTDIR)
 	}
-	p := c23.New[Dir]()
-	d := (*Dir)(p.Obj)
-	d.path = name
-	d.fd = -1
+	d := &Dir{path: name, fd: -1}
 	if err == nil {
 		err = d.read()
 	}
 	if err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	d.ent = c23.Malloc(280)
-	return p
+	return c23.NewHandle(d)
 }
 
 // Readdir is readdir: the next entry, in an array the next call reuses,
@@ -106,16 +106,16 @@ func Opendir(path c23.Ptr) c23.Ptr {
 //
 //	ino_t d_ino; off_t d_off; unsigned short d_reclen;	// 0, 8, 16
 //	unsigned char d_type; char d_name[256];		// 18, 19 (280 bytes)
-func Readdir(p c23.Ptr) c23.Ptr {
+func Readdir(p *c23.Void) *c23.Void {
 	d := dirOf(p)
 	if !d.next(d.ent) {
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	return d.ent
 }
 
 // next stores the next entry at ent, a struct dirent, if there is one.
-func (d *Dir) next(ent c23.Ptr) bool {
+func (d *Dir) next(ent *c23.Void) bool {
 	if d.i >= len(d.ents) {
 		return false
 	}
@@ -127,7 +127,7 @@ func (d *Dir) next(ent c23.Ptr) bool {
 
 // storeEnt stores e as a struct dirent at ent, whose d_off is off and
 // whose name has at most max bytes; the result is its d_reclen.
-func storeEnt(ent c23.Ptr, e fs.DirEntry, off uint64, max int) int {
+func storeEnt(ent *c23.Void, e fs.DirEntry, off uint64, max int) int {
 	var ino uint64
 	if fi, err := e.Info(); err == nil {
 		ino, _ = c23.SysField(reflect.Indirect(reflect.ValueOf(fi.Sys())), "Ino")
@@ -141,7 +141,7 @@ func storeEnt(ent c23.Ptr, e fs.DirEntry, off uint64, max int) int {
 	c23.Store64(c23.Add(ent, 8), off)
 	c23.Store16(c23.Add(ent, 16), uint16(reclen))
 	c23.Store8(c23.Add(ent, 18), dtype(e.Type()))
-	copy(c23.BytesAt(c23.Add(ent, 19), uintptr(len(name)+1)), name+"\x00")
+	copy(c23.Writable(c23.Add(ent, 19), uintptr(len(name)+1)), name+"\x00")
 	return reclen
 }
 
@@ -168,7 +168,7 @@ func dtype(t fs.FileMode) uint8 {
 
 // Closedir is closedir, which closes the descriptor of the directory
 // (dirfd's, or fdopendir's).
-func Closedir(p c23.Ptr) int32 {
+func Closedir(p *c23.Void) int32 {
 	d := dirOf(p)
 	d.closed = true
 	if d.fd >= 0 {
@@ -177,7 +177,7 @@ func Closedir(p c23.Ptr) int32 {
 	return 0
 }
 
-func Rewinddir(p c23.Ptr) {
+func Rewinddir(p *c23.Void) {
 	d := dirOf(p)
 	if d.read() != nil {
 		d.ents, d.i = nil, 0

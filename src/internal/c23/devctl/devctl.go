@@ -13,7 +13,7 @@ import (
 
 // PosixDevctl is posix_devctl: what ioctl does with dcmd and data, the
 // error number returned rather than set, ioctl's result at info.
-func PosixDevctl(fd, dcmd int32, data c23.Ptr, nbyte uint64, info c23.Ptr) int32 {
+func PosixDevctl(fd, dcmd int32, data *c23.Void, nbyte uint64, info *c23.Void) int32 {
 	r := ioctl.Ioctl(fd, uint64(uint32(dcmd)), data)
 	if r < 0 {
 		return c23.Errno()

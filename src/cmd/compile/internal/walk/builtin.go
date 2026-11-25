@@ -969,6 +969,11 @@ func walkUnsafeSlice(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir.N
 		fnname := "unsafeslicecheckptr"
 		fn := typecheck.LookupRuntime(gd, fnname)
 		init.Append(mkcall1(gd, fn, nil, init, reflectdata.UnsafeSliceElemRType(gd, gd.Pos, n), unsafePtr, typecheck.Conv(gd, len, lenType)))
+		if !gd.CObjects && sliceType.Elem().Size() != 0 {
+			// gd: the elements are what the memory is: the pointer
+			// was converted for one of them (doc/gd/unsafe.md).
+			init.Append(mkcall(gd, "checkptrViewKept", nil, init, unsafePtr, reflectdata.UnsafeSliceElemRType(gd, gd.Pos, n), typecheck.Conv(gd, len, types.Types[types.TUINTPTR])))
+		}
 	} else {
 		// Otherwise, open code unsafe.Slice to prevent runtime call overhead.
 		// Keep this code in sync with runtime.unsafeslice{,64}

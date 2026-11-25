@@ -39,22 +39,44 @@ const (
 	EPOLL_CLOEXEC = c23.O_CLOEXEC
 )
 
-// struct epoll_event {uint32_t events; epoll_data_t data;} is 16 bytes,
-// data at 8, on every target. Linux packs it on x86-64 (12 bytes, data at
-// 4), but there epoll_data_t's pointer would be unaligned, and cmd/cc
-// keeps a pointer's capability only in an aligned word.
+// struct epoll_event {uint32_t events; epoll_data_t data;} has data at
+// 8. An epoll_data_t is a union with a pointer, which is its 8 bytes
+// and the pointer that it holds (doc/gd/cc.md, "Unions"): the struct is
+// 24 bytes, and 16 with 4-byte words, where the union is its words. No
+// system call is given one. (Linux packs it on x86-64: 12 bytes, data
+// at 4.)
 const (
-	eventSize = 16
+	eventSize = dataOff + 8 + int(c23.UnionRefs2)*8
 	dataOff   = 8
 )
+
+// loadData reads the epoll_data_t at p: its integer and its pointer.
+func loadData(p *c23.Void) c23.SigVal {
+	if c23.UnionRefs {
+		return c23.LoadSigVal(p)
+	}
+	return c23.SigVal{Int: c23.Load64(p), Ptr: c23.LoadPtr(p)}
+}
+
+// storeData stores v in the epoll_data_t at p.
+func storeData(p *c23.Void, v c23.SigVal) {
+	if c23.UnionRefs {
+		c23.StoreSigVal(p, v)
+		return
+	}
+	c23.Store64(p, v.Int)
+	if v.Ptr != nil {
+		c23.StorePtr(p, v.Ptr)
+	}
+}
 
 // An interest is a descriptor epoll_ctl added.
 type interest struct {
 	fd     int32
 	of     *c23.Ofile // what fd named when it was added
 	events uint32
-	data   c23.Ptr // 8 bytes: the epoll_data_t, a pointer kept as one
-	off    bool    // EPOLLONESHOT reported it: disabled until EPOLL_CTL_MOD
+	data   c23.SigVal // the epoll_data_t: its integer and its pointer
+	off    bool       // EPOLLONESHOT reported it: disabled until EPOLL_CTL_MOD
 
 	// For EPOLLET: what was ready, and the count of arrivals, when it
 	// was last reported.
@@ -162,7 +184,7 @@ func (ep *epoll) remove(it *interest) {
 }
 
 // collect stores up to max ready events at events, and returns how many.
-func (ep *epoll) collect(events c23.Ptr, max int) int {
+func (ep *epoll) collect(events *c23.Void, max int) int {
 	n := 0
 	var reported []*interest
 	for _, it := range ep.snapshot() {
@@ -187,7 +209,7 @@ func (ep *epoll) collect(events c23.Ptr, max int) int {
 		}
 		e := c23.Add(events, n*eventSize)
 		c23.Store32(e, ev)
-		c23.Memmove(c23.Add(e, dataOff), it.data, 8)
+		storeData(c23.Add(e, dataOff), it.data)
 		ep.mu.Unlock()
 		reported = append(reported, it)
 		n++
@@ -271,7 +293,7 @@ func (ep *epoll) contains(target *epoll, depth int) bool {
 
 // EpollCtl is epoll_ctl. A regular file or a directory cannot be added
 // (EPERM), as on Linux.
-func EpollCtl(epfd, op, fd int32, event c23.Ptr) int32 {
+func EpollCtl(epfd, op, fd int32, event *c23.Void) int32 {
 	ep := epollOf(epfd)
 	if ep == nil {
 		return -1
@@ -313,8 +335,7 @@ func EpollCtl(epfd, op, fd int32, event c23.Ptr) int32 {
 		} else if it != nil {
 			ep.remove(it)
 		}
-		it := &interest{fd: fd, of: of, events: events, data: c23.Malloc(8)}
-		c23.Memmove(it.data, c23.Add(event, dataOff), 8)
+		it := &interest{fd: fd, of: of, events: events, data: loadData(c23.Add(event, dataOff))}
 		ep.by[fd] = it
 		ep.list = append(ep.list, it)
 	case EPOLL_CTL_MOD:
@@ -330,7 +351,7 @@ func EpollCtl(epfd, op, fd int32, event c23.Ptr) int32 {
 			return -1
 		}
 		it.events, it.off, it.last = events, false, 0
-		c23.Memmove(it.data, c23.Add(event, dataOff), 8)
+		it.data = loadData(c23.Add(event, dataOff))
 	case EPOLL_CTL_DEL:
 		ep.mu.Lock()
 		defer ep.mu.Unlock()
@@ -350,7 +371,7 @@ func EpollCtl(epfd, op, fd int32, event c23.Ptr) int32 {
 
 // EpollWait is epoll_wait: timeout is in milliseconds, -1 for none. It
 // is not interrupted by signals (their handlers run on other goroutines).
-func EpollWait(epfd int32, events c23.Ptr, maxevents, timeout int32) int32 {
+func EpollWait(epfd int32, events *c23.Void, maxevents, timeout int32) int32 {
 	return epollWait(epfd, events, maxevents, timeout, false, 0)
 }
 
@@ -358,14 +379,14 @@ func EpollWait(epfd int32, events c23.Ptr, maxevents, timeout int32) int32 {
 // while it waits, if that is not null, and if a pending signal it then
 // unblocks runs its handler before anything is ready, the result is -1
 // with errno EINTR.
-func EpollPwait(epfd int32, events c23.Ptr, maxevents, timeout int32, sigmask c23.Ptr) int32 {
+func EpollPwait(epfd int32, events *c23.Void, maxevents, timeout int32, sigmask *c23.Void) int32 {
 	if c23.Addr(sigmask) == 0 {
 		return EpollWait(epfd, events, maxevents, timeout)
 	}
 	return epollWait(epfd, events, maxevents, timeout, true, c23.LoadSigset(sigmask)&^c23.SigUnblockable)
 }
 
-func epollWait(epfd int32, events c23.Ptr, maxevents, timeout int32, setMask bool, mask uint64) int32 {
+func epollWait(epfd int32, events *c23.Void, maxevents, timeout int32, setMask bool, mask uint64) int32 {
 	ep := epollOf(epfd)
 	if ep == nil {
 		return -1

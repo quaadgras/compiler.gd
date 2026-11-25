@@ -433,7 +433,7 @@ func reflectlite_ifaceE2I(t *_type, e any, dst unsafe.Pointer) {
 func ifaceE2I(t *_type, e any, dst unsafe.Pointer) {
 	x := efaceOf(&e)
 	d := (*iface)(dst)
-	d.tab = uintptr(unsafe.Pointer(getitab((*interfacetype)(unsafe.Pointer(t)), (*_type)(unsafe.Pointer(x._type)), false)))
+	d.tab = typeWordOf(unsafe.Pointer(getitab((*interfacetype)(unsafe.Pointer(t)), (*_type)(unsafe.Pointer(x._type)), false)))
 	d.data = x.data
 	d.w0 = x.w0
 	d.w1 = x.w1
@@ -513,7 +513,7 @@ func reflect_compiledTypelinks() ([]*_type, [][]*_type) {
 		end := md.types + md.typedesclen
 		for td < end {
 			td = (td + goarch.PtrSize - 1) &^ (goarch.PtrSize - 1)
-			t := (*_type)(unsafe.Pointer(td))
+			t := (*_type)(staticptr(td))
 			typelinks = append(typelinks, t)
 			td += uintptr(t.DescriptorSize())
 		}

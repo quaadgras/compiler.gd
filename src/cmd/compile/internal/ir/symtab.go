@@ -38,7 +38,18 @@ type SymsStruct struct {
 	CgoCheckMemmove           *obj.LSym
 	CgoCheckPtrWrite          *obj.LSym
 	CheckPtrAlignment         *obj.LSym
+	CheckPtrAlignmentC        *obj.LSym
+	CheckPtrConvC             *obj.LSym
+	CheckPtrArithmeticC       *obj.LSym
+	CheckPtrConvCLoad         *obj.LSym
+	C23ByteStore              *obj.LSym
+	C23PtrStore               *obj.LSym
+	C23PtrStores              *obj.LSym
+	CheckPtrStore             *obj.LSym
+	CheckPtrAlignmentLoad     *obj.LSym
+	C23Header                 *obj.LSym
 	CheckPtrView              *obj.LSym
+	CheckPtrViewKept          *obj.LSym
 	Deferproc                 *obj.LSym
 	Deferprocat               *obj.LSym
 	DeferprocStack            *obj.LSym

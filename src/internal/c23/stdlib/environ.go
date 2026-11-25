@@ -20,11 +20,11 @@ import (
 
 var (
 	envMu  sync.Mutex
-	envObj c23.Ptr // the char ** that is environ, once C uses it
+	envObj *c23.Void // the char ** that is environ, once C uses it
 )
 
 // Environ returns where environ is (cmd/cc's libcVars).
-func Environ() c23.Ptr {
+func Environ() *c23.Void {
 	envMu.Lock()
 	defer envMu.Unlock()
 	if c23.Addr(envObj) == 0 {
@@ -42,7 +42,7 @@ func makeEnviron() {
 	for i, kv := range env {
 		c23.StorePtr(c23.Add(arr, i*ws), c23.CString(kv))
 	}
-	c23.StorePtr(c23.Add(arr, len(env)*ws), c23.Ptr{})
+	c23.StorePtr(c23.Add(arr, len(env)*ws), (*c23.Void)(nil))
 	c23.StorePtr(envObj, arr)
 }
 
@@ -56,7 +56,7 @@ func envChanged() {
 }
 
 // Putenv is putenv: "name=value" sets name, "name" unsets it (as glibc).
-func Putenv(s c23.Ptr) int32 {
+func Putenv(s *c23.Void) int32 {
 	kv := c23.GoString(s)
 	name, value, ok := strings.Cut(kv, "=")
 	if name == "" {

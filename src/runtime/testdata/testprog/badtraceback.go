@@ -34,7 +34,11 @@ func badLR1() {
 	badLR2(0)
 }
 
+// (gd: the checks of pointer arithmetic know where arg ends, so there
+// are none here.)
+//
 //go:noinline
+//go:nocheckptr
 func badLR2(arg int) {
 	// Smash the return PC or saved LR.
 	lrOff := unsafe.Sizeof(uintptr(0))

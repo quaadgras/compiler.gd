@@ -123,6 +123,13 @@ type Link struct {
 	// after the symbol's been created in the output mmap.
 	generatorSyms map[loader.Sym]generatorFunc
 
+	// The table of the data's variables (datavars.go), and the
+	// symbols that it is of.
+	dataVarsTab loader.Sym
+	dataVars    []loader.Sym
+	dataVarGap  loader.Bitmap // the symbols that have a byte after them
+	dataVarCov  loader.Bitmap // the counters of a coverage build
+
 	// gd fork: per-Invocation state migrated off package-level vars
 	// by internal-tooling/link-state-rewrite so concurrent in-process
 	// linker runs (cmd/link/host.Run) don't alias each other. See

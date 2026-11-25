@@ -41,7 +41,11 @@ func TestCallback(t *testing.T) {
 
 func run(t *testing.T, dir string, lto bool, args ...string) {
 	testenv.MustHaveGoRun(t)
-	runArgs := append([]string{"run", "."}, args...)
+	// gd: what SWIG generates for a function that returns a string
+	// reads C's struct of a pointer and a length as a Go string, which
+	// the checks of unsafe.Pointer refuse (doc/gd/unsafe.md): the
+	// program is compiled without them.
+	runArgs := append([]string{"run", "-gcflags=-d=checkptr=0", "."}, args...)
 	cmd := exec.Command(testenv.GoToolPath(t), runArgs...)
 	cmd.Dir = dir
 	if lto {

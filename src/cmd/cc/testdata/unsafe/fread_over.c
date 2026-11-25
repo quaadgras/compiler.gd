@@ -1,0 +1,13 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <stddef.h>
+static volatile int vn; /* defeats constant folding */
+static void *volatile vg;
+static void *launder(void *p) { vg = p; return vg; }
+static void unsafe(const char *what) { printf("UNSAFE: %s\n", what); exit(0); }
+static void ok(void) { printf("OK\n"); exit(0); }
+char victim[16] = "safe";
+
+int main(void){ char *d = malloc(8); FILE *f = fopen("/dev/zero", "r"); vn = 4096; size_t n = fread(d, 1, vn, f); if (n == 4096) unsafe("fread of 4096 bytes in an 8-byte object"); ok(); }

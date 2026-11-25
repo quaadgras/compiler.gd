@@ -11,8 +11,6 @@ import (
 	"strings"
 )
 
-type Ptr = c23.Ptr
-
 const (
 	MM_PRINT   = 0x100
 	MM_CONSOLE = 0x200
@@ -28,8 +26,8 @@ var severities = []string{"", "HALT", "ERROR", "WARNING", "INFO"}
 // Fmtmsg is fmtmsg, as glibc's: "label: severity: text\nTO FIX: action
 // tag", of the parts given (and that MSGVERB selects, for standard
 // error), to standard error (MM_PRINT) and /dev/console (MM_CONSOLE).
-func Fmtmsg(classification int64, label Ptr, severity int32, text, action, tag Ptr) int32 {
-	str := func(p Ptr) (string, bool) {
+func Fmtmsg(classification int64, label *c23.Void, severity int32, text, action, tag *c23.Void) int32 {
+	str := func(p *c23.Void) (string, bool) {
 		if c23.Addr(p) == 0 {
 			return "", false
 		}

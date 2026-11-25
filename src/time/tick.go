@@ -33,6 +33,12 @@ type Ticker struct {
 // tickers, even if they haven't been stopped.
 // The Stop method is no longer necessary to help the garbage collector.
 // (Code may of course still want to call Stop to stop the ticker for other reasons.)
+//
+// (gd: a Ticker is the runtime's timer, which it allocates with its own
+// type for it, whose channel is an unsafe.Pointer: the conversion is not
+// compared with that. doc/gd/unsafe.md.)
+//
+//go:nocheckptr
 func NewTicker(d Duration) *Ticker {
 	if d <= 0 {
 		panic("non-positive interval for NewTicker")
@@ -50,6 +56,12 @@ func NewTicker(d Duration) *Ticker {
 // Stop does not close the channel, to permit calling [Ticker.Reset],
 // and to prevent a concurrent goroutine reading from the channel
 // from seeing an erroneous "tick".
+//
+// (gd: a Ticker is the runtime's timer, which it allocates with its own
+// type for it, whose channel is an unsafe.Pointer: the conversion is not
+// compared with that. doc/gd/unsafe.md.)
+//
+//go:nocheckptr
 func (t *Ticker) Stop() {
 	if !t.initTicker {
 		// This is misuse, and the same for time.Timer would panic,
@@ -63,6 +75,12 @@ func (t *Ticker) Stop() {
 // Reset stops a ticker and resets its period to the specified duration.
 // The next tick will arrive after the new period elapses. The duration d
 // must be greater than zero; if not, Reset will panic.
+//
+// (gd: a Ticker is the runtime's timer, which it allocates with its own
+// type for it, whose channel is an unsafe.Pointer: the conversion is not
+// compared with that. doc/gd/unsafe.md.)
+//
+//go:nocheckptr
 func (t *Ticker) Reset(d Duration) {
 	if d <= 0 {
 		panic("non-positive interval for Ticker.Reset")

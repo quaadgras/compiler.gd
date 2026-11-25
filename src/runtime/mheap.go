@@ -493,6 +493,10 @@ type mspan struct {
 	sharedBits  *gcBits    // bitmap of the objects other goroutines may reach (shared.go); accessed atomically
 	exposedBits *gcBits    // bitmap of the objects whose address a program has as an integer (checkptr.go); accessed atomically
 	wholeBits   *wholeBits // states of the words of small objects, if the span holds a string, slice or interface (mwholebits.go); accessed atomically
+	cbits       *cBits     // what a span of C's objects keeps for them (cspan.go); accessed atomically
+	cids        *cBits     // the types of its words that are typed pointers (cclaim.go); accessed atomically
+	otypes      *cBits     // the types that its objects were allocated for, if they have pointers and no header (mobjtypes.go); written by the allocation, read atomically
+	csize       uintptr    // the bytes that the object of a large span of C's was asked for
 
 	// sweep generation:
 	// if sweepgen == h->sweepgen - 2, the span needs sweeping
@@ -574,11 +578,17 @@ func recordspan(vh unsafe.Pointer, p unsafe.Pointer) {
 //
 // Each of those has a second spanClass, whose spans have the objects
 // that only one goroutine reaches (shared.go).
+//
+// After them are the classes of the spans of C's objects (cspan.go),
+// which are noscan classes as the others see them: such a span has no
+// heap bitmap, no object of it has a header, and the collector scans
+// it by the bits it keeps itself.
 type spanClass uint16
 
 const (
-	numSpanClasses   = gc.NumSizeClasses << 2
+	numSpanClasses   = gc.NumSizeClasses * 6
 	localSpanClasses = spanClass(gc.NumSizeClasses << 1) // the first of the second ones
+	cSpanClasses     = spanClass(gc.NumSizeClasses << 2) // the first of C's
 	tinySpanClass    = spanClass(tinySizeClass<<1 | 1)
 )
 
@@ -588,24 +598,39 @@ func makeSpanClass(sizeclass uint8, noscan bool) spanClass {
 
 //go:nosplit
 func (sc spanClass) sizeclass() int8 {
-	if sc >= localSpanClasses {
+	if sc >= cSpanClasses {
+		sc -= cSpanClasses
+	} else if sc >= localSpanClasses {
 		sc -= localSpanClasses
 	}
 	return int8(sc >> 1)
+}
+
+// makeCSpanClass returns the class of the spans of C's objects of a
+// size class.
+func makeCSpanClass(sizeclass uint8) spanClass {
+	return cSpanClasses + spanClass(sizeclass)<<1 | 1
+}
+
+// c reports whether the spans of sc have C's objects.
+//
+//go:nosplit
+func (sc spanClass) c() bool {
+	return sc >= cSpanClasses
 }
 
 // local reports whether the spans of sc have local objects.
 //
 //go:nosplit
 func (sc spanClass) local() bool {
-	return sc >= localSpanClasses
+	return sc >= localSpanClasses && sc < cSpanClasses
 }
 
 // base returns sc's class for objects that are not local.
 //
 //go:nosplit
 func (sc spanClass) base() spanClass {
-	if sc >= localSpanClasses {
+	if sc.local() {
 		return sc - localSpanClasses
 	}
 	return sc
@@ -1496,7 +1521,7 @@ func (h *mheap) initSpan(s *mspan, typ spanAllocType, spanclass spanClass, base,
 			s.elemsize = uintptr(gc.SizeClassToSize[sizeclass])
 			if goexperiment.GreenTeaGC {
 				var reserve uintptr
-				if gcUsesSpanInlineMarkBits(s.elemsize) {
+				if s.usesInlineMarkBits() {
 					// Reserve space for the inline mark bits.
 					reserve += unsafe.Sizeof(spanInlineMarkBits{})
 				}
@@ -1563,7 +1588,7 @@ func (h *mheap) initSpan(s *mspan, typ spanAllocType, spanclass spanClass, base,
 		atomic.Or8(&arena.pageInUse[pageIdx], pageMask)
 
 		// Mark packed span.
-		if gcUsesSpanInlineMarkBits(s.elemsize) {
+		if s.usesInlineMarkBits() {
 			atomic.Or8(&arena.pageUseSpanInlineMarkBits[pageIdx], pageMask)
 		}
 
@@ -1707,6 +1732,8 @@ func (h *mheap) freeSpan(s *mspan) {
 
 		lock(&h.lock)
 		s.freeWholeBits()
+		s.freeCBits()
+		s.freeObjTypes()
 		if msanenabled {
 			// Tell msan that this entire span is no longer in use.
 			base := unsafe.Pointer(s.base())
@@ -1782,7 +1809,7 @@ func (h *mheap) freeSpanLocked(s *mspan, typ spanAllocType) {
 		atomic.And8(&arena.pageInUse[pageIdx], ^pageMask)
 
 		// Clear small heap span bit if necessary.
-		if gcUsesSpanInlineMarkBits(s.elemsize) {
+		if s.usesInlineMarkBits() {
 			atomic.And8(&arena.pageUseSpanInlineMarkBits[pageIdx], ^pageMask)
 		}
 	default:
@@ -1873,6 +1900,10 @@ func (span *mspan) init(base uintptr, npages uintptr) {
 	span.sharedBits = nil
 	span.exposedBits = nil
 	span.wholeBits = nil
+	span.cbits = nil
+	span.cids = nil
+	span.otypes = nil
+	span.csize = 0
 	span.state.set(mSpanDead)
 	lockInit(&span.speciallock, lockRankMspanSpecial)
 }
@@ -2165,7 +2196,7 @@ func addfinalizer(p unsafe.Pointer, f *funcval, nret uintptr, fint *_type, ot *p
 			gcw := &mp.p.ptr().gcw
 			// Mark everything reachable from the object
 			// so it's retained for the finalizer.
-			if !span.spanclass.noscan() {
+			if !span.spanclass.noscan() || span.spanclass.c() {
 				scanObject(base, gcw)
 			}
 			// Mark the finalizer itself, since the

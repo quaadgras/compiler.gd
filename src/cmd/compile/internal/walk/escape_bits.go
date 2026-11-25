@@ -447,10 +447,20 @@ func emitMaybeMaterialize(gd *base.Invocation, pos src.XPos, n *ir.CallExpr, ini
 	slot := ca.box
 
 	var bodyInit ir.Nodes
-	matCall := mkcall(gd, "materializeToHeap", unsafePtr, &bodyInit,
-		typecheck.ConvNop(gd, slot, unsafePtr),
-		ca.elemPtr,
-	)
+	var matCall *ir.CallExpr
+	if gd.CObjects {
+		// An object of C's on the heap has a byte after it.
+		matCall = mkcall(gd, "materializeToHeapC", unsafePtr, &bodyInit,
+			typecheck.ConvNop(gd, slot, unsafePtr),
+			ca.elemPtr,
+			reflectdata.TypePtrAt(gd, pos, ir.CObjType(gd, slot.Type().Elem())),
+		)
+	} else {
+		matCall = mkcall(gd, "materializeToHeap", unsafePtr, &bodyInit,
+			typecheck.ConvNop(gd, slot, unsafePtr),
+			ca.elemPtr,
+		)
+	}
 	bodyInit.Append(typecheck.Stmt(gd, ir.NewAssignStmt(gd, pos, slot, typecheck.ConvNop(gd, matCall, slot.Type()))))
 
 	bit := u64Lit(gd, pos, 1<<uint(ca.idx+1))

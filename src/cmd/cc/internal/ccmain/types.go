@@ -46,6 +46,11 @@ const (
 	kStruct // and union: rec.union
 	kFunc
 	kVaList // __builtin_va_list
+
+	// C++, in a template's pattern only (cxxtmpl.go).
+	kTParam    // a template parameter: n is its index
+	kDependent // a type that depends on template parameters: dep
+	kMemPtr    // a pointer to a member of type elem of the class mp.cls
 )
 
 type qual uint8
@@ -70,6 +75,17 @@ type ctype struct {
 	enum *enumType // an integer kind that is an enumeration
 
 	align int64 // _Alignas or aligned, if more than the type's own
+
+	// C++ (cxx.go).
+	ref     uint8     // kPtr: a reference (1: T &, 2: T &&)
+	isAuto  bool      // the placeholder auto, until its initializer says
+	isPackT bool      // kTParam: a parameter pack
+	depN    int       // kArray, in a pattern: its length is the value parameter depN-1
+	mp      *memPtr   // a pointer to data member (an integer: the offset); kMemPtr
+	ctad    *template // isAuto: a class template's name, whose arguments the initializer gives
+	dep     *depType  // kDependent
+	chr     byte      // a character type that is its own type: 'w' wchar_t, 's' char16_t, 'i' char32_t
+
 }
 
 type record struct {
@@ -83,7 +99,21 @@ type record struct {
 	flex     bool  // a flexible array member last
 	id       int   // unique in the translation unit
 	goName   string
-	bytes    bool // its mirror is bytes (gen.go's record)
+	tdName   string // C: the first typedef that names it, if it has no tag (its Go name)
+
+	bytes bool // its mirror is bytes (gen.go's record)
+
+	// A union that has a member with a pointer (uptr) is its bytes,
+	// ubytes of them, in which the members without pointers are, and
+	// after them a pointer to what of it has one: see unionPtr.
+	uptr   bool
+	ubytes int64
+
+	sc   *scope     // C++: the scope it is declared in
+	cls  *classInfo // C++: a class's members that are not fields (cxxclass.go)
+	mtag string     // C++: its name as mangled, if it is a template's instance
+	inst *tinst     // C++: the template's instance it is
+	mp   *memPtr    // C++: the pointer to member function it is (cxxmemptr.go)
 }
 
 type field struct {
@@ -95,6 +125,10 @@ type field struct {
 	unit   *ctype
 	packed bool  // __attribute__((packed)) on the member: alignment 1
 	ubytes int64 // a packed bit-field's: the bytes it spans, from off
+
+	mutable bool // C++: not const in a const object
+	base    bool // C++: a base class's subobject
+	vptr    bool // C++: the pointer to the class's table of virtual functions
 }
 
 type funcType struct {
@@ -107,6 +141,16 @@ type funcType struct {
 	psyms    []*symbol         // the parameters, as parsed: a definition's
 	vlas     []*symbol         // the lengths of VLA types in the parameters
 	tags     map[string]*ctype // the tags the parameters declare: a definition's body's too (C23 6.2.1)
+
+	// C++.
+	defaults []defArg    // the parameters' default arguments, if any has one
+	packs    []paramPack // the parameter packs among the parameters
+	recv     *ctype      // a non-static member function's: the type of this, its first parameter
+	thisQ    qual        // the qualifiers after a member function's declarator: of *this
+	noexcept bool
+	ctor     bool
+	dtor     bool
+	conv     *ctype // a conversion function's type
 }
 
 type enumType struct {
@@ -114,6 +158,10 @@ type enumType struct {
 	complete bool
 	fixed    bool      // C23's enum E : type
 	consts   []*symbol // the constants, once complete
+
+	sc     *scope // C++: the scope it is declared in
+	scoped bool   // enum class
+	names  *scope // C++: its constants, for E::name
 }
 
 // sameEnum reports whether two enumerated types with the same tag and
@@ -164,7 +212,7 @@ func funcOf(ret *ctype, params ...*ctype) *ctype {
 func (t *ctype) isInteger() bool { return t.kind >= kBool && t.kind <= kUIntCap }
 
 // isCap reports whether t is an intcap (intcap.go in internal/c23): an
-// integer whose value is a c23.Ptr, keeping a pointer's capability.
+// integer whose value is a *c23.Void, keeping a pointer's capability.
 func (t *ctype) isCap() bool { return t.kind == kIntCap || t.kind == kUIntCap }
 
 // capInt is the integer type of an intcap's address.
@@ -194,20 +242,13 @@ func bitInt(n int64, u bool) *ctype {
 	}
 	return &ctype{kind: kBitInt, n: n}
 }
-func (t *ctype) isFloat() bool { return t.kind >= kFloat && t.kind <= kLDouble }
-func (t *ctype) isArith() bool { return t.isInteger() || t.isFloat() || t.kind == kComplex }
-func (t *ctype) isReal() bool  { return t.isInteger() || t.isFloat() }
-
+func (t *ctype) isFloat() bool  { return t.kind >= kFloat && t.kind <= kLDouble }
+func (t *ctype) isArith() bool  { return t.isInteger() || t.isFloat() || t.kind == kComplex }
 func complexOf(t *ctype) *ctype { return &ctype{kind: kComplex, elem: t} }
 func (t *ctype) isPtr() bool    { return t.kind == kPtr }
 func (t *ctype) isScalar() bool { return t.isArith() || t.isPtr() || t.kind == kNullptr }
-func (t *ctype) isRecord() bool { return t.kind == kStruct }
 func (t *ctype) isAggregate() bool {
 	return t.kind == kArray || t.kind == kStruct
-}
-func (t *ctype) isVoid() bool { return t.kind == kVoid }
-func (t *ctype) isFuncPtr() bool {
-	return t.kind == kPtr && t.elem.kind == kFunc
 }
 func (t *ctype) isVLA() bool {
 	for ; t.kind == kArray; t = t.elem {
@@ -381,6 +422,12 @@ func (t *ctype) unsignedOf() *ctype {
 
 // promote is the integer promotion of t.
 func promote(t *ctype) *ctype {
+	if t.chr != 0 {
+		// wchar_t, char16_t, char32_t: as the integer type under it.
+		c := *t
+		c.chr, c.q = 0, 0
+		t = &c
+	}
 	if t.isInteger() && !t.isBitInt() && t.rank() < 320 {
 		return tInt
 	}
@@ -486,7 +533,7 @@ func compat(a, b *ctype, seen map[[2]*record]bool) bool {
 	case kComplex:
 		return a.elem.kind == b.elem.kind
 	case kPtr:
-		return compat(a.elem, b.elem, seen)
+		return a.ref == b.ref && compat(a.elem, b.elem, seen)
 	case kArray:
 		if a.n >= 0 && b.n >= 0 && a.n != b.n {
 			return false
@@ -598,13 +645,19 @@ func composite(a, b *ctype) *ctype {
 // lookupField finds a member, through anonymous members: the path of
 // fields to it.
 func (r *record) lookupField(name string) []*field {
-	for _, f := range r.fields {
-		if f.name == name {
-			return []*field{f}
-		}
-		if f.name == "" && f.t.kind == kStruct {
-			if p := f.t.rec.lookupField(name); p != nil {
-				return append([]*field{f}, p...)
+	// A C++ class's own members hide its bases': the bases last.
+	for _, bases := range []bool{false, true} {
+		for _, f := range r.fields {
+			if f.base != bases {
+				continue
+			}
+			if f.name == name {
+				return []*field{f}
+			}
+			if f.name == "" && f.t.kind == kStruct {
+				if p := f.t.rec.lookupField(name); p != nil {
+					return append([]*field{f}, p...)
+				}
 			}
 		}
 	}
@@ -623,6 +676,9 @@ func (t *ctype) String() string {
 	case kPtr:
 		if t.elem.kind == kFunc {
 			return t.elem.funcString("(*)")
+		}
+		if t.ref != 0 {
+			return t.elem.String() + " " + "&&"[:t.ref]
 		}
 		s := t.elem.String() + " *"
 		if q != "" {
@@ -659,6 +715,12 @@ func (t *ctype) String() string {
 			u = "unsigned "
 		}
 		return fmt.Sprintf("%s%s_BitInt(%d)", q, u, t.n)
+	}
+	switch t.kind {
+	case kTParam:
+		return q + "<template parameter " + itoa(t.n) + ">"
+	case kDependent, kMemPtr:
+		return q + "<dependent type>"
 	}
 	return q + kindNames[t.kind]
 }
@@ -796,7 +858,41 @@ func (r *record) layout() {
 			size++
 		}
 	}
+	if r.unionPtr() {
+		// The bytes of the largest member that has no pointer, in
+		// words, and the pointer after them.
+		r.uptr = true
+		r.ubytes = 0
+		for _, f := range r.fields {
+			if !hasPointers(f.t) {
+				r.ubytes = max(r.ubytes, (f.t.sizeof()+7)/8*8)
+			}
+		}
+		size, align = r.ubytes+target.ptrSize, 8
+	}
 	r.align = align
 	r.size = (size + align - 1) / align * align
 	r.complete = true
+}
+
+// unionPtr reports whether r is a union that is laid out as its bytes
+// and one pointer for what of it has pointers (doc/gd/cc.md, "Unions"):
+// one that has a member with a pointer. A member with no pointer is in
+// the bytes. Any other is in an object of the heap of its own, which
+// the pointer points to (internal/c23's UnionBox). So a pointer is never
+// the same memory as an integer, and neither can be made of the other.
+func (r *record) unionPtr() bool {
+	if !r.union || r.packed > 0 || target.ptrSize != 8 {
+		return false
+	}
+	ptr := false
+	for _, f := range r.fields {
+		switch t := f.t; {
+		case f.bits >= 0 || f.packed || t.q&qAtomic != 0 || t.align > 8:
+			return false
+		case hasPointers(t):
+			ptr = true
+		}
+	}
+	return ptr
 }

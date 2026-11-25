@@ -55,12 +55,22 @@ func init() {
 		for k := 0; k < 3; k++ {
 			c := int(big) + 7*k
 			l := 10 + 20*k
-			s := unsafe.Slice(&sliceTearHugeArr[0], c)[:l]
+			s := sliceTearHuge(c)[:l]
 			sliceTearVals = append(sliceTearVals, s)
 			sliceTearMarks[c] = mark
 			sliceTearLens[c] = l
 		}
 	}
+}
+
+// sliceTearHuge returns a slice of sliceTearHugeArr whose capacity is c,
+// which is more than the array has: only the capacity is wanted, and
+// nothing past the array is looked at. The check of unsafe.Slice knows
+// where a variable of the data ends, so there is none here.
+//
+//go:nocheckptr
+func sliceTearHuge(c int) []int64 {
+	return unsafe.Slice(&sliceTearHugeArr[0], c)
 }
 
 // sliceTearCheck reports what is wrong with s, which was loaded from where

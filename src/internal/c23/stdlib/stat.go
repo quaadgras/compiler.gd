@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-func Setenv(name, value c23.Ptr, overwrite int32) int32 {
+func Setenv(name, value *c23.Void, overwrite int32) int32 {
 	n := c23.GoString(name)
 	if !envName(n) {
 		return -1
@@ -27,7 +27,7 @@ func Setenv(name, value c23.Ptr, overwrite int32) int32 {
 	return c23.ErrRet(err)
 }
 
-func Unsetenv(name c23.Ptr) int32 {
+func Unsetenv(name *c23.Void) int32 {
 	n := c23.GoString(name)
 	if !envName(n) {
 		return -1
@@ -53,7 +53,7 @@ var mkstempN uint64
 
 // Mkstemp is mkstemp: it replaces the XXXXXX that ends template with what
 // makes the name of a new file, which it creates (mode 0600) and opens.
-func Mkstemp(template c23.Ptr) int32 {
+func Mkstemp(template *c23.Void) int32 {
 	n := c23_string.Strlen(template)
 	if n < 6 || c23.GoString(c23.Add(template, int(n-6))) != "XXXXXX" {
 		c23.SetErrno(c23.EINVAL)
@@ -82,11 +82,11 @@ func Mkstemp(template c23.Ptr) int32 {
 // Realpath is realpath: the absolute name of an existing file, without
 // symbolic links, ., .. or extra slashes, at resolved or, if it is null,
 // in an array realpath allocates.
-func Realpath(path, resolved c23.Ptr) c23.Ptr {
+func Realpath(path, resolved *c23.Void) *c23.Void {
 	name := c23.GoString(path)
 	if _, err := os.Stat(name); err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	abs, err := filepath.Abs(name)
 	if err == nil {
@@ -94,22 +94,22 @@ func Realpath(path, resolved c23.Ptr) c23.Ptr {
 	}
 	if err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	if len(abs) >= 4096 { // PATH_MAX
 		c23.SetErrno(c23.ENAMETOOLONG)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	if c23.Addr(resolved) == 0 {
 		return c23.CString(abs)
 	}
-	copy(c23.BytesAt(resolved, uintptr(len(abs)+1)), abs+"\x00")
+	copy(c23.Writable(resolved, uintptr(len(abs)+1)), abs+"\x00")
 	return resolved
 }
 
 // PosixMemalign is posix_memalign: aligned_alloc, for an alignment that
 // is a power of two and a multiple of sizeof(void *), into *memptr.
-func PosixMemalign(memptr c23.Ptr, align, size uint64) int32 {
+func PosixMemalign(memptr *c23.Void, align, size uint64) int32 {
 	if align < 8 || align&(align-1) != 0 {
 		return c23.EINVAL
 	}

@@ -1132,7 +1132,7 @@
 // gd fat-interface: IMake is 4-ary with two float64 inline halves.
 (ConstInterface) =>
   (IMake
-    (ConstNil <typ.Uintptr>)
+    (ConstNil <typ.ITab>)
     (ConstNil <typ.BytePtr>)
     (Const64F <typ.Float64> [0])
     (Const64F <typ.Float64> [0]))

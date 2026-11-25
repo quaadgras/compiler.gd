@@ -2116,10 +2116,10 @@ func (r *reader) forStmt(label *types.Sym) ir.Node {
 			rang.RType = r.rtype(pos)
 		}
 		if rang.Key != nil && !ir.IsBlank(rang.Key) {
-			rang.KeyTypeWord, rang.KeySrcRType = r.convRTTI(pos)
+			rang.KeyTypeWord, rang.KeySrcRType, _ = r.convRTTI(pos)
 		}
 		if rang.Value != nil && !ir.IsBlank(rang.Value) {
-			rang.ValueTypeWord, rang.ValueSrcRType = r.convRTTI(pos)
+			rang.ValueTypeWord, rang.ValueSrcRType, _ = r.convRTTI(pos)
 		}
 
 		rang.Body = r.blockStmt()
@@ -2767,7 +2767,7 @@ func (r *reader) expr() (res ir.Node) {
 		implicit := r.Bool()
 		typ := r.typ()
 		pos := r.pos()
-		typeWord, srcRType := r.convRTTI(pos)
+		typeWord, srcRType, dstRType := r.convRTTI(pos)
 		dstTypeParam := r.Bool()
 		identical := r.Bool()
 		x := r.expr()
@@ -2797,6 +2797,14 @@ func (r *reader) expr() (res ir.Node) {
 			ce.SetImplicit(true)
 		}
 		n := typecheck.Expr(r.gd, ce)
+
+		// gd: what an unsafe.Pointer is converted to is compared with
+		// the memory, and a shape is not the type.
+		if typ.IsPtr() && typ.HasShape() && dstRType != nil {
+			if n, ok := n.(*ir.ConvExpr); ok && n.Op() == ir.OCONVNOP && n.X.Type().IsUnsafePtr() {
+				n.PtrRType = dstRType
+			}
+		}
 
 		// Conversions between non-identical, non-empty interfaces always
 		// requires a runtime call, even if they have identical underlying
@@ -2891,7 +2899,7 @@ func (r *reader) funcInst(pos src.XPos) (wrapperFn, baseFn, dictPtr ir.Node) {
 		// TODO(mdempsky): Is there a more robust way to get the
 		// dictionary pointer type here?
 		dictPtrType := baseFn.Type().Param(0).Type
-		dictPtr = typecheck.Expr(r.gd, ir.NewConvExpr(r.gd, pos, ir.OCONVNOP, dictPtrType, r.dictWord(pos, r.dict.subdictsOffset()+idx)))
+		dictPtr = r.dictPtrWord(pos, r.dict.subdictsOffset()+idx, dictPtrType)
 
 		return
 	}
@@ -3184,7 +3192,7 @@ func (r *reader) methodExpr() (wrapperFn, baseFn, dictPtr ir.Node) {
 		// TODO(mdempsky): Is there a more robust way to get the
 		// dictionary pointer type here?
 		dictPtrType := shapedFn.Type().Param(1).Type
-		dictPtr := typecheck.Expr(r.gd, ir.NewConvExpr(r.gd, pos, ir.OCONVNOP, dictPtrType, r.dictWord(pos, r.dict.subdictsOffset()+idx)))
+		dictPtr := r.dictPtrWord(pos, r.dict.subdictsOffset()+idx, dictPtrType)
 
 		return nil, shapedFn, dictPtr
 	}
@@ -3331,7 +3339,7 @@ func (r *reader) multiExpr() []ir.Node {
 			res := ir.Node(tmp)
 			if r.Bool() {
 				n := ir.NewConvExpr(r.gd, pos, ir.OCONV, r.typ(), res)
-				n.TypeWord, n.SrcRType = r.convRTTI(pos)
+				n.TypeWord, n.SrcRType, _ = r.convRTTI(pos)
 				n.SetImplicit(true)
 				res = typecheck.Expr(r.gd, n)
 			}
@@ -3589,7 +3597,25 @@ func (r *reader) dictWord(pos src.XPos, idx int) ir.Node {
 // rttiWord is like dictWord, but converts it to *byte (the type used
 // internally to represent *runtime._type and *runtime.itab).
 func (r *reader) rttiWord(pos src.XPos, idx int) ir.Node {
-	return typecheck.Expr(r.gd, ir.NewConvExpr(r.gd, pos, ir.OCONVNOP, types.NewPtr(types.Types[types.TUINT8]), r.dictWord(pos, idx)))
+	return r.dictPtrWord(pos, idx, types.NewPtr(types.Types[types.TUINT8]))
+}
+
+// dictPtrWord returns the word idx of the dictionary as a pointer of
+// type typ: the address of a descriptor, a table or another dictionary.
+//
+// With GOWASM=gc,split a pointer is not made of an integer: the word is
+// loaded as the pointer that it is (the linker gives every word of the
+// data that is an address its pointer), so that what is loaded through
+// it can be told to be inside what it points to
+// (cmd/compile/internal/wasm/gcsplit.go).
+func (r *reader) dictPtrWord(pos src.XPos, idx int, typ *types.Type) ir.Node {
+	word := r.dictWord(pos, idx)
+	if !(buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.Split) {
+		return typecheck.Expr(r.gd, ir.NewConvExpr(r.gd, pos, ir.OCONVNOP, typ, word))
+	}
+	addr := ir.NewConvExpr(r.gd, pos, ir.OCONVNOP, types.Types[types.TUNSAFEPTR], typecheck.NodAddrAt(r.gd, pos, word))
+	p := ir.NewConvExpr(r.gd, pos, ir.OCONVNOP, types.NewPtr(typ), addr)
+	return typecheck.Expr(r.gd, ir.NewStarExpr(r.gd, pos, p))
 }
 
 // rtype reads a type reference from the element bitstream, and
@@ -3660,7 +3686,7 @@ func (r *reader) itab(pos src.XPos) (typ *types.Type, typRType ir.Node, iface *t
 
 // convRTTI returns expressions appropriate for populating an
 // ir.ConvExpr's TypeWord and SrcRType fields, respectively.
-func (r *reader) convRTTI(pos src.XPos) (typeWord, srcRType ir.Node) {
+func (r *reader) convRTTI(pos src.XPos) (typeWord, srcRType, dstRType ir.Node) {
 	r.Sync(pkgbits.SyncConvRTTI)
 	src, srcRType0, dst, dstRType, itab := r.itab(pos)
 	if !dst.IsInterface() {
@@ -4451,6 +4477,10 @@ func ifaceAdapter(gd *base.Invocation, typ *types.Type, method *types.Field, tar
 	recv := typecheck.TempAt(gd, pos, fn, typ)
 	cast := ir.NewConvExpr(gd, pos, ir.OCONV, types.NewPtr(typ),
 		ir.NewConvExpr(gd, pos, ir.OCONV, unsafePtr, ir.NewAddrExpr(gd, pos, stage)))
+	// (The payload's words are T's by construction: the conversion
+	// is the compiler's own, and the runtime, which has the type of
+	// the temporary, is not asked: doc/gd/unsafe.md.)
+	cast.SetCheckPtr(true)
 	fn.Body.Append(ir.NewAssignStmt(gd, pos, recv, ir.NewStarExpr(gd, pos, cast)))
 
 	// Forward the method's own params, minus outBufs (re-added by

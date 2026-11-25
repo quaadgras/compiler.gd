@@ -13,16 +13,16 @@ import (
 
 // A MemFile is the memory a memory stream reads and writes.
 type MemFile struct {
-	Buf  c23.Ptr // the memory
-	Size int     // fmemopen's: the buffer's size; open_memstream's: what buf holds
-	Pos  int     // the position
-	End  int     // the end of the contents
+	Buf  *c23.Void // the memory
+	Size int       // fmemopen's: the buffer's size; open_memstream's: what buf holds
+	Pos  int       // the position
+	End  int       // the end of the contents
 	App  bool
 
 	// open_memstream's: it grows buf, and keeps *bufp and *sizep up to
 	// date with buf and the position.
 	Dyn         bool
-	Bufp, Sizep c23.Ptr
+	Bufp, Sizep *c23.Void
 	Binary      bool
 }
 
@@ -50,9 +50,9 @@ func (m *MemFile) Write(b []byte) (int, error) {
 			m.Buf, m.Size = nb, n
 		}
 		if m.Pos > m.End { // a seek past the end: zeros between
-			clear(c23.BytesAt(c23.Add(m.Buf, m.End), uintptr(m.Pos-m.End)))
+			clear(c23.Writable(c23.Add(m.Buf, m.End), uintptr(m.Pos-m.End)))
 		}
-		copy(c23.BytesAt(c23.Add(m.Buf, m.Pos), uintptr(len(b))), b)
+		copy(c23.Writable(c23.Add(m.Buf, m.Pos), uintptr(len(b))), b)
 		m.Pos += len(b)
 		m.End = max(m.End, m.Pos)
 		c23.Store8(c23.Add(m.Buf, m.End), 0)
@@ -61,7 +61,7 @@ func (m *MemFile) Write(b []byte) (int, error) {
 	}
 	n := min(len(b), max(m.Size-m.Pos, 0))
 	if n > 0 {
-		copy(c23.BytesAt(c23.Add(m.Buf, m.Pos), uintptr(n)), b[:n])
+		copy(c23.Writable(c23.Add(m.Buf, m.Pos), uintptr(n)), b[:n])
 		m.Pos += n
 		m.End = max(m.End, m.Pos)
 	}
@@ -98,7 +98,7 @@ func (m *MemFile) Sync() {
 	if !m.Dyn {
 		return
 	}
-	if m.Buf.Obj == nil {
+	if m.Buf == nil {
 		m.Buf, m.Size = c23.Malloc(1), 1
 	}
 	c23.StorePtr(m.Bufp, m.Buf)

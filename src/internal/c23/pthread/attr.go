@@ -40,7 +40,7 @@ const (
 // detach state, the scheduling inheritance, policy and priority, and the
 // contention scope.
 type attr struct {
-	stack                   c23.Ptr
+	stack                   *c23.Void
 	stackSize, guardSize    uint64
 	detach, inherit         int32
 	policy, priority, scope int32
@@ -48,9 +48,9 @@ type attr struct {
 
 var defaultAttr = attr{stackSize: 8 << 20, guardSize: 4096} // glibc's, on Linux
 
-func attrInt(a c23.Ptr, i int) c23.Ptr { return c23.Add(a, 3*int(c23.WordSize)+4*i) }
+func attrInt(a *c23.Void, i int) *c23.Void { return c23.Add(a, 3*int(c23.WordSize)+4*i) }
 
-func loadAttr(a c23.Ptr) attr {
+func loadAttr(a *c23.Void) attr {
 	return attr{
 		stack:     c23.LoadPtr(a),
 		stackSize: uint64(c23.LoadLong(c23.Add(a, int(c23.WordSize)))),
@@ -63,7 +63,7 @@ func loadAttr(a c23.Ptr) attr {
 	}
 }
 
-func storeAttr(a c23.Ptr, v attr) {
+func storeAttr(a *c23.Void, v attr) {
 	c23.StorePtr(a, v.stack)
 	c23.StoreLong(c23.Add(a, int(c23.WordSize)), int64(v.stackSize))
 	c23.StoreLong(c23.Add(a, 2*int(c23.WordSize)), int64(v.guardSize))
@@ -74,11 +74,11 @@ func storeAttr(a c23.Ptr, v attr) {
 
 // PthreadAttrInit is pthread_attr_init: a joinable thread, with an 8 MiB
 // stack and a page of guard, of its creator's scheduling.
-func PthreadAttrInit(a c23.Ptr) int32 { storeAttr(a, defaultAttr); return 0 }
+func PthreadAttrInit(a *c23.Void) int32 { storeAttr(a, defaultAttr); return 0 }
 
-func PthreadAttrDestroy(a c23.Ptr) int32 { return 0 }
+func PthreadAttrDestroy(a *c23.Void) int32 { return 0 }
 
-func PthreadAttrSetdetachstate(a c23.Ptr, state int32) int32 {
+func PthreadAttrSetdetachstate(a *c23.Void, state int32) int32 {
 	if state != PTHREAD_CREATE_JOINABLE && state != PTHREAD_CREATE_DETACHED {
 		return c23.EINVAL
 	}
@@ -86,26 +86,26 @@ func PthreadAttrSetdetachstate(a c23.Ptr, state int32) int32 {
 	return 0
 }
 
-func PthreadAttrGetdetachstate(a, state c23.Ptr) int32 {
+func PthreadAttrGetdetachstate(a, state *c23.Void) int32 {
 	c23.Store32(state, c23.Load32(attrInt(a, 0)))
 	return 0
 }
 
 // PthreadAttrSetguardsize is pthread_attr_setguardsize: kept, a
 // goroutine's stack has no guard.
-func PthreadAttrSetguardsize(a c23.Ptr, size uint64) int32 {
+func PthreadAttrSetguardsize(a *c23.Void, size uint64) int32 {
 	c23.StoreLong(c23.Add(a, 2*int(c23.WordSize)), int64(size))
 	return 0
 }
 
-func PthreadAttrGetguardsize(a, size c23.Ptr) int32 {
+func PthreadAttrGetguardsize(a, size *c23.Void) int32 {
 	c23.StoreLong(size, c23.LoadLong(c23.Add(a, 2*int(c23.WordSize))))
 	return 0
 }
 
 // PthreadAttrSetstacksize is pthread_attr_setstacksize: kept, as a
 // goroutine's stack grows. EINVAL below PTHREAD_STACK_MIN.
-func PthreadAttrSetstacksize(a c23.Ptr, size uint64) int32 {
+func PthreadAttrSetstacksize(a *c23.Void, size uint64) int32 {
 	if size < stackMin {
 		return c23.EINVAL
 	}
@@ -113,14 +113,14 @@ func PthreadAttrSetstacksize(a c23.Ptr, size uint64) int32 {
 	return 0
 }
 
-func PthreadAttrGetstacksize(a, size c23.Ptr) int32 {
+func PthreadAttrGetstacksize(a, size *c23.Void) int32 {
 	c23.StoreLong(size, c23.LoadLong(c23.Add(a, int(c23.WordSize))))
 	return 0
 }
 
 // PthreadAttrSetstack is pthread_attr_setstack: the stack is kept, and
 // not used.
-func PthreadAttrSetstack(a, stack c23.Ptr, size uint64) int32 {
+func PthreadAttrSetstack(a, stack *c23.Void, size uint64) int32 {
 	if size < stackMin {
 		return c23.EINVAL
 	}
@@ -129,13 +129,13 @@ func PthreadAttrSetstack(a, stack c23.Ptr, size uint64) int32 {
 	return 0
 }
 
-func PthreadAttrGetstack(a, stack, size c23.Ptr) int32 {
+func PthreadAttrGetstack(a, stack, size *c23.Void) int32 {
 	c23.StorePtr(stack, c23.LoadPtr(a))
 	c23.StoreLong(size, c23.LoadLong(c23.Add(a, int(c23.WordSize))))
 	return 0
 }
 
-func PthreadAttrSetinheritsched(a c23.Ptr, inherit int32) int32 {
+func PthreadAttrSetinheritsched(a *c23.Void, inherit int32) int32 {
 	if inherit != PTHREAD_INHERIT_SCHED && inherit != PTHREAD_EXPLICIT_SCHED {
 		return c23.EINVAL
 	}
@@ -143,14 +143,14 @@ func PthreadAttrSetinheritsched(a c23.Ptr, inherit int32) int32 {
 	return 0
 }
 
-func PthreadAttrGetinheritsched(a, inherit c23.Ptr) int32 {
+func PthreadAttrGetinheritsched(a, inherit *c23.Void) int32 {
 	c23.Store32(inherit, c23.Load32(attrInt(a, 1)))
 	return 0
 }
 
 // PthreadAttrSetschedpolicy is pthread_attr_setschedpolicy: SCHED_OTHER,
 // SCHED_FIFO or SCHED_RR, as glibc's.
-func PthreadAttrSetschedpolicy(a c23.Ptr, policy int32) int32 {
+func PthreadAttrSetschedpolicy(a *c23.Void, policy int32) int32 {
 	if policy != SCHED_OTHER && policy != SCHED_FIFO && policy != SCHED_RR {
 		return c23.EINVAL
 	}
@@ -158,7 +158,7 @@ func PthreadAttrSetschedpolicy(a c23.Ptr, policy int32) int32 {
 	return 0
 }
 
-func PthreadAttrGetschedpolicy(a, policy c23.Ptr) int32 {
+func PthreadAttrGetschedpolicy(a, policy *c23.Void) int32 {
 	c23.Store32(policy, c23.Load32(attrInt(a, 2)))
 	return 0
 }
@@ -175,7 +175,7 @@ func prioValid(policy, prio int32) bool {
 // PthreadAttrSetschedparam is pthread_attr_setschedparam: param's
 // priority (struct sched_param {int sched_priority;}), which must be one
 // of the attributes' policy.
-func PthreadAttrSetschedparam(a, param c23.Ptr) int32 {
+func PthreadAttrSetschedparam(a, param *c23.Void) int32 {
 	prio := int32(c23.Load32(param))
 	if !prioValid(int32(c23.Load32(attrInt(a, 2))), prio) {
 		return c23.EINVAL
@@ -184,14 +184,14 @@ func PthreadAttrSetschedparam(a, param c23.Ptr) int32 {
 	return 0
 }
 
-func PthreadAttrGetschedparam(a, param c23.Ptr) int32 {
+func PthreadAttrGetschedparam(a, param *c23.Void) int32 {
 	c23.Store32(param, c23.Load32(attrInt(a, 3)))
 	return 0
 }
 
 // PthreadAttrSetscope is pthread_attr_setscope: PTHREAD_SCOPE_PROCESS is
 // not supported (ENOTSUP), as on Linux.
-func PthreadAttrSetscope(a c23.Ptr, scope int32) int32 {
+func PthreadAttrSetscope(a *c23.Void, scope int32) int32 {
 	switch scope {
 	case PTHREAD_SCOPE_SYSTEM:
 		c23.Store32(attrInt(a, 4), uint32(scope))
@@ -202,7 +202,7 @@ func PthreadAttrSetscope(a c23.Ptr, scope int32) int32 {
 	return c23.EINVAL
 }
 
-func PthreadAttrGetscope(a, scope c23.Ptr) int32 {
+func PthreadAttrGetscope(a, scope *c23.Void) int32 {
 	c23.Store32(scope, c23.Load32(attrInt(a, 4)))
 	return 0
 }
@@ -212,7 +212,7 @@ func PthreadAttrGetscope(a, scope c23.Ptr) int32 {
 // privileges: a real-time policy is EPERM.
 
 // PthreadGetschedparam is pthread_getschedparam.
-func PthreadGetschedparam(id uint64, policy, param c23.Ptr) int32 {
+func PthreadGetschedparam(id uint64, policy, param *c23.Void) int32 {
 	t := c23.ThreadOf(id)
 	if t == nil {
 		return c23.ESRCH
@@ -228,7 +228,7 @@ func PthreadGetschedparam(id uint64, policy, param c23.Ptr) int32 {
 // PthreadSetschedparam is pthread_setschedparam: SCHED_OTHER (with
 // priority 0) is accepted, SCHED_FIFO and SCHED_RR are EPERM, as for a
 // process without CAP_SYS_NICE.
-func PthreadSetschedparam(id uint64, policy int32, param c23.Ptr) int32 {
+func PthreadSetschedparam(id uint64, policy int32, param *c23.Void) int32 {
 	t := c23.ThreadOf(id)
 	if t == nil {
 		return c23.ESRCH
@@ -287,7 +287,7 @@ var concMu sync.Mutex
 // PthreadGetcpuclockid is pthread_getcpuclockid: the thread's CPU-time
 // clock, which counts the time since it started (Go cannot know a
 // goroutine's processor time).
-func PthreadGetcpuclockid(id uint64, clock c23.Ptr) int32 {
+func PthreadGetcpuclockid(id uint64, clock *c23.Void) int32 {
 	if c23.ThreadOf(id) == nil {
 		return c23.ESRCH
 	}
@@ -299,13 +299,13 @@ func PthreadGetcpuclockid(id uint64, clock c23.Ptr) int32 {
 // fork.
 var (
 	atforkMu sync.Mutex
-	atfork   [][3]c23.Ptr
+	atfork   [][3]*c23.Void
 )
 
 // PthreadAtfork is pthread_atfork.
-func PthreadAtfork(prepare, parent, child c23.Ptr) int32 {
+func PthreadAtfork(prepare, parent, child *c23.Void) int32 {
 	atforkMu.Lock()
-	atfork = append(atfork, [3]c23.Ptr{prepare, parent, child})
+	atfork = append(atfork, [3]*c23.Void{prepare, parent, child})
 	atforkMu.Unlock()
 	return 0
 }
@@ -336,7 +336,7 @@ func PthreadCancel(id uint64) int32 {
 }
 
 // PthreadSetcancelstate is pthread_setcancelstate.
-func PthreadSetcancelstate(state int32, old c23.Ptr) int32 {
+func PthreadSetcancelstate(state int32, old *c23.Void) int32 {
 	if state != PTHREAD_CANCEL_ENABLE && state != PTHREAD_CANCEL_DISABLE {
 		return c23.EINVAL
 	}
@@ -355,7 +355,7 @@ func PthreadSetcancelstate(state int32, old c23.Ptr) int32 {
 // PthreadSetcanceltype is pthread_setcanceltype: asynchronous
 // cancellation acts at the same points as deferred cancellation, and
 // when it is chosen.
-func PthreadSetcanceltype(typ int32, old c23.Ptr) int32 {
+func PthreadSetcanceltype(typ int32, old *c23.Void) int32 {
 	if typ != PTHREAD_CANCEL_DEFERRED && typ != PTHREAD_CANCEL_ASYNCHRONOUS {
 		return c23.EINVAL
 	}
@@ -380,22 +380,22 @@ func PthreadTestcancel() { c23.TestCancel() }
 // PthreadCleanupPush is musl's _pthread_cleanup_push, which
 // pthread_cleanup_push calls with a struct __ptcb of its block (not
 // used: the handlers are the thread's).
-func PthreadCleanupPush(cb, f, arg c23.Ptr) { c23.CleanupPush(f, arg) }
+func PthreadCleanupPush(cb, f, arg *c23.Void) { c23.CleanupPush(f, arg) }
 
 // PthreadCleanupPop is musl's _pthread_cleanup_pop.
-func PthreadCleanupPop(cb c23.Ptr, run int32) { c23.CleanupPop(run != 0) }
+func PthreadCleanupPop(cb *c23.Void, run int32) { c23.CleanupPop(run != 0) }
 
 // pthread_condattr_t holds the clock, and whether the condition variable
 // is shared in its top bit.
 const caPshared = 1 << 31
 
-func PthreadCondattrInit(a c23.Ptr) int32 { c23.Store32(a, 0); return 0 }
+func PthreadCondattrInit(a *c23.Void) int32 { c23.Store32(a, 0); return 0 }
 
-func PthreadCondattrDestroy(a c23.Ptr) int32 { return 0 }
+func PthreadCondattrDestroy(a *c23.Void) int32 { return 0 }
 
 // PthreadCondattrSetclock is pthread_condattr_setclock: CLOCK_REALTIME
 // or CLOCK_MONOTONIC.
-func PthreadCondattrSetclock(a c23.Ptr, clock int32) int32 {
+func PthreadCondattrSetclock(a *c23.Void, clock int32) int32 {
 	if clock != c23.CLOCK_REALTIME && clock != c23.CLOCK_MONOTONIC {
 		return c23.EINVAL
 	}
@@ -403,12 +403,12 @@ func PthreadCondattrSetclock(a c23.Ptr, clock int32) int32 {
 	return 0
 }
 
-func PthreadCondattrGetclock(a, clock c23.Ptr) int32 {
+func PthreadCondattrGetclock(a, clock *c23.Void) int32 {
 	c23.Store32(clock, c23.Load32(a)&^caPshared)
 	return 0
 }
 
-func PthreadCondattrSetpshared(a c23.Ptr, pshared int32) int32 {
+func PthreadCondattrSetpshared(a *c23.Void, pshared int32) int32 {
 	if pshared != PTHREAD_PROCESS_PRIVATE && pshared != PTHREAD_PROCESS_SHARED {
 		return c23.EINVAL
 	}
@@ -416,7 +416,7 @@ func PthreadCondattrSetpshared(a c23.Ptr, pshared int32) int32 {
 	return 0
 }
 
-func PthreadCondattrGetpshared(a, pshared c23.Ptr) int32 {
+func PthreadCondattrGetpshared(a, pshared *c23.Void) int32 {
 	c23.Store32(pshared, c23.Load32(a)>>31)
 	return 0
 }
@@ -424,29 +424,29 @@ func PthreadCondattrGetpshared(a, pshared c23.Ptr) int32 {
 // The attributes of read-write locks and barriers: whether they are
 // shared, which changes nothing (the program's threads share them).
 
-func PthreadRwlockattrInit(a c23.Ptr) int32 { c23.Store32(a, 0); return 0 }
+func PthreadRwlockattrInit(a *c23.Void) int32 { c23.Store32(a, 0); return 0 }
 
-func PthreadRwlockattrDestroy(a c23.Ptr) int32 { return 0 }
+func PthreadRwlockattrDestroy(a *c23.Void) int32 { return 0 }
 
-func PthreadRwlockattrSetpshared(a c23.Ptr, pshared int32) int32 { return setPshared(a, pshared) }
+func PthreadRwlockattrSetpshared(a *c23.Void, pshared int32) int32 { return setPshared(a, pshared) }
 
-func PthreadRwlockattrGetpshared(a, pshared c23.Ptr) int32 {
+func PthreadRwlockattrGetpshared(a, pshared *c23.Void) int32 {
 	c23.Store32(pshared, c23.Load32(a))
 	return 0
 }
 
-func PthreadBarrierattrInit(a c23.Ptr) int32 { c23.Store32(a, 0); return 0 }
+func PthreadBarrierattrInit(a *c23.Void) int32 { c23.Store32(a, 0); return 0 }
 
-func PthreadBarrierattrDestroy(a c23.Ptr) int32 { return 0 }
+func PthreadBarrierattrDestroy(a *c23.Void) int32 { return 0 }
 
-func PthreadBarrierattrSetpshared(a c23.Ptr, pshared int32) int32 { return setPshared(a, pshared) }
+func PthreadBarrierattrSetpshared(a *c23.Void, pshared int32) int32 { return setPshared(a, pshared) }
 
-func PthreadBarrierattrGetpshared(a, pshared c23.Ptr) int32 {
+func PthreadBarrierattrGetpshared(a, pshared *c23.Void) int32 {
 	c23.Store32(pshared, c23.Load32(a))
 	return 0
 }
 
-func setPshared(a c23.Ptr, pshared int32) int32 {
+func setPshared(a *c23.Void, pshared int32) int32 {
 	if pshared != PTHREAD_PROCESS_PRIVATE && pshared != PTHREAD_PROCESS_SHARED {
 		return c23.EINVAL
 	}

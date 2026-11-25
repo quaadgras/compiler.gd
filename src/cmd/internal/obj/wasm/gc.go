@@ -235,7 +235,14 @@ const (
 	GCPtrAddr  = 0
 	GCPtrSlots = 1
 	GCPtrOff   = 2
-	GCSlots    = "wasm.slots"
+	// GCPtrLim is the size in bytes of what the pointer points into,
+	// from where element 0 of the array is: the block, the variable of
+	// a frame, the data. A load or a store through the pointer is of
+	// bytes from GCPtrOff on that end at GCPtrLim or before it (see
+	// GCSplitCheck). It is 0 for a pointer that was made of an integer:
+	// nothing is loaded or stored through that one.
+	GCPtrLim = 3
+	GCSlots  = "wasm.slots"
 
 	// The functions the linker generates for split. See
 	// cmd/link/internal/wasm/gcsplit.go.
@@ -246,8 +253,35 @@ const (
 	GCSplitIntToPtr = "wasm.inttoptr" // (i64) ptr: the pointer of an address
 	GCSplitMove     = "wasm.smove"    // (dst, drel i32, src, srel i32, n i32): copy n bytes and their pointers
 	GCSplitZero     = "wasm.szero"    // (p, rel i32, n i32): zero n bytes and their pointers
-	GCSplitNew      = "wasm.snew"     // (addr i32, nslots i32) ptr: a pointer to a new block
+	GCSplitNew      = "wasm.snew"     // (addr i32, nslots i32, size i32) ptr: a pointer to a new block of size bytes
 	GCSplitStrLen   = "wasm.strlen"   // (a, b i64) i64: the length of the string of wasm32 whose A and B these are (with 4-byte words only)
+	// GCSplitLoadTab (p, rel i32) ptr is GCSplitLoadPtr's checked form
+	// for the word of an interface that holds its type or its table:
+	// the pointer that was stored there, or nil for a word of zero. A
+	// word that a program wrote something else over is not one that an
+	// interface is loaded from: the program stops.
+	GCSplitLoadTab = "wasm.loadtabc"
+
+	// What code that is not the runtime's loads and stores through a
+	// pointer is in what the pointer points into: GCSplitCheck (p, rel
+	// i32, n i32) i32 returns the address of the n bytes at rel from
+	// p, and traps if they are not all between GCPtrOff - GCPtrOff
+	// and GCPtrLim. GCSplitCheck1 and the others are that for 1, 2, 4
+	// and 8 bytes. The functions above have a form that asks the same
+	// (GCSplitChecked), and whose pointer made of an integer is one
+	// with no size, which nothing is loaded through.
+	GCSplitCheck  = "wasm.chk"
+	GCSplitCheck1 = "wasm.chk1"
+	GCSplitCheck2 = "wasm.chk2"
+	GCSplitCheck4 = "wasm.chk4"
+	GCSplitCheck8 = "wasm.chk8"
+	// GCSplitCheckW and the others are those for a store: the bytes
+	// are also not of the data that nothing changes (GCGlobalROEnd).
+	GCSplitCheckW  = "wasm.chkw"
+	GCSplitCheckW1 = "wasm.chkw1"
+	GCSplitCheckW2 = "wasm.chkw2"
+	GCSplitCheckW4 = "wasm.chkw4"
+	GCSplitCheckW8 = "wasm.chkw8"
 
 	// GCGlobalSlots is the global (with split) that holds the array of
 	// the program's data, which covers all of it from address 0, and
@@ -255,8 +289,14 @@ const (
 	// array: a pointer to data is that plus the address.
 	GCGlobalSlots  = 7
 	GCGlobalStatic = 8
+	// GCGlobalROEnd is the global (an i32, with split) that holds the
+	// address where the data that the program may change begins: what
+	// is below it is the data that nothing changes (the descriptors of
+	// types, the bytes of strings, tables), and code that is not the
+	// runtime's stores nothing there (GCSplitCheckW).
+	GCGlobalROEnd = 9
 	// GCSplitGlobals is GCGlobals with split.
-	GCSplitGlobals = 9
+	GCSplitGlobals = 10
 
 	// GCStackRatio is how much of the engine's stack a function may
 	// take for each byte of its frame in linear memory, and
@@ -806,6 +846,11 @@ func (t *gcLineTable) write(ctxt *obj.Link, s *obj.LSym, w *bytes.Buffer) {
 	})
 	w.Write(t.buf.Bytes())
 }
+
+// GCSplitChecked returns the name of the form of the function name
+// (GCSplitLoadPtr, GCSplitStorePtr, GCSplitIntToPtr, GCSplitMove or
+// GCSplitZero) that code which is not the runtime's calls.
+func GCSplitChecked(name string) string { return name + "c" }
 
 // GCTypeAddr is the WebAssembly type of an address in linear memory,
 // of the fields GCPtrAddr and GCPtrOff of a GCPtr, and of an address

@@ -14,7 +14,7 @@ const POLLPRI = 0x2
 // Select is select: the fd_sets are bit arrays (descriptor i is bit i%8
 // of byte i/8, on a little-endian target, whatever the word), timeout a
 // struct timeval or null for none.
-func Select(nfds int32, rd, wr, ex, timeout c23.Ptr) int32 {
+func Select(nfds int32, rd, wr, ex, timeout *c23.Void) int32 {
 	var deadline time.Time
 	poll := true
 	if c23.Addr(timeout) != 0 {
@@ -32,7 +32,7 @@ func Select(nfds int32, rd, wr, ex, timeout c23.Ptr) int32 {
 
 // Pselect is pselect: timeout is a struct timespec; the signal mask is
 // not changed.
-func Pselect(nfds int32, rd, wr, ex, timeout, sigmask c23.Ptr) int32 {
+func Pselect(nfds int32, rd, wr, ex, timeout, sigmask *c23.Void) int32 {
 	var deadline time.Time
 	poll := true
 	if c23.Addr(timeout) != 0 {
@@ -48,7 +48,7 @@ func Pselect(nfds int32, rd, wr, ex, timeout, sigmask c23.Ptr) int32 {
 	return selectFds(nfds, rd, wr, ex, deadline, poll)
 }
 
-func selectFds(nfds int32, rd, wr, ex c23.Ptr, deadline time.Time, poll bool) int32 {
+func selectFds(nfds int32, rd, wr, ex *c23.Void, deadline time.Time, poll bool) int32 {
 	if nfds < 0 || nfds > 1024 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -56,9 +56,9 @@ func selectFds(nfds int32, rd, wr, ex c23.Ptr, deadline time.Time, poll bool) in
 	nb := uintptr(nfds+7) / 8
 	sets := [3][]byte{}
 	want := [3][]byte{}
-	for i, p := range [3]c23.Ptr{rd, wr, ex} {
+	for i, p := range [3]*c23.Void{rd, wr, ex} {
 		if c23.Addr(p) != 0 {
-			sets[i] = c23.BytesAt(p, nb)
+			sets[i] = c23.Writable(p, nb)
 			want[i] = append([]byte(nil), sets[i]...)
 		}
 	}

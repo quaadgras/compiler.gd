@@ -630,9 +630,8 @@ type g struct {
 	// built with the "valgrind" build tag, otherwise it is unused.
 	valgrindStackID uintptr
 
-	// c23 is internal/c23's side table of the capabilities that C stored
-	// in this goroutine's stack and that its words cannot carry
-	// (doc/gd/cc.md). copystack re-keys it through c23StackMove.
+	// c23 is what internal/c23 keeps for this goroutine as a thread of
+	// C's: its errno, and the like (c23GTable).
 	c23 unsafe.Pointer
 }
 
@@ -655,6 +654,13 @@ const (
 )
 
 type m struct {
+	// gd: cprobe is set while a conversion is only asked about
+	// (checkptrProbe): what it would stop the program for sets
+	// cprobeFail instead.
+	cprobe, cprobeFail bool
+	cprobeStrict       bool // a word that nothing claimed fails too (crepair.go)
+	cprobeDepth        uint16
+
 	g0      *g     // goroutine with scheduling stack
 	morebuf gobuf  // gobuf arg to morestack
 	divmod  uint32 // div/mod denominator for arm - known to liblink (cmd/internal/obj/arm/obj5.go)
@@ -978,6 +984,11 @@ type p struct {
 
 	// Padding is no longer needed. False sharing is now not a worry because p is large enough
 	// that its size class is an integer multiple of the cache line size (for any of our architectures).
+
+	// The variables of the stack and of the data that the checks of
+	// unsafe pointers looked up last (stackvar.go).
+	varCache     [4]varCacheEnt
+	varCacheNext uint8
 }
 
 type schedt struct {

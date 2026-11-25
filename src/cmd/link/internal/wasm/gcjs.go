@@ -44,7 +44,7 @@ func (l *gcLinker) jsHelpers() []*wasmFunc {
 		writeSleb128(&b, int64(l.typeIndex(wasm.GCPtr)))
 		ptr = b.Bytes()
 		nullPtr = append([]byte{0xD0}, ptr[1:]...)
-		field = 3
+		field = 4
 	} else {
 		ptr = []byte{wasm.GCTypeEqRef}
 	}
@@ -62,6 +62,7 @@ func (l *gcLinker) jsHelpers() []*wasmFunc {
 		box.WriteByte(0xD0)                    // ref.null slots
 		writeSleb128(&box, int64(l.typeIndex(wasm.GCSlots)))
 		writeI32Const(&box, 0) // off
+		writeI32Const(&box, 0) // lim: nothing is loaded through it
 	}
 	box.Write([]byte{0x20, 0x00, 0xFB, 0x00}) // local.get 0; struct.new
 	writeUleb128(&box, uint64(ext))

@@ -50,6 +50,7 @@ func sysAlloc(n uintptr, sysStat *sysMemStat, vmaName string) unsafe.Pointer {
 	sysStat.add(int64(n))
 	gcController.mappedReady.Add(int64(n))
 	p := sysAllocOS(n, vmaName)
+	rtMemAdd(p, n) // gd: the runtime's own (rtmem.go)
 
 	// When using ASAN leak detection, we must tell ASAN about
 	// cases where we store pointers in mmapped memory.
@@ -134,6 +135,8 @@ func sysFree(v unsafe.Pointer, n uintptr, sysStat *sysMemStat) {
 	if asanenabled {
 		lsanunregisterrootregion(v, n)
 	}
+
+	rtMemRemove(v, n) // gd: no longer the runtime's (rtmem.go)
 
 	sysStat.add(-int64(n))
 	gcController.mappedReady.Add(-int64(n))
@@ -273,4 +276,5 @@ func sysUnreserve(v unsafe.Pointer, n uintptr) {
 func sysMap(v unsafe.Pointer, n uintptr, sysStat *sysMemStat, vmaName string) {
 	sysStat.add(int64(n))
 	sysMapOS(v, n, vmaName)
+	rtMemAdd(v, n) // gd: the runtime's own (rtmem.go)
 }

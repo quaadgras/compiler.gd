@@ -23,6 +23,12 @@ func (p *parser) expr() expr {
 
 // rvalueVoid is e evaluated for its effects: any type, void included.
 func (p *parser) rvalueVoid(e expr) expr {
+	if _, ok := e.(*initList); ok {
+		p.errorAt(e.at(), "a braced list is not an expression here")
+	}
+	if pr, ok := e.(*classPR); ok {
+		e = p.materializePR(pr)
+	}
 	if e.ty().kind == kVoid {
 		return e
 	}
@@ -38,6 +44,9 @@ func isAssignOp(s string) bool {
 }
 
 func (p *parser) assignment() expr {
+	if p.cxx && p.is("{") {
+		return p.braceList()
+	}
 	x := p.conditional()
 	t := p.peek()
 	if t.kind != tkPunct || !isAssignOp(t.text) {
@@ -45,6 +54,26 @@ func (p *parser) assignment() expr {
 	}
 	at := p.here()
 	p.next()
+	if p.cxx {
+		y := p.assignment()
+		if l, ok := y.(*initList); ok && x.ty().kind != kStruct {
+			y = p.fromList(l, x.ty(), at)
+		}
+		if x.ty().kind == kStruct {
+			return p.classAssign(t.text, x, y, at)
+		}
+		if overloadable(x.ty()) || overloadable(y.ty()) {
+			if e := p.overloaded(t.text, []expr{x, y}, at); e != nil {
+				return e
+			}
+			if y.ty().kind == kStruct {
+				if c := p.convertClass(y, x.ty(), at); c != nil {
+					y = c
+				}
+			}
+		}
+		return p.makeAssign(at, t.text, x, p.rvalue(y))
+	}
 	y := p.rvalue(p.assignment())
 	return p.makeAssign(at, t.text, x, y)
 }
@@ -113,7 +142,7 @@ func isLvalue(e expr) bool {
 	switch e := e.(type) {
 	case *varRef:
 		return e.sym.kind == symVar
-	case *deref, *compoundLit, *strLit:
+	case *deref, *compoundLit, *strLit, *retSlot:
 		return true
 	case *member:
 		return isLvalue(e.x) || isStructValue(e.x)
@@ -141,15 +170,44 @@ func (p *parser) conditional() expr {
 			c = p.intc(b2i(v), tInt, at)
 		}
 	}
-	var x expr
+	var x, y expr
+	p.condDepth++
 	if p.is(":") {
 		// GNU's c ?: y.
 		x = c
 	} else {
-		x = p.rvalueVoid(p.expr())
+		x = p.expr()
 	}
 	p.expect(":")
-	y := p.rvalueVoid(p.conditional())
+	if p.cxx {
+		y = p.assignment()
+	} else {
+		y = p.conditional()
+	}
+	p.condDepth--
+	if p.cxx {
+		// One operand of a class: converted to the other's type, if it
+		// can be.
+		xs, ys := x.ty().kind == kStruct, y.ty().kind == kStruct
+		if _, ok := x.(*initList); !ok && xs != ys && !isPMF(x.ty()) && !isPMF(y.ty()) {
+			if xs && y.ty().kind != kVoid {
+				if c := p.convertClass(x, valueType(y), at); c != nil {
+					x = c
+				}
+			} else if ys && x.ty().kind != kVoid {
+				if c := p.convertClass(y, valueType(x), at); c != nil {
+					y = c
+				}
+			}
+		}
+	}
+	if p.cxx {
+		if pr := p.classCond(c, x, y, at); pr != nil {
+			return pr
+		}
+	}
+	lx, ly := x, y
+	x, y = p.rvalueVoid(x), p.rvalueVoid(y)
 	if cv, ok := p.foldInt(c); ok && isConstExpr(x) && isConstExpr(y) {
 		// Keep it a constant expression.
 		t := p.condType(x, y, at)
@@ -157,6 +215,11 @@ func (p *parser) conditional() expr {
 			return p.convert(x, t)
 		}
 		return p.convert(y, t)
+	}
+	if p.cxx && lx.ty().kind != kVoid && p.isLvalueCxx(lx) && p.isLvalueCxx(ly) && sameType(lx.ty(), ly.ty()) && bitField(lx) == nil && bitField(ly) == nil {
+		// C++: of two lvalues of one type, an lvalue.
+		t := lx.ty()
+		return &deref{node{t, at}, &cond{node{ptrTo(t), at}, c, p.addressOf(lx, at), p.addressOf(ly, at)}}
 	}
 	t := p.condType(x, y, at).unqual()
 	if t.isPtr() && x.ty().isPtr() && y.ty().isPtr() && noEffects(c) {
@@ -218,6 +281,8 @@ func isConstExpr(e expr) bool {
 func (p *parser) condType(x, y expr, at pos) *ctype {
 	xt, yt := x.ty(), y.ty()
 	switch {
+	case p.cxx && xt.enum != nil && xt.enum == yt.enum:
+		return xt.unqual()
 	case xt.isArith() && yt.isArith():
 		return usual(xt, yt)
 	case xt.kind == kStruct && yt.kind == kStruct && compatible(xt.unqual(), yt.unqual()):
@@ -262,11 +327,23 @@ func (p *parser) binaryExpr(min int) expr {
 	for {
 		t := p.peek()
 		prec, ok := binPrec[t.text]
-		if t.kind != tkPunct || !ok || prec <= min {
+		if t.kind != tkPunct || !ok || prec <= min || p.noGT > 0 && (t.text == ">" || t.text == ">>") {
 			return x
 		}
 		at := p.here()
 		p.next()
+		if p.cxx {
+			short := t.text == "&&" || t.text == "||"
+			if short {
+				p.condDepth++
+			}
+			y := p.binaryExpr(prec)
+			if short {
+				p.condDepth--
+			}
+			x = p.cxxBinary(at, t.text, x, y)
+			continue
+		}
 		y := p.binaryExpr(prec)
 		x = p.binop(at, t.text, p.rvalue(x), p.rvalue(y))
 	}
@@ -577,6 +654,15 @@ func (p *parser) foldTruth(e expr) (bool, bool) {
 		return isStaticAddr(e.x)
 	case *addrOf:
 		return isStaticAddr(e.x)
+	case *binary:
+		// An address constant compared with a null pointer.
+		if e.op == "==" || e.op == "!=" {
+			xv, xok := p.foldTruth(e.x)
+			yv, yok := p.foldTruth(e.y)
+			if xok && yok && !(xv && yv) {
+				return (xv == yv) == (e.op == "=="), true
+			}
+		}
 	}
 	return false, false
 }
@@ -617,6 +703,9 @@ func (p *parser) toPtrish(e expr) expr {
 }
 
 func (p *parser) checkPtrArith(t *ctype, at pos) {
+	if p.cxx {
+		p.complete(t.elem)
+	}
 	if t.elem.kind == kStruct && !t.elem.rec.complete {
 		p.errorAt(at, "arithmetic on a pointer to an incomplete type")
 	}
@@ -631,6 +720,9 @@ func b2i(b bool) int64 {
 
 // scalarCond checks that e may be a condition.
 func (p *parser) scalarCond(e expr, at pos) expr {
+	if p.cxx && e.ty().kind == kStruct {
+		return p.boolOf(e, at)
+	}
 	if !e.ty().isScalar() {
 		p.errorAt(at, "used %s where a scalar is required", e.ty())
 	}
@@ -649,7 +741,8 @@ func isNullConst(e expr) bool {
 		e = c.x
 	}
 	if c, ok := e.(*intConst); ok && c.v == 0 && (c.t.isInteger() || c.t.isPtr() && c.t.elem.kind == kVoid) {
-		return true
+		// In C++ an enumerator is not a null pointer constant.
+		return c.t.enum == nil || c.t.enum.sc == nil
 	}
 	return false
 }
@@ -659,7 +752,7 @@ func (p *parser) castExpr() expr {
 		// (__extension__ expr)
 		return p.postfix(p.primary())
 	}
-	if p.is("(") && p.isTypeStart(1) {
+	if p.is("(") && p.isTypeStart(1) && (!p.cxx || p.castAhead()) {
 		at := p.here()
 		save := p.pos
 		n := len(p.pendingVLA)
@@ -677,6 +770,9 @@ func (p *parser) castExpr() expr {
 				p.pendingVLA = p.pendingVLA[:n]
 			}
 			return p.postfix(e)
+		}
+		if p.cxx {
+			return p.castTo(p.castExpr(), t, at, "")
 		}
 		// The type's lengths are evaluated before the operand (as GCC
 		// and clang do), not with the declaration this is in.
@@ -722,6 +818,11 @@ func (p *parser) castExpr() expr {
 func (p *parser) unaryExpr() expr {
 	at := p.here()
 	t := p.peek()
+	if p.cxx {
+		if e, ok := p.cxxUnary(t, at); ok {
+			return p.postfix(e)
+		}
+	}
 	if t.kind == tkPunct {
 		switch t.text {
 		case "+", "-", "~":
@@ -743,6 +844,9 @@ func (p *parser) unaryExpr() expr {
 		case "!":
 			p.next()
 			x := p.scalarCond(p.rvalue(p.castExpr()), at)
+			if p.cxx {
+				return p.boolResult(p.fold(&unary{node{tInt, at}, "!", x}))
+			}
 			return p.fold(&unary{node{tInt, at}, "!", x})
 		case "&":
 			p.next()
@@ -776,6 +880,15 @@ func (p *parser) unaryExpr() expr {
 		switch t.text {
 		case "sizeof":
 			p.next()
+			if p.cxx && p.accept("...") {
+				p.expect("(")
+				s := p.lookup(p.ident())
+				p.expect(")")
+				if s == nil || s.kind != symPack {
+					p.errorAt(at, "sizeof... of what is not a parameter pack")
+				}
+				return p.intc(int64(packLen(s)), tULong, at)
+			}
 			n := len(p.pendingVLA)
 			if p.is("(") && p.isTypeStart(1) {
 				p.next()
@@ -879,6 +992,16 @@ func (p *parser) unaryExpr() expr {
 			return &builtinCall{node{x.ty().elem, at}, name, []expr{x}}
 		}
 	}
+	if p.cxx && p.isTypeStart(0) {
+		// T(args), T{args}: a simple type specifier, then its operand.
+		p.exprType++
+		s := p.declSpecs()
+		p.exprType--
+		if s.t == nil || !p.is("(") && !p.is("{") {
+			p.errorAt(at, "expected an expression")
+		}
+		return p.postfix(p.functionalCast(s.t, at))
+	}
 	return p.postfix(p.primary())
 }
 
@@ -903,6 +1026,12 @@ func (p *parser) vlaOperand(x expr) expr {
 }
 
 func (p *parser) sizeofType(t *ctype, at pos) expr {
+	if t.isRef() {
+		t = t.elem
+	}
+	if p.cxx {
+		p.complete(baseElem(t))
+	}
 	if t.isVLA() {
 		return &vlaSizeof{node{tULong, at}, t}
 	}
@@ -933,6 +1062,12 @@ func constAddr(e expr) (int64, bool) {
 }
 
 func (p *parser) addressOf(x expr, at pos) expr {
+	if pr, ok := x.(*classPR); ok {
+		x = p.materializePR(pr)
+	}
+	if _, ok := x.(*retSlot); ok {
+		return &addrOf{node{ptrTo(x.ty()), at}, x}
+	}
 	if v, ok := constAddr(x); ok {
 		if m, isMember := x.(*member); !isMember || m.f.bits < 0 {
 			return &intConst{node{ptrTo(x.ty()), at}, v}
@@ -964,6 +1099,12 @@ func (p *parser) addressOf(x expr, at pos) expr {
 			p.errorAt(at, "lvalue required as unary & operand")
 		}
 	case *compoundLit, *strLit:
+	case *seqExpr:
+		if p.cxx {
+			// A temporary, after what makes it.
+			return &seqExpr{node{ptrTo(x.ty()), at}, x.pre, p.addressOf(x.x, at)}
+		}
+		p.errorAt(at, "lvalue required as unary & operand")
 	case *stmtExpr, *call, *cond, *assign:
 		if x.ty().kind == kStruct {
 			break // GNU: the address of a temporary
@@ -1019,6 +1160,30 @@ func (p *parser) postfix(x expr) expr {
 	for {
 		at := p.here()
 		switch {
+		case p.cxx && (p.is(".") || p.is("->")) && p.isAt(1, "*") && p.noPM > 0:
+			return x
+		case p.cxx && (p.is(".") || p.is("->")) && p.isAt(1, "*"):
+			arrow := p.next().text == "->"
+			p.next()
+			x = p.memberPointerAccess(x, arrow, at)
+		case p.cxx && (p.is(".") || p.is("->")):
+			x = p.cxxMember(x, p.next().text == "->", at)
+		case p.cxx && (p.is("++") || p.is("--")) && overloadable(x.ty()):
+			op := p.next().text
+			e := p.overloaded(op, []expr{x, p.intc(0, tInt, at)}, at)
+			if e == nil {
+				p.errorAt(at, "no match for operator%s (operand type is %s)", op, x.ty())
+			}
+			x = e
+		case p.cxx && p.is("[") && x.ty().kind == kStruct:
+			p.next()
+			i := p.expr()
+			p.expect("]")
+			e := p.memberCall(x, "operator[]", []expr{i}, at)
+			if e == nil {
+				p.errorAt(at, "no match for operator[] (operand type is %s)", x.ty())
+			}
+			x = e
 		case p.accept("["):
 			i := p.rvalue(p.expr())
 			p.expect("]")
@@ -1065,17 +1230,26 @@ func (p *parser) memberOf(x expr, name string, at pos) expr {
 	}
 	for _, f := range path {
 		ft := f.t
-		if t.q != 0 {
-			ft = qualifyDeep(ft, t.q)
+		if q := t.q; q != 0 && !ft.isRef() {
+			if f.mutable {
+				q &^= qConst
+			}
+			ft = qualifyDeep(ft, q)
 		}
 		x = &member{node{ft, at}, x, f}
 		t = ft
+	}
+	if p.cxx {
+		return p.unref(x)
 	}
 	return x
 }
 
 // callOf types a call of x, after its "(".
 func (p *parser) callOf(x expr, at pos) expr {
+	if p.cxx {
+		return p.cxxCall(x, at)
+	}
 	if v, ok := x.(*varRef); ok && v.sym.kind == symFunc {
 		v.sym.used = true
 	}
@@ -1136,8 +1310,19 @@ func (p *parser) primary() expr {
 		return &floatConst{node{t.ty, at}, t.fval}
 	case tkString:
 		n := int64(len(t.str))/t.ty.sizeof() + 1
+		if p.cxx {
+			// C++: an array of const elements.
+			return &strLit{node{arrayOf(t.ty.qualified(qConst), n), at}, t.str}
+		}
 		return &strLit{node{arrayOf(t.ty, n), at}, t.str}
 	case tkPunct:
+		if t.text == "::" && p.cxx {
+			p.pos--
+			return p.cxxName(at)
+		}
+		if t.text == "[" && p.cxx && !p.is("[") {
+			return p.lambdaExpr(at)
+		}
 		if t.text == "(" {
 			for p.is("__extension__") && !p.isTypeStart(1) {
 				p.next()
@@ -1145,10 +1330,22 @@ func (p *parser) primary() expr {
 			if p.is("{") {
 				return p.stmtExprOf(at)
 			}
-			if p.isTypeStart(0) {
+			if p.isTypeStart(0) && !p.cxx {
 				ty := p.typeName()
 				p.expect(")")
 				return p.compoundLiteral(ty, at)
+			}
+			if p.cxx {
+				if e, ok := p.foldExpr(at); ok {
+					return e
+				}
+				// Within parentheses, ">" is an operator again.
+				save := p.noGT
+				p.noGT = 0
+				x := p.expr()
+				p.noGT = save
+				p.expect(")")
+				return x
 			}
 			x := p.expr()
 			p.expect(")")
@@ -1166,6 +1363,11 @@ func (p *parser) primary() expr {
 			return p.generic(at)
 		case "__func__", "__FUNCTION__", "__PRETTY_FUNCTION__":
 			if s := p.lookup("__func__"); s != nil {
+				if !s.funcNamed {
+					// The function's name is an object only if it is used.
+					s.funcNamed = true
+					p.u.statics = append(p.u.statics, s)
+				}
 				return &varRef{node{s.t, at}, s}
 			}
 			// GCC: "" outside a function.
@@ -1173,6 +1375,40 @@ func (p *parser) primary() expr {
 		}
 		if len(t.text) > 10 && t.text[:10] == "__builtin_" || len(t.text) > 12 && t.text[:12] == "__cc_atomic_" {
 			return p.builtin(t.text, at)
+		}
+		if p.cxx {
+			switch t.text {
+			case "this":
+				if p.lambda != nil {
+					return p.addressOf(p.thisObject(at), at)
+				}
+				if p.this == nil {
+					p.errorAt(at, "invalid use of this outside a non-static member function")
+				}
+				return &varRef{node{p.this.t, at}, p.this}
+			case "static_cast", "const_cast", "reinterpret_cast", "dynamic_cast":
+				return p.namedCast(t.text, at)
+			}
+			if isTraitName(t.text) && p.is("(") {
+				return p.typeTrait(t.text, at)
+			}
+			if t.text == "typeid" && p.is("(") {
+				return p.typeidExpr(at)
+			}
+			if t.text == "operator" {
+				// An operator function, by its name: operator[](i).
+				name := p.operatorName()
+				a := &adlRef{node: node{tVoid, at}, name: name}
+				if sym := p.lookup(name); sym != nil && sym.kind == symFunc {
+					a.set = funcSet(sym)
+				}
+				if !p.is("(") {
+					p.errorAt(at, "%s is only called here", name)
+				}
+				return a
+			}
+			p.pos--
+			return p.cxxName(at)
 		}
 		s := p.lookup(t.text)
 		if s == nil {
@@ -1304,6 +1540,15 @@ func (p *parser) generic(at pos) expr {
 // rvalue is e's value: lvalue conversion, and arrays and functions
 // decayed to pointers.
 func (p *parser) rvalue(e expr) expr {
+	if m, ok := e.(*memFnRef); ok {
+		e = p.pmfConst(m.set[0], m.p)
+	}
+	if _, ok := e.(*initList); ok {
+		p.errorAt(e.at(), "a braced list is not an expression here")
+	}
+	if pr, ok := e.(*classPR); ok {
+		e = p.materializePR(pr)
+	}
 	t := e.ty()
 	switch t.kind {
 	case kArray:
@@ -1453,6 +1698,9 @@ func (p *parser) assignConvert(e expr, t *ctype, at pos, what string) expr {
 	case tu.isPtr() && et.isPtr():
 		// GCC warns about incompatible pointers; cmd/cc accepts them,
 		// and keeps C's checks at run time.
+		if p.cxx {
+			e = p.baseAddr(e, tu.elem, at) // C++: to a base class
+		}
 	case tu.isPtr() && et.isInteger() || tu.isInteger() && et.isPtr():
 		// GCC warns (an error in GCC 14), but accepts it.
 	case tu.kind == kVaList && et.kind == kVaList:

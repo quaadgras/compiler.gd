@@ -6,6 +6,7 @@ package c23
 
 import (
 	"bufio"
+	"bytes"
 	"io"
 	"math"
 	"os"
@@ -20,60 +21,54 @@ import (
 // (cmd/cc's headers.go), with the Go types of their C types.
 
 // CString allocates s as a C string.
-func CString(s string) Ptr {
+func CString(s string) *Void {
 	p := Malloc(uint64(len(s) + 1))
-	copy(unsafe.Slice((*byte)(p.Obj), len(s)), s)
+	copy(slice(unsafe.Pointer(p), uintptr(len(s))), s)
 	return p
 }
 
-// GoString reads the C string at p.
-func GoString(p Ptr) string {
-	var b []byte
-	for {
-		c := Load8(p)
-		if c == 0 {
-			return string(b)
-		}
-		b = append(b, c)
-		p = Add(p, 1)
-	}
-}
-
-// bytesAt reads n bytes at p.
-func BytesAt(p Ptr, n uintptr) []byte {
-	if n == 0 {
-		return nil
-	}
-	a := Check(p, n)
-	return unsafe.Slice((*byte)(a), n)
-}
+// GoString reads the C string at p, which ends in what p points into.
+func GoString(p *Void) string { return string(StringAt(p)) }
 
 // string.h
 
-func Memcmp(a, b Ptr, n uint64) int32 {
-	for i := uint64(0); i < n; i++ {
-		x, y := Load8(Add(a, int(i))), Load8(Add(b, int(i)))
-		if x != y {
-			return int32(x) - int32(y)
+// Memcmp is memcmp: of bytes that are in what a and b point into, as
+// far as it reads them, which is to the first that differ.
+func Memcmp(a, b *Void, n uint64) int32 {
+	if n == 0 {
+		return 0
+	}
+	x, y := BytesFrom(a), BytesFrom(b)
+	k := min(n, uint64(len(x)), uint64(len(y)))
+	x, y = x[:k], y[:k]
+	if !bytes.Equal(x, y) {
+		for i := range x {
+			if x[i] != y[i] {
+				return int32(x[i]) - int32(y[i])
+			}
 		}
+	}
+	if k < n {
+		outside(a, uintptr(min(n, uint64(^uintptr(0)))), uintptr(k), true)
 	}
 	return 0
 }
 
 // stdlib.h
 
-func Calloc(n, size uint64) Ptr { return Malloc(n * size) }
+// Calloc is calloc: NULL if n objects of size bytes are more than an
+// object can be.
+func Calloc(n, size uint64) *Void {
+	if size != 0 && n > uint64(^uintptr(0)>>1)/size {
+		SetErrno(ENOMEM)
+		return nil
+	}
+	return Malloc(n * size)
+}
 
 // Realloc is realloc: untyped memory, with what p's object holds. p is
 // NULL or what malloc returned (checkRealloc).
-func Realloc(p Ptr, n uint64) Ptr {
-	checkRealloc(p)
-	q := Malloc(n)
-	if p.Obj != nil {
-		Memmove(q, p, min(uintptr(n), p.Size))
-	}
-	return q
-}
+func Realloc(p *Void, n uint64) *Void { return ReallocRaw(p, n) }
 
 // Abort is abort: it calls SIGABRT's handler, if it has one, then ends
 // the program.
@@ -88,7 +83,7 @@ func Abort() {
 }
 
 func abort() {
-	Fflush(Ptr{})
+	Fflush((*Void)(nil))
 	panic(&Fault{"abort", 0})
 }
 
@@ -96,13 +91,13 @@ func abort() {
 // streams and ends the program.
 func Exit(status int32) {
 	runAtexit()
-	Fflush(Ptr{})
+	Fflush((*Void)(nil))
 	os.Exit(int(status))
 }
 
 // cmpFunc is the Go function of a C comparison function, as qsort and
 // bsearch take.
-func CmpFunc(cmp Ptr) func(Ptr, Ptr) int32 { return FuncOf[func(Ptr, Ptr) int32](cmp) }
+func CmpFunc(cmp *Void) func(*Void, *Void) int32 { return FuncOf[func(*Void, *Void) int32](cmp) }
 
 var (
 	AtexitMu sync.Mutex
@@ -177,7 +172,7 @@ func digitVal(c byte) int {
 	return 99
 }
 
-func SetEnd(end, s Ptr, n int) {
+func SetEnd(end, s *Void, n int) {
 	if Addr(end) != 0 {
 		StorePtr(end, Add(s, n))
 	}
@@ -185,15 +180,40 @@ func SetEnd(end, s Ptr, n int) {
 
 // errno.h
 
-// errnoObj is errno: a C int, which C reads and writes through the
-// pointer ErrnoLoc returns.
-var ErrnoObj = New[int32]()
+// errno is each thread's own: a C int in the goroutine's gTable, which C
+// reads and writes through the pointer ErrnoLoc returns. It is made when
+// the thread first sets errno or takes its address: until then it is 0,
+// as a new thread's is.
+
+// ErrnoLoc returns the pointer to the calling thread's errno
+// (__cc_errno).
+func ErrnoLoc() *Void {
+	tb := GSelf()
+	if tb.errnoP == nil {
+		tb.errno = New[int32]()
+		tb.errnoP = (*int32)(Check(tb.errno, 4))
+	}
+	return tb.errno
+}
 
 // Errno returns errno.
-func Errno() int32 { return int32(Load32(ErrnoObj)) }
+func Errno() int32 {
+	tb := (*gTable)(*gTableSlot())
+	if tb == nil || tb.errnoP == nil {
+		return 0
+	}
+	return *tb.errnoP
+}
 
 // SetErrno sets errno.
-func SetErrno(e int32) { Store32(ErrnoObj, uint32(e)) }
+func SetErrno(e int32) {
+	tb := (*gTable)(*gTableSlot())
+	if tb == nil || tb.errnoP == nil {
+		Store32(ErrnoLoc(), uint32(e))
+		return
+	}
+	*tb.errnoP = e
+}
 
 // stdio.h
 
@@ -215,17 +235,19 @@ type File struct {
 
 var (
 	stdioOnce sync.Once
-	stdio     [3]Ptr
+	stdio     [3]*Void
 	Files     []*File
 	FilesMu   sync.Mutex
-	fileInfo  = TinfoOf[File]()
 )
 
-func FileOf(p Ptr) *File {
-	if p.Obj == nil || p.Info() != fileInfo || p.Off != 0 {
+// FileOf returns the stream that p, a FILE *, points to: p is what
+// NewFile or NewStream returned (a Handle), and not memory that C
+// filled in to look like a stream.
+func FileOf(p *Void) *File {
+	f, ok := HandleOf[*File](p)
+	if !ok {
 		RaiseFault("not a FILE", Addr(p))
 	}
-	f := (*File)(p.Obj)
 	if f.closed {
 		RaiseFault("use of a closed FILE", Addr(p))
 	}
@@ -233,25 +255,28 @@ func FileOf(p Ptr) *File {
 }
 
 // newFile returns a stream of the file descriptor fd.
-func NewFile(fd int32, rd, wr bool) Ptr {
-	p := New[File]()
-	fl := (*File)(p.Obj)
-	fl.Fd = fd
+func NewFile(fd int32, rd, wr bool) *Void {
+	fl := &File{Fd: fd, Rd: rd, Wr: wr}
 	fl.W = bufio.NewWriter(FdIO{fl})
-	fl.Rd, fl.Wr = rd, wr
+	return NewStream(fl)
+}
+
+// NewStream returns the FILE * for C of the stream fl, which is flushed
+// with the others from here on.
+func NewStream(fl *File) *Void {
 	FilesMu.Lock()
 	Files = append(Files, fl)
 	FilesMu.Unlock()
-	return p
+	return NewHandle(fl)
 }
 
 // Stdio returns stdin (0), stdout (1) or stderr (2).
-func Stdio(n int32) Ptr {
+func Stdio(n int32) *Void {
 	stdioOnce.Do(func() {
 		stdio[0] = NewFile(0, true, false)
 		stdio[1] = NewFile(1, false, true)
 		stdio[2] = NewFile(2, false, true)
-		(*File)(stdio[2].Obj).Unbuf = true
+		FileOf(stdio[2]).Unbuf = true
 	})
 	return stdio[n]
 }
@@ -308,8 +333,8 @@ func (f *File) Flush() int32 {
 }
 
 // Fflush flushes a stream, or every stream if p is null.
-func Fflush(p Ptr) int32 {
-	if p.Obj == nil {
+func Fflush(p *Void) int32 {
+	if p == nil {
 		FilesMu.Lock()
 		defer FilesMu.Unlock()
 		r := int32(0)
@@ -333,7 +358,7 @@ func (f *File) Readable() bool {
 func (f *File) Reader() *bufio.Reader {
 	if f.R == nil {
 		if f.Fd == 0 {
-			Fflush(Ptr{})
+			Fflush((*Void)(nil))
 		} else {
 			f.Flush()
 		}
@@ -558,7 +583,7 @@ func FormatC(f string, ap *VaList) []byte {
 			}
 			body = []byte{byte(ToInt64(ap.Next()))}
 		case 's':
-			p, _ := ap.Next().(Ptr)
+			p, _ := ap.Next().(*Void)
 			var s string
 			switch {
 			case Addr(p) == 0:
@@ -595,7 +620,7 @@ func FormatC(f string, ap *VaList) []byte {
 			}
 			body = []byte(s)
 		case 'p':
-			p, _ := ap.Next().(Ptr)
+			p, _ := ap.Next().(*Void)
 			if Addr(p) == 0 {
 				body = []byte("(nil)")
 			} else {
@@ -621,7 +646,7 @@ func FormatC(f string, ap *VaList) []byte {
 				zero = false
 			}
 		case 'n':
-			p, _ := ap.Next().(Ptr)
+			p, _ := ap.Next().(*Void)
 			Store32(p, uint32(len(out)))
 			continue
 		default:
@@ -692,7 +717,7 @@ func ToInt64(a any) int64 {
 		return int64(v)
 	case uint64:
 		return int64(v)
-	case Ptr:
+	case *Void:
 		return int64(Addr(v))
 	}
 	RaiseFault("printf: a non-integer argument for an integer conversion", 0)

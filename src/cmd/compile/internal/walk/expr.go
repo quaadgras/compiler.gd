@@ -130,6 +130,12 @@ func walkExpr1(gd *base.Invocation, n ir.Node, init *ir.Nodes) ir.Node {
 	case ir.OMAKEFACE, ir.OAND, ir.OANDNOT, ir.OSUB, ir.OMUL, ir.OADD, ir.OOR, ir.OXOR, ir.OLSH, ir.ORSH,
 		ir.OUNSAFEADD:
 		n := n.(*ir.BinaryExpr)
+		// gd: one address less another is a distance, not an
+		// address that is kept: their objects are not exposed
+		// (walkConv).
+		for _, c := range ir.UnkeptAddrs(n) {
+			c.SetCheckPtr(true)
+		}
 		n.X = walkExpr(gd, n.X, init)
 		n.Y = walkExpr(gd, n.Y, init)
 		if n.Op() == ir.OUNSAFEADD && !n.CheckPtr() && ir.ShouldCheckPtr(gd, ir.CurFunc(gd), 1) {
@@ -138,7 +144,15 @@ func walkExpr1(gd *base.Invocation, n ir.Node, init *ir.Nodes) ir.Node {
 			x := typecheck.ConvNop(gd, n.X, types.Types[types.TUINTPTR])
 			y := typecheck.Conv(gd, n.Y, types.Types[types.TUINTPTR])
 			conv := typecheck.ConvNop(gd, ir.NewBinaryExpr(gd, n.Pos(), ir.OADD, x, y), types.Types[types.TUNSAFEPTR])
-			walkExpr(gd, conv, init)
+			r := walkExpr(gd, conv, init)
+			if gd.CObjects {
+				// In a package of C's the check gives the pointer:
+				// p + n without the bit that p has if it is a
+				// pointer to the end of its object, and with the
+				// bit if the result is one
+				// (runtime.checkptrArithmeticC).
+				return typecheck.ConvNop(gd, r, n.Type())
+			}
 		}
 		return n
 
@@ -178,6 +192,11 @@ func walkExpr1(gd *base.Invocation, n ir.Node, init *ir.Nodes) ir.Node {
 
 	case ir.OEQ, ir.ONE, ir.OLT, ir.OLE, ir.OGT, ir.OGE:
 		n := n.(*ir.BinaryExpr)
+		// gd: an address that is only compared is not kept as an
+		// integer, and its object is not exposed (walkConv).
+		for _, c := range ir.UnkeptAddrs(n) {
+			c.SetCheckPtr(true)
+		}
 		return walkCompare(gd, n, init)
 
 	case ir.OANDAND, ir.OOROR:

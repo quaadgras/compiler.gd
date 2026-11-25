@@ -28,7 +28,13 @@ func phaseGOutBufAlloc(gd *base.Invocation, n ir.Node, t *types.Type, init *ir.N
 		return nil
 	}
 	pos := n.Pos()
-	call := mkcall(gd, "maybeInPlace", types.Types[types.TUNSAFEPTR], init, outBuf, reflectdata.TypePtrAt(gd, pos, t))
+	var call *ir.CallExpr
+	if gd.CObjects {
+		// An object of C's on the heap has a byte after it.
+		call = mkcall(gd, "maybeInPlaceC", types.Types[types.TUNSAFEPTR], init, outBuf, reflectdata.TypePtrAt(gd, pos, t), reflectdata.TypePtrAt(gd, pos, ir.CObjType(gd, t)))
+	} else {
+		call = mkcall(gd, "maybeInPlace", types.Types[types.TUNSAFEPTR], init, outBuf, reflectdata.TypePtrAt(gd, pos, t))
+	}
 	conv := ir.NewConvExpr(gd, pos, ir.OCONVNOP, types.NewPtr(t), call)
 	conv.SetTypecheck(1)
 	conv.MarkNonNil()

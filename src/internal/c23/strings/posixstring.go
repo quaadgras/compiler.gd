@@ -9,9 +9,9 @@ import (
 	"math/bits"
 )
 
-func Strcasecmp(a, b c23.Ptr) int32 { return Strncasecmp(a, b, ^uint64(0)) }
+func Strcasecmp(a, b *c23.Void) int32 { return Strncasecmp(a, b, ^uint64(0)) }
 
-func Strncasecmp(a, b c23.Ptr, n uint64) int32 {
+func Strncasecmp(a, b *c23.Void, n uint64) int32 {
 	for ; n > 0; n-- {
 		x, y := c23.LowerASCII(c23.Load8(a)), c23.LowerASCII(c23.Load8(b))
 		if x != y || x == 0 {
@@ -22,10 +22,10 @@ func Strncasecmp(a, b c23.Ptr, n uint64) int32 {
 	return 0
 }
 
-func Bzero(p c23.Ptr, n uint64) { c23.Memset(p, 0, n) }
+func Bzero(p *c23.Void, n uint64) { c23.Memset(p, 0, n) }
 
 // Bcopy is bcopy: memmove, with the source first.
-func Bcopy(src, dst c23.Ptr, n uint64) { c23.Memmove(dst, src, uintptr(n)) }
+func Bcopy(src, dst *c23.Void, n uint64) { c23.Memmove(dst, src, uintptr(n)) }
 
 // Ffs is ffs: the position of i's least significant bit set, from 1, or 0.
 func Ffs(i int32) int32 {

@@ -27,7 +27,7 @@ type fsInfo struct {
 // longs, 8-byte aligned.
 var base = (2*int(c23.LongSize) + 7) &^ 7
 
-func store(buf c23.Ptr, fi fsInfo, err error, size int, fill func(c23.Ptr, fsInfo)) int32 {
+func store(buf *c23.Void, fi fsInfo, err error, size int, fill func(*c23.Void, fsInfo)) int32 {
 	if err != nil {
 		c23.SetErrnoOf(err)
 		return -1
@@ -49,7 +49,7 @@ var statvfsSize = base + 56 + 2*int(c23.LongSize) + 24
 //	unsigned long f_fsid; (int __f_unused on ILP32)	// base+48
 //	unsigned long f_flag, f_namemax;		// base+56
 //	int __f_spare[6];
-func fillStatvfs(buf c23.Ptr, fi fsInfo) {
+func fillStatvfs(buf *c23.Void, fi fsInfo) {
 	l := int(c23.LongSize)
 	c23.StoreLong(buf, int64(fi.bsize))
 	c23.StoreLong(c23.Add(buf, l), int64(fi.frsize))
@@ -73,7 +73,7 @@ var statfsSize = (base + 48 + 7*int(c23.LongSize) + 7) &^ 7
 //	fsfilcnt_t f_files, f_ffree;
 //	fsid_t f_fsid;				// base+40
 //	unsigned long f_namelen, f_frsize, f_flags, f_spare[4];	// base+48
-func fillStatfs(buf c23.Ptr, fi fsInfo) {
+func fillStatfs(buf *c23.Void, fi fsInfo) {
 	l := int(c23.LongSize)
 	c23.StoreLong(buf, int64(fi.typ))
 	c23.StoreLong(c23.Add(buf, l), int64(fi.bsize))
@@ -99,12 +99,12 @@ func fdInfo(fd int32) (fsInfo, bool, error) {
 
 // Statvfs is statvfs: f_flag has ST_RDONLY and ST_NOSUID, and Linux's
 // other ST_ flags there.
-func Statvfs(path, buf c23.Ptr) int32 {
+func Statvfs(path, buf *c23.Void) int32 {
 	fi, err := statfs(c23.GoString(path))
 	return store(buf, fi, err, statvfsSize, fillStatvfs)
 }
 
-func Fstatvfs(fd int32, buf c23.Ptr) int32 {
+func Fstatvfs(fd int32, buf *c23.Void) int32 {
 	fi, ok, err := fdInfo(fd)
 	if !ok {
 		return -1
@@ -113,12 +113,12 @@ func Fstatvfs(fd int32, buf c23.Ptr) int32 {
 }
 
 // Statfs is statfs: f_type is the system's (Linux's magic numbers there).
-func Statfs(path, buf c23.Ptr) int32 {
+func Statfs(path, buf *c23.Void) int32 {
 	fi, err := statfs(c23.GoString(path))
 	return store(buf, fi, err, statfsSize, fillStatfs)
 }
 
-func Fstatfs(fd int32, buf c23.Ptr) int32 {
+func Fstatfs(fd int32, buf *c23.Void) int32 {
 	fi, ok, err := fdInfo(fd)
 	if !ok {
 		return -1

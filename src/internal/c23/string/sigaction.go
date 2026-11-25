@@ -10,7 +10,7 @@ import (
 )
 
 // Strsignal is strsignal: glibc's descriptions.
-func Strsignal(sig int32) c23.Ptr {
+func Strsignal(sig int32) *c23.Void {
 	strsignalMu.Lock()
 	defer strsignalMu.Unlock()
 	p, ok := strsignalMsg[sig]
@@ -23,4 +23,4 @@ func Strsignal(sig int32) c23.Ptr {
 
 var strsignalMu sync.Mutex
 
-var strsignalMsg = map[int32]c23.Ptr{}
+var strsignalMsg = map[int32]*c23.Void{}

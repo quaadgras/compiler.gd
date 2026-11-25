@@ -350,6 +350,13 @@ type ConvExpr struct {
 	TypeWord Node `mknode:"-"`
 	SrcRType Node `mknode:"-"`
 
+	// PtrRType is an expression yielding the *runtime._type of the
+	// pointer type that an unsafe.Pointer is converted to, in generic
+	// code, where the type itself is a shape, which says nothing of
+	// what a pointer in it points to (gd: runtime.checkptrAlignment
+	// compares the type with the memory's).
+	PtrRType Node `mknode:"-"`
+
 	// For -d=checkptr instrumentation of conversions from
 	// unsafe.Pointer to *Elem or *[Len]Elem.
 	//
@@ -363,16 +370,31 @@ type ConvExpr struct {
 	// View is what the compiler knows of a conversion from
 	// unsafe.Pointer to a pointer: see walk's markWholeViews.
 	View ViewKind
+
+	// Raw is set for a conversion of a function that is not checked
+	// (ir.NoCheckPtrIn: one of the runtime's, or marked go:nocheckptr)
+	// which is inlined in one that is: a pointer that it makes an
+	// integer of keeps every bit that it has.
+	Raw bool
+
+	// LoadOnly is set if the result of a conversion from unsafe.Pointer
+	// to a pointer is loaded through and nothing else: it is not
+	// stored through, kept, or passed on (gd: walk's markWholeViews).
+	LoadOnly bool
 }
 
 // A ViewKind says whether a conversion to a pointer views a string, a
-// slice or an interface whole (doc/gd/unsafe.md).
+// slice or an interface whole, and whether its type is compatible with
+// what it points into (doc/gd/unsafe.md).
 type ViewKind uint8
 
 const (
 	ViewUnknown ViewKind = iota // what it points into is not known
 	ViewWhole                   // known, and it views them whole
 	ViewPartial                 // known, and it views part of one: it fails at run time
+	ViewPtrInt                  // known, and it has a pointer where that has an integer: it fails
+	ViewIntPtr                  // known, and it has an integer where that has a pointer: it fails
+	ViewPointee                 // known, and its pointer is to another type than that one's: it fails
 )
 
 func NewConvExpr(gd *base.Invocation, pos src.XPos, op Op, typ *types.Type, x Node) *ConvExpr {
@@ -404,6 +426,7 @@ func NoCheckPtrIn(nodes Nodes) {
 		case *ConvExpr:
 			if n.Op() == OCONVNOP {
 				n.SetCheckPtr(true)
+				n.Raw = true
 			}
 		case *BinaryExpr:
 			switch n.Op() {
@@ -1264,24 +1287,100 @@ func ShouldCheckPtr(gd *base.Invocation, fn *Func, level int) bool {
 	// the runtime's packages is compiled where it is instantiated, and
 	// in the runtime too, where there are none: all its copies must be
 	// the same.
-	if sym := fn.Sym(); sym != nil && sym.Pkg != nil && UncheckedPkg(sym.Pkg.Path) {
+	if sym := fn.Sym(); sym != nil && sym.Pkg != nil && NoCheckPtrPkg(sym.Pkg.Path) {
 		return false
 	}
 	return true
 }
 
-// UncheckedPkg reports whether the package with the given path is
-// compiled without -d=checkptr: the runtime's packages; the runtime of C
-// (internal/c23), which keeps pointers that the checks would not allow
-// (one past the end of an object, tagged) and has checks of its own; and
-// reflect, whose pointers are to values of the types it says they are,
-// by construction but for NewAt, which checks.
+// UnkeptAddrs returns the operands of n that are conversions of a pointer
+// to an integer which is not kept, so that the object it points into is
+// no more exposed for it (runtime.exposeptr) and shared with nothing:
+// the operands of a comparison, whose result is not an address, and the
+// two of a subtraction of one address from another, whose result is a
+// distance.
+func UnkeptAddrs(n *BinaryExpr) []*ConvExpr {
+	x, y := AddrConv(n.X), AddrConv(n.Y)
+	var cs []*ConvExpr
+	switch n.Op() {
+	case OEQ, ONE, OLT, OLE, OGT, OGE:
+		if x != nil {
+			cs = append(cs, x)
+		}
+		if y != nil {
+			cs = append(cs, y)
+		}
+	case OSUB:
+		if x != nil && y != nil {
+			cs = append(cs, x, y)
+		}
+	}
+	return cs
+}
+
+// AddrConv returns the conversion of a pointer to an integer that x is,
+// or is converted from to another integer as wide: uintptr(p), and
+// int64(uintptr(p)) where a pointer has 64 bits. It returns nil for
+// anything else.
+func AddrConv(x Node) *ConvExpr {
+	for x.Op() == OCONV || x.Op() == OCONVNOP {
+		c := x.(*ConvExpr)
+		if c.Type().IsUintptr() && c.X.Type().IsUnsafePtr() {
+			return c
+		}
+		if !c.Type().IsInteger() || !c.X.Type().IsInteger() || c.Type().Size() != c.X.Type().Size() || c.Type().Size() != int64(types.PtrSize) {
+			return nil
+		}
+		x = c.X
+	}
+	return nil
+}
+
+// NoCheckPtrPkg reports whether the package with the given path is
+// compiled without -d=checkptr: the runtime's packages, and reflect,
+// whose pointers are to values of the types it says they are, by
+// construction but for NewAt, which checks.
+//
+// C's library (internal/c23) is not one of them. It is given C's
+// pointers, which are whatever the program made of them, and is checked
+// as the C that calls it is (base.Invocation.CObjects): its arithmetic
+// stays in the object, and what it converts a pointer to is what the
+// memory is claimed for. Its few functions that make a pointer of an
+// integer or keep bits in one are marked go:nocheckptr.
+func NoCheckPtrPkg(path string) bool {
+	return path != "internal/c23" && UncheckedPkg(path)
+}
+
+// UncheckedPkg reports whether the package with the given path is one
+// whose pointers the escape analysis does not follow: the runtime's
+// packages, the runtime of C (internal/c23) and reflect, which keep
+// pointers as integers and make them of memory. All but internal/c23
+// are compiled without -d=checkptr (NoCheckPtrPkg).
 func UncheckedPkg(path string) bool {
 	switch path {
 	case "internal/c23", "reflect", "internal/reflectlite":
 		return true
 	}
 	return objabi.LookupPkgSpecial(path).Runtime
+}
+
+// StackVars reports what the table of the variables of fn's frame is to
+// have, as -d=stackvars says it: nothing if it is 0. A function of the
+// runtime's packages has no table, and neither has one that the compiler
+// writes for a type (an equality or a hash function): no pointer to a
+// variable of theirs is given to code whose pointers are checked. It
+// goes by the function's own package, not by the one that is compiled:
+// a function that more than one package has a copy of, as a generic
+// function's instance is, is the same in each.
+func StackVars(gd *base.Invocation, fn *Func) int {
+	if gd.Debug.StackVars <= 0 {
+		return 0
+	}
+	sym := fn.Sym()
+	if sym == nil || sym.Pkg == nil || sym.Pkg.Path == "type" || objabi.LookupPkgSpecial(sym.Pkg.Path).Runtime {
+		return 0
+	}
+	return gd.Debug.StackVars
 }
 
 // ShouldAsanCheckPtr reports whether pointer checking should be enabled for

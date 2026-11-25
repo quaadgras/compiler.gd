@@ -52,6 +52,10 @@ func memequal(p, q unsafe.Pointer, n uintptr) bool {
 	if n == 0 {
 		return true
 	}
+	if splitMode {
+		splitcheck(p, n)
+		splitcheck(q, n)
+	}
 	a, b := trylinaddr(p), trylinaddr(q)
 	if a != 0 && b != 0 {
 		if a == b {
@@ -114,11 +118,11 @@ func setclosurectxt(p unsafe.Pointer)
 // values that carry a size in their second word.
 
 func memequal_varlen(a, b unsafe.Pointer) bool {
-	size := *(*uintptr)(unsafe.Pointer(getclosureptr() + goarch.PtrSize))
+	size := *(*uintptr)(staticptr(getclosureptr() + goarch.PtrSize))
 	return memequal(a, b, size)
 }
 
 func memhash_varlen(p unsafe.Pointer, h uintptr) uintptr {
-	size := *(*uintptr)(unsafe.Pointer(getclosureptr() + goarch.PtrSize))
+	size := *(*uintptr)(staticptr(getclosureptr() + goarch.PtrSize))
 	return memhash(p, h, size)
 }

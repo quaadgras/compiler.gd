@@ -463,7 +463,8 @@ commas. For example:
 var passes = [...]pass{
 	{name: "number lines", fn: numberLines, required: true},
 	{name: "early phielim and copyelim", fn: copyelim},
-	{name: "early deadcode", fn: deadcode}, // remove generated dead code to avoid doing pointless work during opt
+	{name: "early deadcode", fn: deadcode},            // remove generated dead code to avoid doing pointless work during opt
+	{name: "c headers", fn: cheaders, required: true}, // the checks of C's pointers against what is looked up once
 	{name: "short circuit", fn: shortcircuit},
 	{name: "decompose user", fn: decomposeUser, required: true},
 	{name: "pre-opt deadcode", fn: deadcode},

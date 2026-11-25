@@ -1304,7 +1304,7 @@ func mkinlcall(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr, fn *ir.Fu
 	if res == nil {
 		gd.FatalfAt(n.Pos(), "inlining call to %v failed", fn.Nname.DiagName())
 	}
-	if gd.Debug.Checkptr != 0 && (ir.UncheckedPkg(fn.Sym().Pkg.Path) || fn.Pragma&ir.NoCheckPtr != 0) {
+	if gd.Debug.Checkptr != 0 && (ir.NoCheckPtrPkg(fn.Sym().Pkg.Path) || fn.Pragma&ir.NoCheckPtr != 0) {
 		ir.NoCheckPtrIn(res.Body)
 		ir.NoCheckPtrIn(res.ReturnVars)
 	}

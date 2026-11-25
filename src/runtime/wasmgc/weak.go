@@ -19,6 +19,7 @@ type weakHandle struct {
 	off    uintptr
 	strong unsafe.Pointer
 	addr   uintptr // split: the address
+	lim    uintptr // split: the size of the block
 }
 
 type weakKey struct {
@@ -42,7 +43,7 @@ func weak_runtime_registerWeakPointer(p unsafe.Pointer) unsafe.Pointer {
 		}
 		h := weakHandles[k]
 		if h == nil {
-			h = &weakHandle{id: k.id, off: ptroff(p), addr: uintptr(p)}
+			h = &weakHandle{id: k.id, off: ptroff(p), addr: uintptr(p), lim: ptrlim(p)}
 			weakHandles[k] = h
 		}
 		return unsafe.Pointer(h)
@@ -78,7 +79,7 @@ func weak_runtime_makeStrongFromWeak(u unsafe.Pointer) unsafe.Pointer {
 		return h.strong
 	}
 	if splitMode {
-		return weakgetat(h.id, uint32(h.addr), uint32(h.off))
+		return weakgetat(h.id, uint32(h.addr), uint32(h.off), uint32(h.lim))
 	}
 	p := weakget(h.id)
 	if p == nil || h.off == 0 {
@@ -114,7 +115,7 @@ func weakmake(p unsafe.Pointer) int32
 func weakget(id int32) unsafe.Pointer
 
 //go:wasmimport gd weakgetat
-func weakgetat(id int32, addr, off uint32) unsafe.Pointer
+func weakgetat(id int32, addr, off, lim uint32) unsafe.Pointer
 
 //go:linkname sync_test_runtime_blockUntilEmptyCleanupQueue sync_test.runtime_blockUntilEmptyCleanupQueue
 func sync_test_runtime_blockUntilEmptyCleanupQueue(timeout int64) bool {

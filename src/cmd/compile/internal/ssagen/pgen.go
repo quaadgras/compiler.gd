@@ -220,6 +220,7 @@ func (s *ssafn) AllocFrame(gd *base.Invocation, f *ssa.Func) {
 
 	// Reassign stack offsets of the locals that are used.
 	lastHasPtr := false
+	stackVars := ir.StackVars(gd, fn) > 0
 	for i, n := range fn.Dcl {
 		if n.Op() != ir.ONAME || n.Class != ir.PAUTO && !(n.Class == ir.PPARAMOUT && n.IsOutputParamInRegisters()) {
 			// i.e., stack assign if AUTO, or if PARAMOUT in registers (which has no predefined spill locations)
@@ -244,6 +245,16 @@ func (s *ssafn) AllocFrame(gd *base.Invocation, f *ssa.Func) {
 			// as a pointer to the pointer-containing object (and causing it
 			// to be scanned when it shouldn't be). See issue 24993.
 			w = 1
+		}
+		if stackVars && n.Type().Size() > 0 && n.Addrtaken() && s.stksize > 0 {
+			// gd: a byte between a variable that a pointer can be
+			// to and the one after it, so that the pointer to its
+			// end, which C makes and the checks of arithmetic
+			// allow, is not the address of another variable
+			// (liveness's emitStackVars; doc/gd/unsafe.md). An
+			// object of C's on the heap has the byte too
+			// (ir.CObjType).
+			s.stksize++
 		}
 		s.stksize += w
 		s.stksize = types.RoundUp(s.stksize, types.StackAlignment(n.Type()))

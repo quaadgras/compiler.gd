@@ -157,7 +157,7 @@ int getc_unlocked(FILE *stream);
 int getchar_unlocked(void);
 int putc_unlocked(int c, FILE *stream);
 int putchar_unlocked(int c);
-int renameat(int oldfd, const char *old, int newfd, const char *new);
+int renameat(int oldfd, const char *__old, int newfd, const char *__new);
 char *ctermid(char *s);
 `)
 	extendHeader("dirent.h", `#define d_fileno d_ino

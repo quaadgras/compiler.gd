@@ -1,10 +1,7 @@
-// C that shares its memory with Go (demo/interop/main.go).
+// C that shares its memory with Go (main.go).
 #include <stdlib.h>
 #include <string.h>
-
 #include "interop.h"
-
-
 
 // C allocates; Go walks the list with plain field loads.
 struct node *make_list(int n) {
@@ -18,7 +15,7 @@ struct node *make_list(int n) {
 	return head;
 }
 
-// Go allocates; C walks the list, deriving each capability from the address.
+// Go allocates; C walks the list.
 long sum_list(struct node *n) {
 	long s = 0;
 	while (n) {
@@ -28,69 +25,27 @@ long sum_list(struct node *n) {
 	return s;
 }
 
-// C indexes memory that Go gave it: checked against the derived capability.
+// C indexes memory that Go gave it.
 int read_at(int p[], int i) { return p[i]; }
 
-// C stores a pointer outside its object where Go can see it: the word is
-// tagged, so that Go cannot use it, and C keeps its capability.
-void store_past(struct holder *h, int arr[], int n) { h->random_int = arr + n + 3; }
-
-// A holder that C allocates.
+// A holder that C allocates, and a slice's array kept in its int* field.
 struct holder *new_holder(void) { return malloc(sizeof(struct holder)); }
+void keep_array(struct holder *h, int a[]) { h->ints = a; }
+int at(struct holder *h, int i) { return h->ints[i]; }
 
-// C loads it back and brings it into bounds.
-int load_back(struct holder *h, int k) {
-	int *p = h->random_int - k;
-	return *p;
-}
-
-// One-based arrays: a pointer before its object, in a register only.
-int one_based_sum(int a[], int n) {
-	int *b = a - 1;
-	int s = 0;
-	for (int i = 1; i <= n; i++)
-		s += b[i];
-	return s;
-}
-
-// An integer written over a pointer word: Go would read it as a pointer.
-void pun(struct holder *h) {
-	long *w = (long *)h;
-	*w = 0x1234;
-}
-
-// A pointer made of an integer has no capability.
-int forge(long addr) {
-	int *p = (int *)addr;
-	return *p;
-}
-
-// A pointer stored in memory with no pointer words (malloc'd as bytes).
+// A pointer stored in memory that malloc was given no type for.
+static char *hidden;
 void hide(struct node *n) {
-	char *buf = malloc(16);
-	struct node **slot = (struct node **)buf;
+	hidden = malloc(16);
+	struct node **slot = (struct node **)hidden;
 	*slot = n;
 }
-
-// C's locals on the stack: an integer over a pointer word of a local.
-int stack_pun(void) {
-	struct node a, b;
-	long *p = (long *)&a.next;
-	a.v = 1;
-	b.v = 2;
-	a.next = &b;
-	*p = 0x41414141;
-	return a.v;
-}
-
-// A pointer of the wrong type in a typed field: n->next to an int.
-void confuse(struct node *n, int *x) { n->next = (struct node *)x; }
-
-// ...which C can still use as what it is.
-int unconfuse(struct node *n) { return *(int *)n->next; }
+long hidden_sum(void) { return sum_list(*(struct node **)hidden); }
 
 // C writes words of whatever Go passed it.
 void poke(void *p, int i, long v) { ((long *)p)[i] = v; }
+
+void *as_void(node_t *n) { return n; }
 
 // Go passes a pointer to its stack; C only reads through it.
 long sum_pair(struct node *n) { return n->v + n->next->v; }
@@ -111,35 +66,57 @@ int locals(void) {
 	return x * 100 + y * 10 + a.v;
 }
 
-// A slice's whole array, kept in an int* field.
-void keep_array(struct holder *h, int a[]) { h->random_int = a; }
+// A variable of C's that Go sets.
+int counter;
+int count(void) { return counter++; }
 
-int at(struct holder *h, int i) { return h->random_int[i]; }
+enum color next_color(enum color c) { return c == BLUE ? RED : c == RED ? GREEN : BLUE; }
+
+char *shout(char *s) {
+	for (char *p = s; *p; p++)
+		if (*p >= 'a' && *p <= 'z')
+			*p -= 'a' - 'A';
+	return s;
+}
+
+// The pointer one past the end of an array, which is all that is kept
+// of it while it is summed, last to first.
+int backwards_sum(int n) {
+	int *a = malloc(n * sizeof *a);
+	for (int i = 0; i < n; i++)
+		a[i] = i + 1;
+	int *first = a, *p = a + n, s = 0;
+	a = 0;
+	while (p != first)
+		s += *--p;
+	return s;
+}
+
+// The n ints that end at end, which is all the caller has of them.
+long sum_back(int *end, int n) {
+	long s = 0;
+	while (n-- > 0)
+		s += *--end;
+	return s;
+}
 
 // A tagged union, like Godot's Variant: the same words hold a long, a
 // double or a pointer.
-
-
 struct variant *make_variant(int n) {
 	struct variant *v = malloc(sizeof *v);
 	v->type = 2;
 	v->v.n = make_list(n);
 	return v;
 }
-
 long variant_sum(struct variant *v) {
 	if (v->type == 2)
 		return sum_list(v->v.n);
 	return v->v.i;
 }
-
-void variant_set_double(struct variant *v, double d) {
-	v->type = 1;
-	v->v.d = d;
+void variant_set_long(struct variant *v, long i) {
+	v->type = 0;
+	v->v.i = i;
 }
-
-// Reads the union as a pointer whatever it holds.
-long variant_misread(struct variant *v) { return v->v.n->v; }
 
 // Objects placed in untyped memory, as placement new does in a pool.
 struct node *in_pool(void) {
@@ -155,9 +132,7 @@ struct node *in_pool(void) {
 
 // The pool's objects live while C keeps a pointer to them.
 struct node *pool_root;
-
 void make_pool(void) { pool_root = in_pool(); }
-
 long pool_sum(void) { return sum_list(pool_root); }
 
 // free and realloc take what malloc returned, and NULL.
@@ -172,26 +147,3 @@ int free_mallocd(void) {
 	free_sized(malloc(8), 8);
 	return realloc(NULL, 8) != NULL;
 }
-
-void free_interior(void) {
-	char *p = malloc(16);
-	free(p + 1);
-}
-
-void free_local(void) {
-	int x = 0;
-	free(&x);
-}
-
-// A pointer that went through a long has no capability: free cannot tell
-// it from malloc's, and realloc cannot copy its object.
-void free_lost(void) { free((void *)(long)malloc(8)); }
-
-void realloc_lost(void) { realloc((void *)(long)malloc(8), 16); }
-
-void realloc_interior(void) {
-	char *p = malloc(16);
-	realloc(p + 8, 32);
-}
-
-void free_go(int *p) { free(p); }

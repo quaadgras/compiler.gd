@@ -182,7 +182,10 @@ func stringDataHeap(s string) *byte {
 	if n == 0 {
 		return nil
 	}
-	b := make([]byte, n)
+	// (With a zero byte after them: a literal of C's is the pointer to
+	// its bytes, which end so, and what the pointer points into is
+	// what is allocated here. See internal/c23's String.)
+	b := make([]byte, n+1)
 	copy(b, s)
 	return &b[0]
 }

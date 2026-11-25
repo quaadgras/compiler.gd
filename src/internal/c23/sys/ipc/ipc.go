@@ -15,7 +15,7 @@ import (
 // Ftok is ftok, glibc's and musl's: the low 16 bits of the file's inode
 // number, the low 8 of its device's and the low 8 of id. Where the system
 // gives no inode or device numbers (Windows, wasm), they are 0.
-func Ftok(path c23.Ptr, id int32) int32 {
+func Ftok(path *c23.Void, id int32) int32 {
 	fi, err := os.Stat(c23.GoString(path))
 	if err != nil {
 		c23.SetErrnoOf(err)

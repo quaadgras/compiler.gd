@@ -16,7 +16,7 @@ import (
 var hsearchState struct {
 	sync.Mutex
 	made bool
-	tab  map[string]c23.Ptr
+	tab  map[string]*c23.Void
 }
 
 // Hcreate is hcreate: it makes the table, unless there is one (0).
@@ -28,7 +28,7 @@ func Hcreate(nel uint64) int32 {
 		return 0
 	}
 	st.made = true
-	st.tab = make(map[string]c23.Ptr, min(nel, 1<<16))
+	st.tab = make(map[string]*c23.Void, min(nel, 1<<16))
 	return 1
 }
 
@@ -43,7 +43,7 @@ func Hdestroy() {
 // Hsearch is hsearch: the entry of item's key, or null if there is none
 // and action is FIND (errno ESRCH); with ENTER, an entry of item if there
 // is none.
-func Hsearch(item c23.Ptr, action uint32) c23.Ptr {
+func Hsearch(item *c23.Void, action uint32) *c23.Void {
 	st := &hsearchState
 	st.Lock()
 	defer st.Unlock()
@@ -54,7 +54,7 @@ func Hsearch(item c23.Ptr, action uint32) c23.Ptr {
 	}
 	if action == 0 || !st.made {
 		c23.SetErrno(c23.ESRCH)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	e := c23.Malloc(uint64(2 * c23.WordSize))
 	c23.StorePtr(e, key)
@@ -63,28 +63,28 @@ func Hsearch(item c23.Ptr, action uint32) c23.Ptr {
 	return e
 }
 
-func tkey(n c23.Ptr) c23.Ptr { return c23.LoadPtr(n) }
+func tkey(n *c23.Void) *c23.Void { return c23.LoadPtr(n) }
 
-func tleft(n c23.Ptr) c23.Ptr { return c23.LoadPtr(c23.Add(n, int(c23.WordSize))) }
+func tleft(n *c23.Void) *c23.Void { return c23.LoadPtr(c23.Add(n, int(c23.WordSize))) }
 
-func tright(n c23.Ptr) c23.Ptr { return c23.LoadPtr(c23.Add(n, 2*int(c23.WordSize))) }
+func tright(n *c23.Void) *c23.Void { return c23.LoadPtr(c23.Add(n, 2*int(c23.WordSize))) }
 
-func tsetLeft(n, c c23.Ptr) { c23.StorePtr(c23.Add(n, int(c23.WordSize)), c) }
+func tsetLeft(n, c *c23.Void) { c23.StorePtr(c23.Add(n, int(c23.WordSize)), c) }
 
-func tsetRight(n, c c23.Ptr) { c23.StorePtr(c23.Add(n, 2*int(c23.WordSize)), c) }
+func tsetRight(n, c *c23.Void) { c23.StorePtr(c23.Add(n, 2*int(c23.WordSize)), c) }
 
-func tsetHeight(n c23.Ptr, h int) { c23.StoreWord(c23.Add(n, 3*int(c23.WordSize)), uintptr(h)) }
+func tsetHeight(n *c23.Void, h int) { c23.StoreWord(c23.Add(n, 3*int(c23.WordSize)), uintptr(h)) }
 
-func theight(n c23.Ptr) int {
+func theight(n *c23.Void) int {
 	if c23.Addr(n) == 0 {
 		return 0
 	}
 	return int(c23.LoadWord(c23.Add(n, 3*int(c23.WordSize))))
 }
 
-func tfix(n c23.Ptr) { tsetHeight(n, 1+max(theight(tleft(n)), theight(tright(n)))) }
+func tfix(n *c23.Void) { tsetHeight(n, 1+max(theight(tleft(n)), theight(tright(n)))) }
 
-func trotRight(n c23.Ptr) c23.Ptr {
+func trotRight(n *c23.Void) *c23.Void {
 	l := tleft(n)
 	tsetLeft(n, tright(l))
 	tsetRight(l, n)
@@ -93,7 +93,7 @@ func trotRight(n c23.Ptr) c23.Ptr {
 	return l
 }
 
-func trotLeft(n c23.Ptr) c23.Ptr {
+func trotLeft(n *c23.Void) *c23.Void {
 	r := tright(n)
 	tsetRight(n, tleft(r))
 	tsetLeft(r, n)
@@ -103,7 +103,7 @@ func trotLeft(n c23.Ptr) c23.Ptr {
 }
 
 // tbalance restores the AVL property at n and returns the subtree's root.
-func tbalance(n c23.Ptr) c23.Ptr {
+func tbalance(n *c23.Void) *c23.Void {
 	tfix(n)
 	switch b := theight(tleft(n)) - theight(tright(n)); {
 	case b > 1:
@@ -122,23 +122,23 @@ func tbalance(n c23.Ptr) c23.Ptr {
 
 // tinsert inserts key in the subtree n, unless it is there: it returns
 // the subtree's new root and key's node.
-func tinsert(n, key c23.Ptr, cmp func(c23.Ptr, c23.Ptr) int32) (c23.Ptr, c23.Ptr) {
+func tinsert(n, key *c23.Void, cmp func(*c23.Void, *c23.Void) int32) (*c23.Void, *c23.Void) {
 	if c23.Addr(n) == 0 {
 		nn := c23.Malloc(uint64(4 * c23.WordSize))
 		c23.StorePtr(nn, key)
 		tsetHeight(nn, 1)
 		return nn, nn
 	}
-	var found c23.Ptr
+	var found *c23.Void
 	switch c := cmp(key, tkey(n)); {
 	case c == 0:
 		return n, n
 	case c < 0:
-		var l c23.Ptr
+		var l *c23.Void
 		l, found = tinsert(tleft(n), key, cmp)
 		tsetLeft(n, l)
 	default:
-		var r c23.Ptr
+		var r *c23.Void
 		r, found = tinsert(tright(n), key, cmp)
 		tsetRight(n, r)
 	}
@@ -147,9 +147,9 @@ func tinsert(n, key c23.Ptr, cmp func(c23.Ptr, c23.Ptr) int32) (c23.Ptr, c23.Ptr
 
 // Tsearch is tsearch: the node of key in the tree *rootp, which it adds
 // if there is none.
-func Tsearch(key, rootp, compar c23.Ptr) c23.Ptr {
+func Tsearch(key, rootp, compar *c23.Void) *c23.Void {
 	if c23.Addr(rootp) == 0 {
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	root, n := tinsert(c23.LoadPtr(rootp), key, c23.CmpFunc(compar))
 	c23.StorePtr(rootp, root)
@@ -157,9 +157,9 @@ func Tsearch(key, rootp, compar c23.Ptr) c23.Ptr {
 }
 
 // Tfind is tfind: the node of key in the tree *rootp, or null.
-func Tfind(key, rootp, compar c23.Ptr) c23.Ptr {
+func Tfind(key, rootp, compar *c23.Void) *c23.Void {
 	if c23.Addr(rootp) == 0 {
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	cmp := c23.CmpFunc(compar)
 	n := c23.LoadPtr(rootp)
@@ -173,12 +173,12 @@ func Tfind(key, rootp, compar c23.Ptr) c23.Ptr {
 			n = tright(n)
 		}
 	}
-	return c23.Ptr{}
+	return (*c23.Void)(nil)
 }
 
 // tremoveMin removes the smallest node of the subtree n: it returns the
 // subtree's new root and that node.
-func tremoveMin(n c23.Ptr) (c23.Ptr, c23.Ptr) {
+func tremoveMin(n *c23.Void) (*c23.Void, *c23.Void) {
 	if c23.Addr(tleft(n)) == 0 {
 		return tright(n), n
 	}
@@ -190,22 +190,22 @@ func tremoveMin(n c23.Ptr) (c23.Ptr, c23.Ptr) {
 // tremove removes key's node from the subtree n: it returns the
 // subtree's new root, the parent of the removed node (null for n
 // itself) and whether it found it.
-func tremove(n, key c23.Ptr, cmp func(c23.Ptr, c23.Ptr) int32) (c23.Ptr, c23.Ptr, bool) {
+func tremove(n, key *c23.Void, cmp func(*c23.Void, *c23.Void) int32) (*c23.Void, *c23.Void, bool) {
 	if c23.Addr(n) == 0 {
-		return n, c23.Ptr{}, false
+		return n, (*c23.Void)(nil), false
 	}
 	c := cmp(key, tkey(n))
 	if c == 0 {
 		l, r := tleft(n), tright(n)
 		if c23.Addr(r) == 0 {
-			return l, c23.Ptr{}, true
+			return l, (*c23.Void)(nil), true
 		}
 		r, m := tremoveMin(r)
 		tsetLeft(m, l)
 		tsetRight(m, r)
-		return tbalance(m), c23.Ptr{}, true
+		return tbalance(m), (*c23.Void)(nil), true
 	}
-	var child, parent c23.Ptr
+	var child, parent *c23.Void
 	var ok bool
 	if c < 0 {
 		child, parent, ok = tremove(tleft(n), key, cmp)
@@ -223,13 +223,13 @@ func tremove(n, key c23.Ptr, cmp func(c23.Ptr, c23.Ptr) int32) (c23.Ptr, c23.Ptr
 // Tdelete is tdelete: it removes key's node from the tree *rootp and
 // returns its parent, or, for the root, a pointer that is not null (the
 // new root, or rootp if the tree is now empty); null if key is not there.
-func Tdelete(key, rootp, compar c23.Ptr) c23.Ptr {
+func Tdelete(key, rootp, compar *c23.Void) *c23.Void {
 	if c23.Addr(rootp) == 0 {
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	root, parent, ok := tremove(c23.LoadPtr(rootp), key, c23.CmpFunc(compar))
 	if !ok {
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	c23.StorePtr(rootp, root)
 	if c23.Addr(parent) == 0 {
@@ -244,13 +244,13 @@ func Tdelete(key, rootp, compar c23.Ptr) c23.Ptr {
 // Twalk is twalk: it calls action for each node, with preorder (0),
 // postorder (1) and endorder (2) for an inner node and leaf (3) for a
 // leaf, and the node's depth.
-func Twalk(root, action c23.Ptr) {
+func Twalk(root, action *c23.Void) {
 	if c23.Addr(root) == 0 || c23.Addr(action) == 0 {
 		return
 	}
-	f := c23.FuncOf[func(c23.Ptr, uint32, int32)](action)
-	var walk func(n c23.Ptr, depth int32)
-	walk = func(n c23.Ptr, depth int32) {
+	f := c23.FuncOf[func(*c23.Void, uint32, int32)](action)
+	var walk func(n *c23.Void, depth int32)
+	walk = func(n *c23.Void, depth int32) {
 		l, r := tleft(n), tright(n)
 		if c23.Addr(l) == 0 && c23.Addr(r) == 0 {
 			f(n, 3, depth)
@@ -270,13 +270,13 @@ func Twalk(root, action c23.Ptr) {
 }
 
 // Tdestroy is GNU's tdestroy: it calls freeNode with each node's key.
-func Tdestroy(root, freeNode c23.Ptr) {
+func Tdestroy(root, freeNode *c23.Void) {
 	if c23.Addr(root) == 0 {
 		return
 	}
-	f := c23.FuncOf[func(c23.Ptr)](freeNode)
-	var walk func(n c23.Ptr)
-	walk = func(n c23.Ptr) {
+	f := c23.FuncOf[func(*c23.Void)](freeNode)
+	var walk func(n *c23.Void)
+	walk = func(n *c23.Void) {
 		if l := tleft(n); c23.Addr(l) != 0 {
 			walk(l)
 		}
@@ -290,7 +290,7 @@ func Tdestroy(root, freeNode c23.Ptr) {
 
 // Lfind is lfind: the first of the *nelp elements at base that compar
 // finds equal to key, or null.
-func Lfind(key, base, nelp c23.Ptr, width uint64, compar c23.Ptr) c23.Ptr {
+func Lfind(key, base, nelp *c23.Void, width uint64, compar *c23.Void) *c23.Void {
 	cmp := c23.CmpFunc(compar)
 	n := c23.LoadLong(nelp)
 	for i := int64(0); i < n; i++ {
@@ -299,12 +299,12 @@ func Lfind(key, base, nelp c23.Ptr, width uint64, compar c23.Ptr) c23.Ptr {
 			return e
 		}
 	}
-	return c23.Ptr{}
+	return (*c23.Void)(nil)
 }
 
 // Lsearch is lsearch: lfind, which adds key at the end if it is not
 // there, and counts it in *nelp.
-func Lsearch(key, base, nelp c23.Ptr, width uint64, compar c23.Ptr) c23.Ptr {
+func Lsearch(key, base, nelp *c23.Void, width uint64, compar *c23.Void) *c23.Void {
 	if e := Lfind(key, base, nelp, width, compar); c23.Addr(e) != 0 {
 		return e
 	}
@@ -317,10 +317,10 @@ func Lsearch(key, base, nelp c23.Ptr, width uint64, compar c23.Ptr) c23.Ptr {
 
 // Insque is insque: it puts element, a struct qelem {forw, back, ...},
 // after pred in its list, or makes a list of it alone if pred is null.
-func Insque(element, pred c23.Ptr) {
+func Insque(element, pred *c23.Void) {
 	if c23.Addr(pred) == 0 {
-		c23.StorePtr(element, c23.Ptr{})
-		c23.StorePtr(c23.Add(element, int(c23.WordSize)), c23.Ptr{})
+		c23.StorePtr(element, (*c23.Void)(nil))
+		c23.StorePtr(c23.Add(element, int(c23.WordSize)), (*c23.Void)(nil))
 		return
 	}
 	next := c23.LoadPtr(pred)
@@ -333,7 +333,7 @@ func Insque(element, pred c23.Ptr) {
 }
 
 // Remque is remque: it removes element from its list.
-func Remque(element c23.Ptr) {
+func Remque(element *c23.Void) {
 	next, prev := c23.LoadPtr(element), c23.LoadPtr(c23.Add(element, int(c23.WordSize)))
 	if c23.Addr(next) != 0 {
 		c23.StorePtr(c23.Add(next, int(c23.WordSize)), prev)

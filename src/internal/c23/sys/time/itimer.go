@@ -17,7 +17,7 @@ const (
 
 // loadTimeval reads a struct timeval {time_t tv_sec; suseconds_t
 // tv_usec;}, 8 bytes each on every target.
-func loadTimeval(p c23.Ptr) (time.Duration, bool) {
+func loadTimeval(p *c23.Void) (time.Duration, bool) {
 	sec, usec := int64(c23.Load64(p)), int64(c23.Load64(c23.Add(p, 8)))
 	if sec < 0 || usec < 0 || usec >= 1e6 {
 		return 0, false
@@ -28,7 +28,7 @@ func loadTimeval(p c23.Ptr) (time.Duration, bool) {
 	return time.Duration(sec)*time.Second + time.Duration(usec)*time.Microsecond, true
 }
 
-func storeTimeval(p c23.Ptr, d time.Duration) {
+func storeTimeval(p *c23.Void, d time.Duration) {
 	// Round up, so that an armed timer does not read as disarmed.
 	us := (d + time.Microsecond - 1) / time.Microsecond
 	c23.Store64(p, uint64(us/1e6))
@@ -37,13 +37,13 @@ func storeTimeval(p c23.Ptr, d time.Duration) {
 
 // storeItimerval stores struct itimerval {struct timeval it_interval,
 // it_value;}.
-func storeItimerval(p c23.Ptr, value, interval time.Duration) {
+func storeItimerval(p *c23.Void, value, interval time.Duration) {
 	storeTimeval(p, interval)
 	storeTimeval(c23.Add(p, 16), value)
 }
 
 // Getitimer is getitimer.
-func Getitimer(which int32, curr c23.Ptr) int32 {
+func Getitimer(which int32, curr *c23.Void) int32 {
 	if which < ITIMER_REAL || which > ITIMER_PROF {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -57,7 +57,7 @@ func Getitimer(which int32, curr c23.Ptr) int32 {
 // sends SIGALRM. ITIMER_VIRTUAL (SIGVTALRM) and ITIMER_PROF (SIGPROF)
 // count wall time too, as Go has no timers of a process's processor
 // time: they expire no later than Linux's would.
-func Setitimer(which int32, newValue, oldValue c23.Ptr) int32 {
+func Setitimer(which int32, newValue, oldValue *c23.Void) int32 {
 	if which < ITIMER_REAL || which > ITIMER_PROF {
 		c23.SetErrno(c23.EINVAL)
 		return -1

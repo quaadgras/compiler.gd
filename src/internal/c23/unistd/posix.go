@@ -14,14 +14,14 @@ import (
 
 // Read is read, a cancellation point when it is called (not while it
 // waits).
-func Read(fd int32, buf c23.Ptr, n uint64) int64 {
+func Read(fd int32, buf *c23.Void, n uint64) int64 {
 	c23.TestCancel()
 	f := c23.FdFile(fd)
 	if f == nil {
 		c23.SetErrno(c23.EBADF)
 		return -1
 	}
-	k, err := f.Read(c23.BytesAt(buf, uintptr(n)))
+	k, err := f.Read(c23.Writable(buf, uintptr(n)))
 	if err != nil && err != io.EOF {
 		c23.SetErrnoOf(err)
 		return -1
@@ -31,7 +31,7 @@ func Read(fd int32, buf c23.Ptr, n uint64) int64 {
 
 // Write is write, a cancellation point when it is called (not while it
 // waits).
-func Write(fd int32, buf c23.Ptr, n uint64) int64 {
+func Write(fd int32, buf *c23.Void, n uint64) int64 {
 	c23.TestCancel()
 	f := c23.FdFile(fd)
 	if f == nil {
@@ -72,7 +72,7 @@ func Lseek(fd int32, off int64, whence int32) int64 {
 }
 
 // Unlink is unlink, which does not remove directories (EISDIR, as Linux).
-func Unlink(path c23.Ptr) int32 {
+func Unlink(path *c23.Void) int32 {
 	name := c23.GoString(path)
 	if fi, err := os.Lstat(name); err == nil && fi.IsDir() {
 		c23.SetErrno(c23.EISDIR)
@@ -82,7 +82,7 @@ func Unlink(path c23.Ptr) int32 {
 }
 
 // Rmdir is rmdir, which removes only directories.
-func Rmdir(path c23.Ptr) int32 {
+func Rmdir(path *c23.Void) int32 {
 	name := c23.GoString(path)
 	fi, err := os.Lstat(name)
 	if err != nil {
@@ -95,7 +95,7 @@ func Rmdir(path c23.Ptr) int32 {
 	return c23.ErrRet(os.Remove(name))
 }
 
-func Access(path c23.Ptr, mode int32) int32 {
+func Access(path *c23.Void, mode int32) int32 {
 	if mode&^7 != 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -135,11 +135,11 @@ func Isatty(fd int32) int32 {
 
 // Getcwd is getcwd, which allocates the array if buf is null (as glibc:
 // of size bytes, or as many as it takes if size is 0).
-func Getcwd(buf c23.Ptr, size uint64) c23.Ptr {
+func Getcwd(buf *c23.Void, size uint64) *c23.Void {
 	wd, err := os.Getwd()
 	if err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
 	n := uint64(len(wd) + 1)
 	if c23.Addr(buf) == 0 {
@@ -148,21 +148,21 @@ func Getcwd(buf c23.Ptr, size uint64) c23.Ptr {
 		}
 		if n > size {
 			c23.SetErrno(c23.ERANGE)
-			return c23.Ptr{}
+			return (*c23.Void)(nil)
 		}
 		buf = c23.Malloc(size)
 	} else if size == 0 {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	} else if n > size {
 		c23.SetErrno(c23.ERANGE)
-		return c23.Ptr{}
+		return (*c23.Void)(nil)
 	}
-	copy(c23.BytesAt(buf, uintptr(n)), wd+"\x00")
+	copy(c23.Writable(buf, uintptr(n)), wd+"\x00")
 	return buf
 }
 
-func Chdir(path c23.Ptr) int32 { return c23.ErrRet(os.Chdir(c23.GoString(path))) }
+func Chdir(path *c23.Void) int32 { return c23.ErrRet(os.Chdir(c23.GoString(path))) }
 
 // Sleep is sleep, a cancellation point.
 func Sleep(s uint32) uint32 {
@@ -205,7 +205,7 @@ func Dup2(fd, fd2 int32) int32 {
 }
 
 // Pipe is pipe: fds[0] reads what fds[1] writes.
-func Pipe(fds c23.Ptr) int32 {
+func Pipe(fds *c23.Void) int32 {
 	r, w, err := os.Pipe()
 	if err != nil {
 		c23.SetErrnoOf(err)
@@ -239,7 +239,7 @@ func Sysconf(name int32) int64 {
 
 // Gethostname is gethostname: a name that does not fit is truncated,
 // and the result is -1 with errno ENAMETOOLONG, as glibc.
-func Gethostname(name c23.Ptr, n uint64) int32 {
+func Gethostname(name *c23.Void, n uint64) int32 {
 	h, err := os.Hostname()
 	if err != nil {
 		c23.SetErrnoOf(err)
@@ -247,10 +247,10 @@ func Gethostname(name c23.Ptr, n uint64) int32 {
 	}
 	b := append([]byte(h), 0)
 	if uint64(len(b)) > n {
-		copy(c23.BytesAt(name, uintptr(n)), b)
+		copy(c23.Writable(name, uintptr(n)), b)
 		c23.SetErrno(c23.ENAMETOOLONG)
 		return -1
 	}
-	copy(c23.BytesAt(name, uintptr(len(b))), b)
+	copy(c23.Writable(name, uintptr(len(b))), b)
 	return 0
 }

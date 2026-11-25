@@ -316,6 +316,9 @@ var debug struct {
 	gcstoptheworld           int32
 	gctrace                  int32
 	invalidptr               int32
+	cclaims                  int32 // gd: print what the claims of C's memory found (cclaim.go)
+	creclaim                 int32 // gd: memory of C's that is claimed again for something that is not compatible: 0, the default, takes away the pointers that were converted before (crepair.go); 1 only counts it; 2 stops the program
+	cintptr                  int32 // gd: an integer that is an address and that C converts to a pointer is one that cannot be used (the default; 0: it is only counted)
 	madvdontneed             int32 // for Linux; issue 28466
 	scavtrace                int32
 	scheddetail              int32
@@ -381,6 +384,9 @@ var dbgvars = []*dbgVar{
 	{name: "gctrace", value: &debug.gctrace},
 	{name: "harddecommit", value: &debug.harddecommit},
 	{name: "inittrace", value: &debug.inittrace},
+	{name: "cclaims", value: &debug.cclaims},
+	{name: "cintptr", value: &debug.cintptr},
+	{name: "creclaim", value: &debug.creclaim},
 	{name: "invalidptr", value: &debug.invalidptr},
 	{name: "madvdontneed", value: &debug.madvdontneed},
 	{name: "panicnil", atomic: &debug.panicnil},
@@ -403,6 +409,7 @@ func parseRuntimeDebugVars(godebug string) {
 	// defaults
 	debug.cgocheck = 1
 	debug.invalidptr = 1
+	debug.cintptr = 1            // gd: an integer that is an address is not a pointer of C's (cclaim.go's c23IntPtr)
 	debug.adaptivestackstart = 1 // set this to 0 to turn larger initial goroutine stacks off
 	debug.collectgoroutines = 1  // set this to 0 to keep the goroutines that are blocked forever
 	if GOOS == "linux" {

@@ -208,13 +208,11 @@ func run(path string, flags int32, fn func(path string, flag int32, fi fs.FileIn
 // call makes the C arguments of a callback: the path, and the struct stat
 // of fi (zeros if the object could not be looked at).
 type call struct {
-	sb Ptr
+	sb *c23.Void
 }
 
-type Ptr = c23.Ptr
-
-func (c *call) stat(fi fs.FileInfo) Ptr {
-	if c.sb.Obj == nil {
+func (c *call) stat(fi fs.FileInfo) *c23.Void {
+	if c.sb == nil {
 		c.sb = c23.Malloc(stat.StatSize)
 	}
 	if fi == nil {
@@ -231,8 +229,8 @@ func (c *call) stat(fi fs.FileInfo) Ptr {
 // FTW_CHDIR changes the working directory to each directory before its
 // entries, so that fn runs in the directory of the object it is given,
 // and back to the walk's at the end; FTW_ACTIONRETVAL is glibc's.
-func Nftw(path, fn Ptr, fdLimit, flags int32) int32 {
-	f := c23.FuncOf[func(Ptr, Ptr, int32, Ptr) int32](fn)
+func Nftw(path, fn *c23.Void, fdLimit, flags int32) int32 {
+	f := c23.FuncOf[func(*c23.Void, *c23.Void, int32, *c23.Void) int32](fn)
 	var c call
 	ftw := c23.Malloc(8)
 	return run(c23.GoString(path), flags, func(p string, flag int32, fi fs.FileInfo, base, level int) int32 {
@@ -244,8 +242,8 @@ func Nftw(path, fn Ptr, fdLimit, flags int32) int32 {
 
 // Ftw is ftw: nftw without flags (symbolic links are followed, a
 // dangling one is FTW_SLN, as glibc's).
-func Ftw(path, fn Ptr, fdLimit int32) int32 {
-	f := c23.FuncOf[func(Ptr, Ptr, int32) int32](fn)
+func Ftw(path, fn *c23.Void, fdLimit int32) int32 {
+	f := c23.FuncOf[func(*c23.Void, *c23.Void, int32) int32](fn)
 	var c call
 	return run(c23.GoString(path), 0, func(p string, flag int32, fi fs.FileInfo, base, level int) int32 {
 		return f(c23.CString(p), c.stat(fi), flag)

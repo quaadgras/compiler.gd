@@ -862,9 +862,9 @@ typedef struct {
 #define RES_DNSRCH 0x00000200
 #define RES_DEFAULT (RES_RECURSE | RES_DEFNAMES | RES_DNSRCH)
 int res_init(void);
-int res_query(const char *dname, int class, int type, unsigned char *answer, int anslen);
-int res_search(const char *dname, int class, int type, unsigned char *answer, int anslen);
-int res_querydomain(const char *name, const char *domain, int class, int type, unsigned char *answer, int anslen);
+int res_query(const char *dname, int __class, int type, unsigned char *answer, int anslen);
+int res_search(const char *dname, int __class, int type, unsigned char *answer, int anslen);
+int res_querydomain(const char *name, const char *domain, int __class, int type, unsigned char *answer, int anslen);
 #endif
 `,
 }

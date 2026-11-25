@@ -632,6 +632,7 @@ func Mkdir(path string, perm uint32) error {
 
 func ReadDir(fd int, buf []byte, cookie dircookie) (int, error) {
 	var nwritten size
+	hostBytes(unsafe.Pointer(&buf[0]), len(buf))
 	errno := fd_readdir(int32(fd), &buf[0], size(len(buf)), cookie, &nwritten)
 	return int(nwritten), errnoErr(errno)
 }
@@ -906,6 +907,8 @@ func Fsync(fd int) error {
 }
 
 func makeIOVec(b []byte) *iovec {
+	// (The host is given the address and the length: see hostBytes.)
+	hostBytes(unsafe.Pointer(unsafe.SliceData(b)), len(b))
 	return &iovec{
 		buf:    uintptr32(uintptr(unsafe.Pointer(unsafe.SliceData(b)))),
 		bufLen: size(len(b)),

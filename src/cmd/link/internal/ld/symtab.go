@@ -449,6 +449,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	ctxt.xdefine("runtime.ecovctrs", sym.SNOPTRBSS, 0)
 	ctxt.xdefine("runtime.end", sym.SBSS, 0)
 	ctxt.xdefine("runtime.epclntab", sym.SRODATA, 0)
+	ctxt.xdefine("runtime.rodatarelro", sym.SRODATA, 0)
 
 	// garbage collection symbols
 	s := ldr.CreateSymForUpdate("runtime.gcdata", 0)
@@ -654,6 +655,14 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 		moduledata.AddUint(ctxt.Arch, 0)
 	}
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.epclntab", 0))
+	// The table of the data's variables, and the start of the one
+	// section it has a part for that has no field above.
+	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.rodatarelro", 0))
+	if s := ctxt.dataVarsSym(); s != 0 {
+		moduledata.AddAddr(ctxt.Arch, s)
+	} else {
+		moduledata.AddUint(ctxt.Arch, 0)
+	}
 
 	if ctxt.IsAIX() && ctxt.IsExternal() {
 		// Add R_XCOFFREF relocation to prevent ld's garbage collection of

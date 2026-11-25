@@ -465,7 +465,7 @@ func (x *expandState) decomposeAsNecessary(pos src.XPos, b *Block, a, m0 *Value,
 		// argument/return. SSA carries iface as a 4-arg OpIMake
 		// (tab, data, inline_real, inline_imag); decompose into matching
 		// register slots.
-		mem = x.decomposeOne(pos, b, a, mem, x.typs.Uintptr, OpITab, &rc)
+		mem = x.decomposeOne(pos, b, a, mem, x.typs.ITab, OpITab, &rc)
 		pos = pos.WithNotStmt()
 		// Immediate interfaces cause so many headaches.
 		if a.Op == OpIMake {
@@ -659,7 +659,7 @@ func (x *expandState) rewriteSelectOrArg(pos src.XPos, b *Block, container, a, m
 		// gd fat-interface: consume 2 int + 2 float register slots
 		// (tab, data, inline.real, inline.imag) and feed all 4 into the
 		// 4-ary OpIMake so the inline payload survives ABI transit.
-		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.Uintptr, rc.next(x.typs.Uintptr)))
+		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.ITab, rc.next(x.typs.ITab)))
 		pos = pos.WithNotStmt()
 		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.BytePtr, rc.next(x.typs.BytePtr)))
 		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.Float64, rc.next(x.typs.Float64)))
@@ -838,7 +838,7 @@ func (x *expandState) rewriteWideSelectToStores(pos src.XPos, b *Block, containe
 		// gd fat-interface: store all four slots (2 int + 2 float) to
 		// memory so the in-memory iface matches the 32-byte (24-byte
 		// on 32-bit) layout with inline typed complex128.
-		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.Uintptr, rc.next(x.typs.Uintptr))
+		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.ITab, rc.next(x.typs.ITab))
 		pos = pos.WithNotStmt()
 		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.BytePtr, rc.next(x.typs.BytePtr))
 		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.Float64, rc.next(x.typs.Float64))

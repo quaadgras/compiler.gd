@@ -37,6 +37,10 @@ func gcUsesSpanInlineMarkBits(_ uintptr) bool {
 	return false
 }
 
+func (s *mspan) usesInlineMarkBits() bool {
+	return false
+}
+
 func (s *mspan) inlineMarkBits() *spanInlineMarkBits {
 	return nil
 }
@@ -156,6 +160,10 @@ func scanObject(b uintptr, gcw *gcWork) {
 	n := s.elemsize
 	if n == 0 {
 		throw("scanObject n == 0")
+	}
+	if s.spanclass.c() {
+		scanObjectC(b, s, gcw)
+		return
 	}
 	if s.spanclass.noscan() {
 		// Correctness-wise this is ok, but it's inefficient

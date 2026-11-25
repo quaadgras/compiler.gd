@@ -12,7 +12,7 @@ import (
 
 // Utime is utime: times is a struct utimbuf {time_t actime; time_t
 // modtime;}, or null for now.
-func Utime(path, times c23.Ptr) int32 {
+func Utime(path, times *c23.Void) int32 {
 	a, m := time.Now(), time.Now()
 	if c23.Addr(times) != 0 {
 		a = time.Unix(int64(c23.Load64(times)), 0)

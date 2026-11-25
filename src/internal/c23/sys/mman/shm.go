@@ -12,11 +12,17 @@ import (
 )
 
 // Mlock is mlock: memory is not paged out by request, and the request
-// succeeds.
-func Mlock(addr c23.Ptr, length uint64) int32 { return 0 }
+// succeeds for memory that the program has.
+func Mlock(addr *c23.Void, length uint64) int32 {
+	if !advisable(addr, length) {
+		c23.SetErrno(c23.ENOMEM)
+		return -1
+	}
+	return 0
+}
 
 // Munlock is munlock.
-func Munlock(addr c23.Ptr, length uint64) int32 { return 0 }
+func Munlock(addr *c23.Void, length uint64) int32 { return Mlock(addr, length) }
 
 // mlockall's flags.
 const (
@@ -47,9 +53,12 @@ const (
 )
 
 // PosixMadvise is posix_madvise, which takes no advice: 0, or EINVAL.
-func PosixMadvise(addr c23.Ptr, length uint64, advice int32) int32 {
+func PosixMadvise(addr *c23.Void, length uint64, advice int32) int32 {
 	if advice < POSIX_MADV_NORMAL || advice > POSIX_MADV_DONTNEED {
 		return c23.EINVAL
+	}
+	if !advisable(addr, length) {
+		return c23.ENOMEM
 	}
 	return 0
 }
@@ -59,7 +68,7 @@ func PosixMadvise(addr c23.Ptr, length uint64, advice int32) int32 {
 // directory elsewhere (or if there is no /dev/shm). As theirs, the name's
 // leading slashes are dropped, and what is left must be a file name of
 // at most 255 bytes, not "." or "..".
-func shmName(p c23.Ptr) (string, bool) {
+func shmName(p *c23.Void) (string, bool) {
 	name := strings.TrimLeft(c23.GoString(p), "/")
 	switch {
 	case len(name) > 255:
@@ -81,7 +90,7 @@ func shmName(p c23.Ptr) (string, bool) {
 // ShmOpen is shm_open: open of the object's file (shmName), close-on-exec
 // and not through a symbolic link. Its shared mappings (mmap's
 // MAP_SHARED) are shared in the process, not with others.
-func ShmOpen(name c23.Ptr, flags int32, mode uint32) int32 {
+func ShmOpen(name *c23.Void, flags int32, mode uint32) int32 {
 	file, ok := shmName(name)
 	if !ok {
 		return -1
@@ -90,7 +99,7 @@ func ShmOpen(name c23.Ptr, flags int32, mode uint32) int32 {
 }
 
 // ShmUnlink is shm_unlink: the object's file is removed.
-func ShmUnlink(name c23.Ptr) int32 {
+func ShmUnlink(name *c23.Void) int32 {
 	file, ok := shmName(name)
 	if !ok {
 		return -1

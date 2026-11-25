@@ -24,7 +24,7 @@ func Ftruncate(fd int32, length int64) int32 {
 }
 
 // Truncate is truncate.
-func Truncate(path c23.Ptr, length int64) int32 {
+func Truncate(path *c23.Void, length int64) int32 {
 	if length < 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -48,11 +48,11 @@ func Fdatasync(fd int32) int32 { return Fsync(fd) }
 // (uid_t)-1.
 func cid(id uint32) int { return int(int32(id)) }
 
-func Chown(path c23.Ptr, uid, gid uint32) int32 {
+func Chown(path *c23.Void, uid, gid uint32) int32 {
 	return c23.ErrRet(os.Chown(c23.GoString(path), cid(uid), cid(gid)))
 }
 
-func Lchown(path c23.Ptr, uid, gid uint32) int32 {
+func Lchown(path *c23.Void, uid, gid uint32) int32 {
 	return c23.ErrRet(os.Lchown(c23.GoString(path), cid(uid), cid(gid)))
 }
 
@@ -66,27 +66,27 @@ func Fchown(fd int32, uid, gid uint32) int32 {
 
 // Readlink is readlink: the link's contents, truncated to n bytes and not
 // terminated.
-func Readlink(path, buf c23.Ptr, n uint64) int64 {
+func Readlink(path, buf *c23.Void, n uint64) int64 {
 	s, err := os.Readlink(c23.GoString(path))
 	if err != nil {
 		c23.SetErrnoOf(err)
 		return -1
 	}
 	k := min(uint64(len(s)), n)
-	copy(c23.BytesAt(buf, uintptr(k)), s)
+	copy(c23.Writable(buf, uintptr(k)), s)
 	return int64(k)
 }
 
-func Symlink(target, link c23.Ptr) int32 {
+func Symlink(target, link *c23.Void) int32 {
 	return c23.ErrRet(os.Symlink(c23.GoString(target), c23.GoString(link)))
 }
 
-func Link(old, new c23.Ptr) int32 {
+func Link(old, new *c23.Void) int32 {
 	return c23.ErrRet(os.Link(c23.GoString(old), c23.GoString(new)))
 }
 
 // Pread is pread: it reads at off, and the file's offset stays.
-func Pread(fd int32, buf c23.Ptr, n uint64, off int64) int64 {
+func Pread(fd int32, buf *c23.Void, n uint64, off int64) int64 {
 	f := c23.FdOS(fd)
 	if f == nil {
 		return -1
@@ -95,7 +95,7 @@ func Pread(fd int32, buf c23.Ptr, n uint64, off int64) int64 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
 	}
-	k, err := f.ReadAt(c23.BytesAt(buf, uintptr(n)), off)
+	k, err := f.ReadAt(c23.Writable(buf, uintptr(n)), off)
 	if err != nil && err != io.EOF {
 		c23.SetErrnoOf(err)
 		return -1
@@ -105,7 +105,7 @@ func Pread(fd int32, buf c23.Ptr, n uint64, off int64) int64 {
 
 // Pwrite is pwrite: it writes at off, and the file's offset stays. A file
 // opened O_APPEND is appended to, as Linux does.
-func Pwrite(fd int32, buf c23.Ptr, n uint64, off int64) int64 {
+func Pwrite(fd int32, buf *c23.Void, n uint64, off int64) int64 {
 	of := c23.FdFile(fd)
 	if of == nil {
 		c23.SetErrno(c23.EBADF)

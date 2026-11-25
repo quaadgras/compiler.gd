@@ -24,9 +24,9 @@ const FIOCLEX = 0x5451
 // TIOCGWINSZ (a terminal's struct winsize), FIONBIO, FIOCLEX and
 // FIONCLEX. Other requests fail with ENOTTY.
 func Ioctl(fd int32, req uint64, va ...any) int32 {
-	var arg c23.Ptr
+	var arg *c23.Void
 	if len(va) > 0 {
-		arg = c23.VaArg[c23.Ptr](c23.VaStart(va))
+		arg = c23.VaArg[*c23.Void](c23.VaStart(va))
 	}
 	of := c23.FdFile(fd)
 	if of == nil {

@@ -27,6 +27,9 @@ func mix(h, v uint64) uint64 {
 // memhash hashes the n bytes at p.
 func memhash(p unsafe.Pointer, seed, n uintptr) uintptr {
 	h := uint64(seed) ^ uint64(n)*hashMul
+	if splitMode && n != 0 {
+		splitcheck(p, n)
+	}
 	if a := trylinaddr(p); a != 0 {
 		i := uintptr(0)
 		for ; i+8 <= n; i += 8 {
@@ -108,7 +111,7 @@ func c128hash(p unsafe.Pointer, h uintptr) uintptr {
 
 func interhash(p unsafe.Pointer, h uintptr) uintptr {
 	x := (*iface)(p)
-	if x.tab == 0 {
+	if x.tab == typeWordOf(nil) {
 		return h
 	}
 	return ifaceHash((*itab)(unsafe.Pointer(x.tab)).Type, (*eface)(p), h)
@@ -116,7 +119,7 @@ func interhash(p unsafe.Pointer, h uintptr) uintptr {
 
 func nilinterhash(p unsafe.Pointer, h uintptr) uintptr {
 	x := (*eface)(p)
-	if x._type == 0 {
+	if x._type == typeWordOf(nil) {
 		return h
 	}
 	return ifaceHash((*_type)(unsafe.Pointer(x._type)), x, h)

@@ -27,8 +27,6 @@ import (
 	"time"
 )
 
-type Ptr = c23.Ptr
-
 // sys/socket.h's values: Linux's.
 const (
 	AF_UNSPEC = 0
@@ -203,7 +201,7 @@ func install(s *socket, flags int32) int32 {
 
 // Socketpair is socketpair: AF_UNIX stream or datagram sockets,
 // connected in memory, which can send each other descriptors.
-func Socketpair(family, typ, proto int32, sv Ptr) int32 {
+func Socketpair(family, typ, proto int32, sv *c23.Void) int32 {
 	flags := typ & (SOCK_NONBLOCK | SOCK_CLOEXEC)
 	typ &^= flags
 	if family != AF_UNIX {
@@ -264,7 +262,7 @@ func (s *socket) network() string {
 // Bind is bind. A stream socket listens from here (so its port is taken
 // and getsockname knows it), but accept takes connections only after
 // listen.
-func Bind(fd int32, addr Ptr, n uint32) int32 {
+func Bind(fd int32, addr *c23.Void, n uint32) int32 {
 	s, _ := sockOf(fd)
 	if s == nil {
 		return -1
@@ -397,10 +395,10 @@ func Listen(fd int32, backlog int32) int32 {
 }
 
 // Accept is accept.
-func Accept(fd int32, addr, n Ptr) int32 { return Accept4(fd, addr, n, 0) }
+func Accept(fd int32, addr, n *c23.Void) int32 { return Accept4(fd, addr, n, 0) }
 
 // Accept4 is accept4: flags are SOCK_NONBLOCK and SOCK_CLOEXEC.
-func Accept4(fd int32, addr, n Ptr, flags int32) int32 {
+func Accept4(fd int32, addr, n *c23.Void, flags int32) int32 {
 	s, nonblock := sockOf(fd)
 	if s == nil {
 		return -1
@@ -437,11 +435,11 @@ func Accept4(fd int32, addr, n Ptr, flags int32) int32 {
 }
 
 // Addr is c23.Addr.
-func Addr(p Ptr) uintptr { return c23.Addr(p) }
+func Addr(p *c23.Void) uintptr { return c23.Addr(p) }
 
 // Connect is connect. In non-blocking mode a stream socket connects in
 // the background: EINPROGRESS, then poll's POLLOUT and SO_ERROR.
-func Connect(fd int32, addr Ptr, n uint32) int32 {
+func Connect(fd int32, addr *c23.Void, n uint32) int32 {
 	s, nonblock := sockOf(fd)
 	if s == nil {
 		return -1
@@ -888,12 +886,12 @@ func (s *socket) sendMate(m *socket, b []byte, rights []*c23.Ofile) (int, error)
 }
 
 // Send is send.
-func Send(fd int32, buf Ptr, n uint64, flags int32) int64 {
-	return Sendto(fd, buf, n, flags, Ptr{}, 0)
+func Send(fd int32, buf *c23.Void, n uint64, flags int32) int64 {
+	return Sendto(fd, buf, n, flags, (*c23.Void)(nil), 0)
 }
 
 // Sendto is sendto: a stream socket ignores the address.
-func Sendto(fd int32, buf Ptr, n uint64, flags int32, addr Ptr, alen uint32) int64 {
+func Sendto(fd int32, buf *c23.Void, n uint64, flags int32, addr *c23.Void, alen uint32) int64 {
 	s, _ := sockOf(fd)
 	if s == nil {
 		return -1
@@ -914,17 +912,17 @@ func Sendto(fd int32, buf Ptr, n uint64, flags int32, addr Ptr, alen uint32) int
 }
 
 // Recv is recv.
-func Recv(fd int32, buf Ptr, n uint64, flags int32) int64 {
-	return Recvfrom(fd, buf, n, flags, Ptr{}, Ptr{})
+func Recv(fd int32, buf *c23.Void, n uint64, flags int32) int64 {
+	return Recvfrom(fd, buf, n, flags, (*c23.Void)(nil), (*c23.Void)(nil))
 }
 
 // Recvfrom is recvfrom.
-func Recvfrom(fd int32, buf Ptr, n uint64, flags int32, addr, alen Ptr) int64 {
+func Recvfrom(fd int32, buf *c23.Void, n uint64, flags int32, addr, alen *c23.Void) int64 {
 	s, nonblock := sockOf(fd)
 	if s == nil {
 		return -1
 	}
-	k, from, rights, err := s.recv(c23.BytesAt(buf, uintptr(n)), nonblock || flags&MSG_DONTWAIT != 0, flags&MSG_PEEK != 0, flags&MSG_WAITALL != 0)
+	k, from, rights, err := s.recv(c23.Writable(buf, uintptr(n)), nonblock || flags&MSG_DONTWAIT != 0, flags&MSG_PEEK != 0, flags&MSG_WAITALL != 0)
 	drop(rights)
 	if err != nil && err != io.EOF {
 		return int64(fail(err))
@@ -949,7 +947,10 @@ var (
 	iovecSize = 2 * ws
 )
 
-func iovecs(msg Ptr) [][]byte {
+// iovecs returns the memory of msg's iovecs, each as far as it says and
+// in the object that its base points into: to write to, for a message
+// that is received.
+func iovecs(msg *c23.Void, write bool) [][]byte {
 	iov := c23.LoadPtr(c23.Add(msg, mIov))
 	n := int(c23.LoadLong(c23.Add(msg, mIovLen)))
 	var bs [][]byte
@@ -957,7 +958,9 @@ func iovecs(msg Ptr) [][]byte {
 		e := c23.Add(iov, i*iovecSize)
 		base := c23.LoadPtr(e)
 		l := uint64(c23.LoadLong(c23.Add(e, ws)))
-		if l > 0 {
+		if l > 0 && write {
+			bs = append(bs, c23.Writable(base, uintptr(l)))
+		} else if l > 0 {
 			bs = append(bs, c23.BytesAt(base, uintptr(l)))
 		}
 	}
@@ -965,13 +968,13 @@ func iovecs(msg Ptr) [][]byte {
 }
 
 // Sendmsg is sendmsg.
-func Sendmsg(fd int32, msg Ptr, flags int32) int64 {
+func Sendmsg(fd int32, msg *c23.Void, flags int32) int64 {
 	s, _ := sockOf(fd)
 	if s == nil {
 		return -1
 	}
 	var b []byte
-	for _, v := range iovecs(msg) {
+	for _, v := range iovecs(msg, false) {
 		b = append(b, v...)
 	}
 	var to net.Addr
@@ -1007,7 +1010,7 @@ var cmsgHdr = (ws + 8 + ws - 1) / ws * ws
 func cmsgAlign(n int) int { return (n + ws - 1) / ws * ws }
 
 // controlRights holds the descriptors of msg's SCM_RIGHTS messages.
-func controlRights(msg Ptr) ([]*c23.Ofile, int32) {
+func controlRights(msg *c23.Void) ([]*c23.Ofile, int32) {
 	ctl := c23.LoadPtr(c23.Add(msg, mCtl))
 	n := int(c23.LoadLong(c23.Add(msg, mCtlLen)))
 	if Addr(ctl) == 0 {
@@ -1038,12 +1041,12 @@ func controlRights(msg Ptr) ([]*c23.Ofile, int32) {
 }
 
 // Recvmsg is recvmsg.
-func Recvmsg(fd int32, msg Ptr, flags int32) int64 {
+func Recvmsg(fd int32, msg *c23.Void, flags int32) int64 {
 	s, nonblock := sockOf(fd)
 	if s == nil {
 		return -1
 	}
-	vs := iovecs(msg)
+	vs := iovecs(msg, true)
 	total := 0
 	for _, v := range vs {
 		total += len(v)
@@ -1062,7 +1065,7 @@ func Recvmsg(fd int32, msg Ptr, flags int32) int64 {
 		if from != nil {
 			l := Encode(from, s.family)
 			cap := int(c23.Load32(c23.Add(msg, mNameLen)))
-			copy(c23.BytesAt(name, uintptr(min(cap, len(l)))), l)
+			copy(c23.Writable(name, uintptr(min(cap, len(l)))), l)
 			c23.Store32(c23.Add(msg, mNameLen), uint32(len(l)))
 		} else {
 			c23.Store32(c23.Add(msg, mNameLen), 0)
@@ -1100,7 +1103,7 @@ func Recvmsg(fd int32, msg Ptr, flags int32) int64 {
 }
 
 // Getsockname is getsockname.
-func Getsockname(fd int32, addr, alen Ptr) int32 {
+func Getsockname(fd int32, addr, alen *c23.Void) int32 {
 	s, _ := sockOf(fd)
 	if s == nil {
 		return -1
@@ -1134,7 +1137,7 @@ func unbound(family int32) net.Addr {
 }
 
 // Getpeername is getpeername.
-func Getpeername(fd int32, addr, alen Ptr) int32 {
+func Getpeername(fd int32, addr, alen *c23.Void) int32 {
 	s, _ := sockOf(fd)
 	if s == nil {
 		return -1
@@ -1156,7 +1159,7 @@ func Getpeername(fd int32, addr, alen Ptr) int32 {
 
 // Getsockopt is getsockopt, of the options setsockopt knows, SO_TYPE,
 // SO_ERROR (which it clears), SO_ACCEPTCONN, SO_DOMAIN and SO_PROTOCOL.
-func Getsockopt(fd, level, name int32, val, vlen Ptr) int32 {
+func Getsockopt(fd, level, name int32, val, vlen *c23.Void) int32 {
 	s, _ := sockOf(fd)
 	if s == nil {
 		return -1
@@ -1252,7 +1255,7 @@ func (s *socket) opt(level, name int32) *int32 {
 
 // Setsockopt is setsockopt. Options Go can apply to its connections it
 // applies; others are kept for getsockopt; unknown ones are ignored.
-func Setsockopt(fd, level, name int32, val Ptr, vlen uint32) int32 {
+func Setsockopt(fd, level, name int32, val *c23.Void, vlen uint32) int32 {
 	s, _ := sockOf(fd)
 	if s == nil {
 		return -1
@@ -1396,7 +1399,7 @@ var errnoMap = []struct {
 
 // Decode reads the sockaddr of n bytes at p, of family (a datagram
 // socket's if typ is SOCK_DGRAM), as net's address.
-func Decode(family, typ int32, p Ptr, n uint32) (net.Addr, int32) {
+func Decode(family, typ int32, p *c23.Void, n uint32) (net.Addr, int32) {
 	if n < 2 {
 		return nil, c23.EINVAL
 	}
@@ -1494,14 +1497,14 @@ func Encode(a net.Addr, family int32) []byte {
 
 // EncodeTo stores a's sockaddr at addr, at most *alen bytes of it, and
 // its length at alen.
-func EncodeTo(a net.Addr, family int32, addr, alen Ptr) {
+func EncodeTo(a net.Addr, family int32, addr, alen *c23.Void) {
 	b := Encode(a, family)
 	if Addr(alen) == 0 {
 		return
 	}
 	n := int(c23.Load32(alen))
 	if Addr(addr) != 0 && n > 0 {
-		copy(c23.BytesAt(addr, uintptr(min(n, len(b)))), b)
+		copy(c23.Writable(addr, uintptr(min(n, len(b)))), b)
 	}
 	c23.Store32(alen, uint32(len(b)))
 }

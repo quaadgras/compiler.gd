@@ -12,8 +12,6 @@ import (
 	"strings"
 )
 
-type Ptr = c23.Ptr
-
 const (
 	AF_INET  = 2
 	AF_INET6 = 10
@@ -54,18 +52,18 @@ func ParseInet4(s string) (netip.Addr, bool) {
 }
 
 // InetAton is inet_aton.
-func InetAton(cp, inp Ptr) int32 {
+func InetAton(cp, inp *c23.Void) int32 {
 	ip, ok := ParseInet4(c23.GoString(cp))
 	if !ok {
 		return 0
 	}
 	a := ip.As4()
-	copy(c23.BytesAt(inp, 4), a[:])
+	copy(c23.Writable(inp, 4), a[:])
 	return 1
 }
 
 // InetAddr is inet_addr: INADDR_NONE (all ones) if cp is not one.
-func InetAddr(cp Ptr) uint32 {
+func InetAddr(cp *c23.Void) uint32 {
 	ip, ok := ParseInet4(c23.GoString(cp))
 	if !ok {
 		return 0xffffffff
@@ -74,19 +72,19 @@ func InetAddr(cp Ptr) uint32 {
 	return uint32(a[0]) | uint32(a[1])<<8 | uint32(a[2])<<16 | uint32(a[3])<<24
 }
 
-var ntoaBuf = c23.NewTLS(func() Ptr { return c23.Malloc(16) })
+var ntoaBuf = c23.NewTLS(func() *c23.Void { return c23.Malloc(16) })
 
 // InetNtoa is inet_ntoa, of the address's s_addr: the result is in the
 // thread's buffer, which the next call overwrites.
-func InetNtoa(a uint32) Ptr {
+func InetNtoa(a uint32) *c23.Void {
 	s := netip.AddrFrom4([4]byte{byte(a), byte(a >> 8), byte(a >> 16), byte(a >> 24)}).String()
 	p := ntoaBuf.Get()
-	copy(c23.BytesAt(p, uintptr(len(s)+1)), s+"\x00")
+	copy(c23.Writable(p, uintptr(len(s)+1)), s+"\x00")
 	return p
 }
 
 // InetPton is inet_pton: AF_INET takes only a.b.c.d.
-func InetPton(family int32, src, dst Ptr) int32 {
+func InetPton(family int32, src, dst *c23.Void) int32 {
 	s := c23.GoString(src)
 	switch family {
 	case AF_INET:
@@ -95,7 +93,7 @@ func InetPton(family int32, src, dst Ptr) int32 {
 			return 0
 		}
 		a := ip.As4()
-		copy(c23.BytesAt(dst, 4), a[:])
+		copy(c23.Writable(dst, 4), a[:])
 		return 1
 	case AF_INET6:
 		ip, err := netip.ParseAddr(s)
@@ -103,7 +101,7 @@ func InetPton(family int32, src, dst Ptr) int32 {
 			return 0
 		}
 		a := ip.As16()
-		copy(c23.BytesAt(dst, 16), a[:])
+		copy(c23.Writable(dst, 16), a[:])
 		return 1
 	}
 	c23.SetErrno(c23.EAFNOSUPPORT)
@@ -111,7 +109,7 @@ func InetPton(family int32, src, dst Ptr) int32 {
 }
 
 // InetNtop is inet_ntop.
-func InetNtop(family int32, src, dst Ptr, n uint32) Ptr {
+func InetNtop(family int32, src, dst *c23.Void, n uint32) *c23.Void {
 	var s string
 	switch family {
 	case AF_INET:
@@ -124,20 +122,20 @@ func InetNtop(family int32, src, dst Ptr, n uint32) Ptr {
 		}
 	default:
 		c23.SetErrno(c23.EAFNOSUPPORT)
-		return Ptr{}
+		return (*c23.Void)(nil)
 	}
 	if !putString(dst, n, s) {
 		c23.SetErrno(c23.ENOSPC)
-		return Ptr{}
+		return (*c23.Void)(nil)
 	}
 	return dst
 }
 
 // putString stores s and its NUL in the n bytes at p, if it fits.
-func putString(p Ptr, n uint32, s string) bool {
+func putString(p *c23.Void, n uint32, s string) bool {
 	if uint32(len(s)) >= n {
 		return false
 	}
-	copy(c23.BytesAt(p, uintptr(len(s)+1)), s+"\x00")
+	copy(c23.Writable(p, uintptr(len(s)+1)), s+"\x00")
 	return true
 }

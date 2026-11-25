@@ -102,7 +102,7 @@ const StatSize = uint64((120 + 3*c23.LongSize + 7) &^ 7)
 //
 // FillStat is exported for the other headers' functions that pass a
 // struct stat (ftw.h's).
-func FillStat(buf c23.Ptr, fi fs.FileInfo) {
+func FillStat(buf *c23.Void, fi fs.FileInfo) {
 	c23.Memset(buf, 0, StatSize)
 	sys := reflect.Indirect(reflect.ValueOf(fi.Sys()))
 	if sys.IsValid() && sys.Kind() != reflect.Struct {
@@ -143,7 +143,7 @@ func FillStat(buf c23.Ptr, fi fs.FileInfo) {
 	ts(104, "Ctim", "Ctimespec", "Ctime")
 }
 
-func statRet(buf c23.Ptr, fi fs.FileInfo, err error) int32 {
+func statRet(buf *c23.Void, fi fs.FileInfo, err error) int32 {
 	if err != nil {
 		c23.SetErrnoOf(err)
 		return -1
@@ -152,17 +152,17 @@ func statRet(buf c23.Ptr, fi fs.FileInfo, err error) int32 {
 	return 0
 }
 
-func Stat(path, buf c23.Ptr) int32 {
+func Stat(path, buf *c23.Void) int32 {
 	fi, err := os.Stat(c23.GoString(path))
 	return statRet(buf, fi, err)
 }
 
-func Lstat(path, buf c23.Ptr) int32 {
+func Lstat(path, buf *c23.Void) int32 {
 	fi, err := os.Lstat(c23.GoString(path))
 	return statRet(buf, fi, err)
 }
 
-func Fstat(fd int32, buf c23.Ptr) int32 {
+func Fstat(fd int32, buf *c23.Void) int32 {
 	if of := c23.FdFile(fd); of != nil && of.Sp != nil {
 		c23.Memset(buf, 0, StatSize)
 		c23.Store64(c23.Add(buf, 16), 1)
@@ -180,11 +180,11 @@ func Fstat(fd int32, buf c23.Ptr) int32 {
 	return statRet(buf, fi, err)
 }
 
-func Mkdir(path c23.Ptr, mode uint32) int32 {
+func Mkdir(path *c23.Void, mode uint32) int32 {
 	return c23.ErrRet(os.Mkdir(c23.GoString(path), c23.GoMode(mode)))
 }
 
-func Chmod(path c23.Ptr, mode uint32) int32 {
+func Chmod(path *c23.Void, mode uint32) int32 {
 	return c23.ErrRet(os.Chmod(c23.GoString(path), c23.GoMode(mode)))
 }
 

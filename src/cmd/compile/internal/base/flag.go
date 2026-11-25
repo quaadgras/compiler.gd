@@ -202,6 +202,7 @@ func (gd *Invocation) ParseFlags(args []string) {
 	gd.Sharing = buildcfg.Experiment.Sharing
 
 	gd.Debug.Checkptr = -1 // so we can tell whether it is set explicitly
+	gd.Debug.StackVars = -1
 
 	gd.Flag.Cfg.ImportMap = make(map[string]string)
 
@@ -355,6 +356,19 @@ func (gd *Invocation) ParseFlags(args []string) {
 		}
 	}
 
+	if gd.Debug.StackVars == -1 { // if not set explicitly
+		// gd: the checks find the variable of a frame that a pointer
+		// is in from a table that each function has (liveness's
+		// emitStackVars), but for the functions of the runtime's
+		// packages (ir.StackVars). A package that is not checked
+		// has them too, since a pointer to a variable of its own is
+		// given to code that is checked.
+		gd.Debug.StackVars = 0
+		if gd.Ctxt.Arch.Family != sys.Wasm {
+			gd.Debug.StackVars = 2
+		}
+	}
+
 	if gd.Flag.LowerC < 1 {
 		gd.UsageError("-c must be at least 1, got %d", gd.Flag.LowerC)
 	}
@@ -383,8 +397,8 @@ func (gd *Invocation) ParseFlags(args []string) {
 		gd.Debug.Checkptr = 0
 		unchecked := false
 		switch gd.Ctxt.Pkgpath {
-		case "internal/c23", "reflect", "internal/reflectlite":
-			unchecked = true // see ir.UncheckedPkg
+		case "reflect", "internal/reflectlite":
+			unchecked = true // see ir.NoCheckPtrPkg
 		}
 		if gd.Ctxt.Arch.Family != sys.Wasm && !unchecked {
 			gd.Debug.Checkptr = 1

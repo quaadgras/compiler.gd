@@ -49,7 +49,7 @@ var (
 	recs  [][]byte // the database's records, read when first asked for
 	read  bool
 	next  int
-	entry c23.Ptr // the struct utmpx the functions return
+	entry *c23.Void // the struct utmpx the functions return
 )
 
 // load reads the database, once after setutxent: the records of
@@ -80,11 +80,11 @@ func load() {
 }
 
 // result returns rec as the static struct utmpx.
-func result(rec []byte) c23.Ptr {
+func result(rec []byte) *c23.Void {
 	if c23.Addr(entry) == 0 {
 		entry = c23.Malloc(recSize)
 	}
-	copy(c23.BytesAt(entry, recSize), rec)
+	copy(c23.Writable(entry, recSize), rec)
 	return entry
 }
 
@@ -103,7 +103,7 @@ func Setutxent() {
 func Endutxent() { Setutxent() }
 
 // find returns the next record match accepts, or null.
-func find(match func(rec []byte) bool) c23.Ptr {
+func find(match func(rec []byte) bool) *c23.Void {
 	mu.Lock()
 	defer mu.Unlock()
 	load()
@@ -114,11 +114,11 @@ func find(match func(rec []byte) bool) c23.Ptr {
 			return result(rec)
 		}
 	}
-	return c23.Ptr{}
+	return (*c23.Void)(nil)
 }
 
 // Getutxent is getutxent: the next entry, or null at the end.
-func Getutxent() c23.Ptr { return find(func([]byte) bool { return true }) }
+func Getutxent() *c23.Void { return find(func([]byte) bool { return true }) }
 
 // field is the NUL-terminated field of n bytes at off of rec.
 func field(rec []byte, off, n int) []byte {
@@ -133,7 +133,7 @@ func field(rec []byte, off, n int) []byte {
 // RUN_LVL, BOOT_TIME, NEW_TIME or OLD_TIME; else the next of a process
 // (INIT_PROCESS, LOGIN_PROCESS, USER_PROCESS or DEAD_PROCESS) with ut's
 // ut_id.
-func Getutxid(ut c23.Ptr) c23.Ptr {
+func Getutxid(ut *c23.Void) *c23.Void {
 	typ := int16(c23.Load16(ut))
 	id := bytes.Clone(c23.BytesAt(c23.Add(ut, offID), 4))
 	if i := bytes.IndexByte(id, 0); i >= 0 {
@@ -154,7 +154,7 @@ func Getutxid(ut c23.Ptr) c23.Ptr {
 
 // Getutxline is getutxline: the next entry of type LOGIN_PROCESS or
 // USER_PROCESS with ut's ut_line.
-func Getutxline(ut c23.Ptr) c23.Ptr {
+func Getutxline(ut *c23.Void) *c23.Void {
 	line := bytes.Clone(c23.BytesAt(c23.Add(ut, offLine), 32))
 	if i := bytes.IndexByte(line, 0); i >= 0 {
 		line = line[:i]
@@ -167,7 +167,7 @@ func Getutxline(ut c23.Ptr) c23.Ptr {
 
 // Pututxline is pututxline, which cannot write the database: null, errno
 // EPERM (as glibc's for a process that may not).
-func Pututxline(ut c23.Ptr) c23.Ptr {
+func Pututxline(ut *c23.Void) *c23.Void {
 	c23.SetErrno(c23.EPERM)
-	return c23.Ptr{}
+	return (*c23.Void)(nil)
 }

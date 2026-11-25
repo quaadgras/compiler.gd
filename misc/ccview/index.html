@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ccview</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+:root {
+  --bg: #f6f7f9; --surface: #fff; --fg: #1b2330; --muted: #5a6577; --rule: #d9dee6;
+  --accent: #0b6e99; --sel: #fff3c4; --add: #ddf4e0; --add-bar: #2e9a48;
+  --unsafe-bg: #ffe2c2; --unsafe-fg: #7a3600; --rt-bg: #dcecf5; --rt-fg: #0a4f6e;
+  --err-bg: #fde8e8; --err-fg: #8a1c1c;
+  --k: #a626a4; --s: #2f7d32; --n: #b25b00; --c: #8b95a5; --t: #0b6e99; --f: #4a54c9; --m: #8a5a00;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #12161c; --surface: #1a2029; --fg: #e3e8ef; --muted: #9aa5b5; --rule: #2c3542;
+  --accent: #6cc3e6; --sel: #3d3618; --add: #173a22; --add-bar: #4cc36b;
+  --unsafe-bg: #5a3310; --unsafe-fg: #ffd3a3; --rt-bg: #14384a; --rt-fg: #a9dcf2;
+  --err-bg: #3d1a1a; --err-fg: #ffb3b3;
+  --k: #d38ce0; --s: #8fd18f; --n: #f0a656; --c: #6c7889; --t: #6cc3e6; --f: #9aa6ff; --m: #e0b860;
+  color-scheme: dark;
+} }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.45 var(--sans); display: flex; flex-direction: column; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; padding: .5rem 1rem; border-bottom: 1px solid var(--rule); background: var(--surface); }
+header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
+select, button, input[type=search] { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--rule); border-radius: 5px; padding: .25rem .5rem; }
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.on { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+#file { max-width: 28rem; }
+.meta { color: var(--muted); font-size: .85rem; display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
+.meta b { color: var(--fg); font-weight: 500; font-variant-numeric: tabular-nums; }
+.spacer { flex: 1; }
+#banner { display: none; white-space: pre-wrap; font: 12px/1.4 var(--mono); background: var(--err-bg); color: var(--err-fg); padding: .5rem 1rem; max-height: 14rem; overflow: auto; border-bottom: 1px solid var(--rule); }
+main { flex: 1; min-height: 0; display: grid; grid-template-columns: 16rem minmax(0, 5fr) minmax(0, 7fr); }
+main.hideout { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+main.hideout #outline { display: none; }
+#outline { border-right: 1px solid var(--rule); display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
+#outline input { margin: .5rem; }
+#decls { overflow: auto; flex: 1; font: 12px/1.35 var(--mono); }
+#decls div { padding: .2rem .6rem; cursor: pointer; border-left: 3px solid transparent; }
+#decls div:hover { background: var(--bg); }
+#decls div.sel { background: var(--sel); border-left-color: var(--accent); }
+#decls div.changed { border-left-color: var(--add-bar); }
+#decls small { display: block; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#decls .kind { color: var(--muted); }
+.pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-right: 1px solid var(--rule); }
+.label { font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: .35rem .8rem; border-bottom: 1px solid var(--rule); background: var(--surface); display: flex; gap: .75rem; align-items: center; }
+.label span { text-transform: none; letter-spacing: 0; }
+.code { flex: 1; overflow: auto; background: var(--surface); font: 12.5px/1.5 var(--mono); tab-size: 4; }
+.code table { border-collapse: collapse; min-width: 100%; }
+.code td { padding: 0; vertical-align: top; white-space: pre; }
+.code td.ln { color: var(--muted); text-align: right; padding: 0 .6rem 0 .8rem; user-select: none; opacity: .6; border-left: 3px solid transparent; }
+.code td.tx { padding-right: 1rem; width: 100%; }
+.code tr.add td.ln { border-left-color: var(--add-bar); }
+.code tr.add td.tx { background: var(--add); }
+.code tr.sel td { background: var(--sel); }
+.code tr.sel.add td.tx { background: var(--sel); }
+textarea#scratch { flex: 1; resize: none; border: 0; padding: .6rem .8rem; font: 12.5px/1.5 var(--mono); background: var(--surface); color: var(--fg); tab-size: 4; outline: none; }
+mark { border-radius: 3px; padding: 0 1px; }
+mark.u { background: var(--unsafe-bg); color: var(--unsafe-fg); }
+mark.r { background: var(--rt-bg); color: var(--rt-fg); }
+body.nomark mark { background: none; color: inherit; }
+.hljs-keyword, .hljs-meta .hljs-keyword { color: var(--k); }
+.hljs-string, .hljs-meta .hljs-string { color: var(--s); }
+.hljs-number, .hljs-literal { color: var(--n); }
+.hljs-comment { color: var(--c); font-style: italic; }
+.hljs-type, .hljs-built_in, .hljs-class .hljs-title, .hljs-title.class_ { color: var(--t); }
+.hljs-title.function_, .hljs-title { color: var(--f); }
+.hljs-meta { color: var(--m); }
+#loading { position: fixed; top: .6rem; right: 1rem; color: var(--muted); font-size: .85rem; display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ccview</h1>
+  <select id="file" title="Source file"></select>
+  <button id="scratchBtn" title="Edit your own source">Scratch</button>
+  <select id="lang" title="Scratch language" hidden><option value="c">C</option><option value="cpp">C++</option></select>
+  <button id="refresh" title="Rebuild cmd/cc and translate again (r, or ctrl+enter in scratch)">⟳ Rebuild &amp; translate</button>
+  <span class="spacer"></span>
+  <label class="meta"><input type="checkbox" id="marks" checked> marks</label>
+  <label class="meta"><input type="checkbox" id="outlineChk" checked> outline</label>
+  <div class="meta" id="meta"></div>
+</header>
+<div id="banner"></div>
+<span id="loading">building…</span>
+<main id="main">
+  <nav id="outline">
+    <input type="search" id="filter" placeholder="filter declarations">
+    <div id="decls"></div>
+  </nav>
+  <section class="pane">
+    <div class="label">source <span id="srcName"></span></div>
+    <div class="code" id="src"></div>
+    <textarea id="scratch" spellcheck="false" hidden></textarea>
+  </section>
+  <section class="pane">
+    <div class="label">Go <span id="goInfo"></span></div>
+    <div class="code" id="go"></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const state = { path: '', scratch: false, res: null, sel: -1, changed: new Set() };
+const ls = {
+  get(k, d) { try { const v = localStorage.getItem('ccview.' + k); return v == null ? d : v; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('ccview.' + k, v); } catch {} },
+};
+
+function esc(s) { return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]); }
+
+const markRe = /\b(unsafe\.\w+|uintptr)\b|\b(c23\.\w+)/g;
+// Highlight src and return one HTML string per line, closing and
+// reopening spans that cross line breaks.
+function highlightLines(src, lang, marks) {
+  let html;
+  try { html = hljs.highlight(src, { language: lang, ignoreIllegals: true }).value; }
+  catch { html = esc(src); }
+  const lines = [], stack = [];
+  let cur = '';
+  for (const m of html.matchAll(/<span[^>]*>|<\/span>|\n|[^<\n]+/g)) {
+    const t = m[0];
+    if (t === '\n') { lines.push(cur + '</span>'.repeat(stack.length)); cur = stack.join(''); }
+    else if (t.startsWith('<span')) { stack.push(t); cur += t; }
+    else if (t === '</span>') { stack.pop(); cur += t; }
+    else cur += marks ? t.replace(markRe, (all, u, r) => u ? `<mark class="u">${u}</mark>` : `<mark class="r">${r}</mark>`) : t;
+  }
+  lines.push(cur + '</span>'.repeat(stack.length));
+  if (src.endsWith('\n')) lines.pop();
+  return lines;
+}
+
+function renderCode(el, src, lang, marks, added) {
+  const lines = highlightLines(src, lang, marks);
+  const rows = lines.map((l, i) =>
+    `<tr id="${el.id}-${i + 1}"${added && added.has(i) ? ' class="add"' : ''}><td class="ln">${i + 1}</td><td class="tx">${l || ' '}</td></tr>`);
+  el.innerHTML = `<table>${rows.join('')}</table>`;
+}
+
+// Lines of cur that are not in prev, by longest common subsequence
+// (or, for very large inputs, by multiset difference).
+function addedLines(prev, cur) {
+  const out = new Set();
+  if (!prev) return out;
+  const a = prev.split('\n'), b = cur.split('\n');
+  let s = 0;
+  while (s < a.length && s < b.length && a[s] === b[s]) s++;
+  let ea = a.length, eb = b.length;
+  while (ea > s && eb > s && a[ea - 1] === b[eb - 1]) { ea--; eb--; }
+  const n = ea - s, m = eb - s;
+  if (n * m > 3e7) {
+    const count = new Map();
+    for (let i = s; i < ea; i++) count.set(a[i], (count.get(a[i]) || 0) + 1);
+    for (let j = s; j < eb; j++) { const c = count.get(b[j]) || 0; if (c) count.set(b[j], c - 1); else out.add(j); }
+    return out;
+  }
+  const w = m + 1, dp = new Int32Array((n + 1) * w);
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i * w + j] = a[s + i] === b[s + j] ? dp[(i + 1) * w + j + 1] + 1 : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1]);
+  let i = 0, j = 0;
+  while (j < m) {
+    if (i < n && a[s + i] === b[s + j]) { i++; j++; }
+    else if (i < n && dp[(i + 1) * w + j] >= dp[i * w + j + 1]) i++;
+    else { out.add(s + j); j++; }
+  }
+  return out;
+}
+
+// ---- Finding a declaration's C source -------------------------------
+
+function lineOf(text, idx) { let n = 1; for (let i = 0; i < idx; i++) if (text.charCodeAt(i) === 10) n++; return n; }
+function matchClose(text, open) { // index of the bracket closing text[open]
+  const o = text[open], c = { '(': ')', '{': '}', '<': '>' }[o];
+  let d = 0;
+  for (let i = open; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'") { for (i++; i < text.length && text[i] !== ch; i++) if (text[i] === '\\') i++; continue; }
+    if (ch === '/' && text[i + 1] === '/') { while (i < text.length && text[i] !== '\n') i++; continue; }
+    if (ch === '/' && text[i + 1] === '*') { i = text.indexOf('*/', i + 2); if (i < 0) return text.length - 1; i++; continue; }
+    if (ch === o) d++; else if (ch === c && --d === 0) return i;
+  }
+  return text.length - 1;
+}
+function stripTemplateArgs(s) {
+  let out = '', d = 0;
+  for (const ch of s) { if (ch === '<') d++; else if (ch === '>') d--; else if (!d) out += ch; }
+  return out;
+}
+function findAggregate(text, name, lo, hi) {
+  const re = new RegExp('\\b(struct|class|union|enum)\\s+' + name + '\\b[^;{()]*\\{', 'g');
+  re.lastIndex = lo;
+  const m = re.exec(text);
+  if (!m || m.index >= hi) return null;
+  const open = m.index + m[0].length - 1;
+  let end = matchClose(text, open);
+  const semi = text.indexOf(';', end);
+  if (semi > 0) end = semi;
+  return [text.lastIndexOf('\n', m.index) + 1, end + 1];
+}
+function locateC(text, d) {
+  let name = d.c;
+  if (!name || /^anon/.test(name)) return null;
+  if (d.kind === 'type') return findAggregate(text, name, 0, text.length);
+  if (d.kind !== 'func') {
+    const m = new RegExp('^[^\\n]*\\b' + name.replace(/\W/g, '') + '\\b[^\\n]*$', 'm').exec(text);
+    return m ? [m.index, m.index + m[0].length] : null;
+  }
+  // "ns::Class<T>::method(args) const" -> ["ns", "Class", "method"]
+  let base = name;
+  const p = base.indexOf('(');
+  if (p > 0) base = base.slice(0, p);
+  base = stripTemplateArgs(base).replace(/\s+/g, '');
+  if (base.startsWith('operator') || base.includes('::operator')) {
+    const i = base.lastIndexOf('operator');
+    base = base.slice(0, i).replace(/::$/, '') + (i > 0 ? '::' : '') + 'operator\\s*' + base.slice(i + 8).replace(/\W/g, m => '\\' + m);
+    const parts = base.split('::');
+    return findIn(text, parts.slice(0, -1), parts.at(-1), true);
+  }
+  const parts = base.split('::').filter(Boolean);
+  return findIn(text, parts.slice(0, -1), parts.at(-1), false);
+}
+function findIn(text, scopes, fn, raw) {
+  const esc2 = s => raw ? s : s.replace(/[^\w~]/g, m => '\\' + m);
+  if (scopes.length) {
+    // Out of the class: Class::fn(...) { or ns::Class::fn
+    const q = scopes.at(-1) + '(?:<[^>]*>)?\\s*::\\s*' + esc2(fn);
+    const r = findFuncDefRaw(text, q, 0, text.length);
+    if (r) return r;
+    // Inside the class body.
+    const agg = findAggregate(text, scopes.at(-1), 0, text.length);
+    if (agg) {
+      const inner = findFuncDefRaw(text, esc2(fn), agg[0], agg[1]);
+      if (inner) return inner;
+    }
+  }
+  return findFuncDefRaw(text, esc2(fn), 0, text.length);
+}
+function findFuncDefRaw(text, pat, lo, hi) {
+  const re = new RegExp('(^|[^\\w.>~])(' + pat + ')\\s*\\(', 'g');
+  return findFuncDefRe(text, re, lo, hi);
+}
+function findFuncDefRe(text, re, lo, hi) {
+  re.lastIndex = lo;
+  let m;
+  while ((m = re.exec(text)) && m.index < hi) {
+    const at = m.index + m[1].length;
+    const lineStart = text.lastIndexOf('\n', at) + 1;
+    const before = text.slice(lineStart, at);
+    if (/[=;]|\breturn\b|\bif\b|\bwhile\b|\bfor\b/.test(before)) continue;
+    const close = matchClose(text, m.index + m[0].length - 1);
+    let k = close + 1;
+    while (k < text.length) {
+      const ch = text[k];
+      if (ch === '{' || ch === ';') break;
+      if (ch === '(') { k = matchClose(text, k) + 1; continue; }
+      if (!/[\s\w:,&*<>\[\]\-]/.test(ch)) break;
+      k++;
+    }
+    if (text[k] !== '{') { re.lastIndex = m.index + m[0].length; continue; }
+    const end = matchClose(text, k);
+    let from = lineStart;
+    for (;;) {
+      const pe = from - 1; if (pe <= 0) break;
+      const ps = text.lastIndexOf('\n', pe - 1) + 1;
+      const prev = text.slice(ps, pe).trim();
+      if (!prev || /[;{}:]$|\*\/$|^\/\/|^#/.test(prev)) break;
+      from = ps;
+    }
+    return [from, end + 1];
+  }
+  return null;
+}
+
+// ---- UI ---------------------------------------------------------------
+
+function selectRows(el, from, to) {
+  el.querySelectorAll('tr.sel').forEach(r => r.classList.remove('sel'));
+  if (from == null) return;
+  for (let i = from; i <= to; i++) { const r = $(el.id + '-' + i); if (r) r.classList.add('sel'); }
+  const first = $(el.id + '-' + from);
+  if (first) el.scrollTop = first.offsetTop - 40;
+}
+
+function selectDecl(i, fromGo) {
+  const res = state.res; if (!res) return;
+  state.sel = i;
+  document.querySelectorAll('#decls div').forEach(d => d.classList.toggle('sel', +d.dataset.i === i));
+  const d = res.decls[i];
+  if (!d) return;
+  selectRows($('go'), d.start, d.end);
+  const span = locateC(res.source, d);
+  if (span) selectRows($('src'), lineOf(res.source, span[0]), lineOf(res.source, span[1] - 1));
+  else selectRows($('src'), null);
+  $('srcName').textContent = (state.scratch ? 'scratch' : res.path.replace(/^.*\/src\/cmd\/cc\//, '')) + (span ? '' : d.c ? `  (no match for ${d.c})` : '');
+  const sd = document.querySelector('#decls div.sel');
+  if (sd) sd.scrollIntoView({ block: 'nearest' });
+}
+
+function renderDecls() {
+  const res = state.res, f = $('filter').value.toLowerCase();
+  if (!res || !res.decls) { $('decls').innerHTML = ''; return; }
+  $('decls').innerHTML = res.decls.map((d, i) => {
+    if (f && !(d.go.toLowerCase().includes(f) || (d.c || '').toLowerCase().includes(f))) return '';
+    const changed = [...state.changed].some(l => l + 1 >= d.start && l + 1 <= d.end);
+    const c = d.c && d.c !== d.go ? `<small>${esc(d.c)}</small>` : '';
+    return `<div data-i="${i}" class="${i === state.sel ? 'sel ' : ''}${changed ? 'changed' : ''}" title="${esc(d.go)}"><span class="kind">${d.kind}</span> ${esc(d.go)}${c}</div>`;
+  }).join('');
+}
+
+function render() {
+  const res = state.res;
+  const banner = [];
+  if (res.build) banner.push('cmd/cc failed to build:\n' + res.build.trim());
+  if (res.stderr) banner.push('cc:\n' + res.stderr.trim());
+  if (res.parseErr) banner.push('go/parser: ' + res.parseErr);
+  $('banner').style.display = banner.length ? 'block' : 'none';
+  $('banner').textContent = banner.join('\n\n');
+
+  const marks = $('marks').checked;
+  state.changed = addedLines(res.prev, res.go || '');
+  if (!state.scratch) renderCode($('src'), res.source || '', res.lang, false);
+  renderCode($('go'), res.go || '', 'go', marks, state.changed);
+  const st = (res.stats || []).map(s => `${s.name} <b>${s.n}</b>`).join(' · ');
+  $('meta').innerHTML = `${esc(res.rev || '')} · cc built ${res.buildMs} ms · translated ${res.transMs} ms`;
+  $('goInfo').innerHTML = st + (res.prev ? ` · <span style="color:var(--add-bar)">${state.changed.size} lines changed</span> since the last different output` : '');
+  $('srcName').textContent = state.scratch ? 'scratch' : (res.path || '').replace(/^.*\/src\/cmd\/cc\//, '');
+  renderDecls();
+  if (state.sel >= 0 && res.decls && res.decls[state.sel]) selectDecl(state.sel);
+}
+
+async function translate() {
+  if (!state.scratch && !state.path) return;
+  $('loading').style.display = 'block';
+  const keepSel = state.res && state.res.decls && state.res.decls[state.sel] ? state.res.decls[state.sel].go : null;
+  const goTop = $('go').scrollTop, srcTop = $('src').scrollTop;
+  try {
+    const body = { path: state.path };
+    if (state.scratch) { body.source = $('scratch').value || ' '; body.lang = $('lang').value; }
+    const r = await fetch('/api/translate', { method: 'POST', body: JSON.stringify(body) });
+    if (!r.ok) throw new Error(await r.text());
+    const res = await r.json();
+    state.res = res;
+    state.sel = keepSel && res.decls ? res.decls.findIndex(d => d.go === keepSel) : -1;
+    render();
+    if (state.sel < 0) { $('go').scrollTop = goTop; $('src').scrollTop = srcTop; }
+  } catch (e) {
+    $('banner').style.display = 'block';
+    $('banner').textContent = String(e);
+  } finally {
+    $('loading').style.display = 'none';
+  }
+}
+
+function saveHash() {
+  const p = new URLSearchParams();
+  if (state.scratch) p.set('scratch', '1'); else p.set('file', state.path);
+  history.replaceState(null, '', '#' + p);
+}
+
+function setScratch(on) {
+  state.scratch = on;
+  $('scratchBtn').classList.toggle('on', on);
+  $('scratch').hidden = !on; $('src').hidden = on; $('lang').hidden = !on; $('file').disabled = on;
+  if (on && !$('scratch').value) $('scratch').value = ls.get('scratch', state.res ? state.res.source : '');
+  saveHash(); translate();
+}
+
+async function init() {
+  const groups = await (await fetch('/api/files')).json();
+  const sel = $('file');
+  for (const g of groups) {
+    if (!g.files || !g.files.length) continue;
+    const og = document.createElement('optgroup'); og.label = g.name;
+    for (const f of g.files) { const o = document.createElement('option'); o.value = f; o.textContent = f.split('/').pop(); og.appendChild(o); }
+    sel.appendChild(og);
+  }
+  const h = new URLSearchParams(location.hash.slice(1));
+  state.path = h.get('file') || ls.get('file', '') || (sel.options[0] && sel.options[0].value) || '';
+  if (![...sel.options].some(o => o.value === state.path) && sel.options[0]) state.path = sel.options[0].value;
+  sel.value = state.path;
+  $('lang').value = ls.get('lang', 'c');
+  $('marks').checked = ls.get('marks', '1') === '1';
+  $('outlineChk').checked = ls.get('outline', '1') === '1';
+  $('main').classList.toggle('hideout', !$('outlineChk').checked);
+  if (h.get('scratch')) setScratch(true); else { saveHash(); translate(); }
+}
+
+$('file').onchange = e => { state.path = e.target.value; state.sel = -1; ls.set('file', state.path); saveHash(); translate(); };
+$('refresh').onclick = translate;
+$('scratchBtn').onclick = () => setScratch(!state.scratch);
+$('lang').onchange = e => { ls.set('lang', e.target.value); translate(); };
+$('scratch').oninput = e => ls.set('scratch', e.target.value);
+$('marks').onchange = e => { ls.set('marks', e.target.checked ? '1' : '0'); if (state.res) render(); };
+$('outlineChk').onchange = e => { ls.set('outline', e.target.checked ? '1' : '0'); $('main').classList.toggle('hideout', !e.target.checked); };
+$('filter').oninput = renderDecls;
+$('decls').onclick = e => { const d = e.target.closest('div[data-i]'); if (d) selectDecl(+d.dataset.i); };
+$('go').onclick = e => {
+  const tr = e.target.closest('tr'); if (!tr || !state.res || !state.res.decls) return;
+  if (getSelection().toString()) return;
+  const line = +tr.id.split('-').pop();
+  const i = state.res.decls.findIndex(d => line >= d.start && line <= d.end);
+  if (i >= 0) selectDecl(i, true);
+};
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); translate(); return; }
+  if (e.target.matches('input, textarea, select')) return;
+  if (e.key === 'r' && !e.ctrlKey && !e.metaKey) translate();
+});
+$('scratch').addEventListener('keydown', e => {
+  if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertText', false, '\t'); }
+});
+window.addEventListener('hashchange', () => {
+  const f = new URLSearchParams(location.hash.slice(1)).get('file');
+  if (f && f !== state.path && !state.scratch) { state.path = f; state.sel = -1; $('file').value = f; translate(); }
+});
+init();
+</script>
+</body>
+</html>

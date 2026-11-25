@@ -68,6 +68,18 @@ func Walk(gd *base.Invocation, fn *ir.Func) {
 	for _, n := range fn.Dcl {
 		types.CalcSize(gd, n.Type())
 	}
+
+	// And, of C's, the types they are allocated as on the heap.
+	if gd.CObjects {
+		for _, n := range fn.Dcl {
+			ir.CObjType(gd, n.Type())
+		}
+		ir.VisitList(fn.Body, func(n ir.Node) {
+			if n.Op() == ir.ONEW {
+				ir.CObjType(gd, n.Type().Elem())
+			}
+		})
+	}
 }
 
 // walkRecv walks an ORECV node.
@@ -513,6 +525,9 @@ func analyzePreWalk(gd *base.Invocation, fn *ir.Func) *walkAnalysis {
 	ro := &ir.ReassignOracle{}
 	ro.Init(fn)
 	markWholeViews(gd, fn, ro)
+	if gd.Debug.UintptrSurvey != 0 {
+		surveyUintptr(gd, fn)
+	}
 	sv := make(map[ir.Node]ir.Node)
 	scs := make(map[*ir.Name]*types.Type)
 	ir.Visit(fn, func(n ir.Node) {

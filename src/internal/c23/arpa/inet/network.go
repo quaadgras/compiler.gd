@@ -48,7 +48,7 @@ func InetNetof(a uint32) uint32 {
 
 // InetMakeaddr is inet_makeaddr: it stores at sret the struct in_addr of
 // host in network net.
-func InetMakeaddr(sret Ptr, net, host uint32) {
+func InetMakeaddr(sret *c23.Void, net, host uint32) {
 	var a uint32
 	switch {
 	case net < 128:
@@ -60,13 +60,13 @@ func InetMakeaddr(sret Ptr, net, host uint32) {
 	default:
 		a = net | host
 	}
-	copy(c23.BytesAt(sret, 4), []byte{byte(a >> 24), byte(a >> 16), byte(a >> 8), byte(a)})
+	copy(c23.Writable(sret, 4), []byte{byte(a >> 24), byte(a >> 16), byte(a >> 8), byte(a)})
 }
 
 // InetNetwork is inet_network, as glibc's: up to four parts of a network
 // number (each decimal, octal or hex, at most 255), the last the least
 // significant byte; INADDR_NONE if cp is not one.
-func InetNetwork(cp Ptr) uint32 {
+func InetNetwork(cp *c23.Void) uint32 {
 	return inetNetwork(c23.GoString(cp))
 }
 
