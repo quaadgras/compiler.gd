@@ -793,6 +793,9 @@ func c23IntPtr(v uintptr) unsafe.Pointer {
 		// The program's own code and data, and what the runtime
 		// keeps for itself (rtmem.go).
 		addr = rtMemOwned(v)
+		for datap := &firstmoduledata; datap != nil && !addr; datap = datap.next {
+			addr = datap.text <= v && v < datap.etext
+		}
 	}
 	if addr {
 		cIntPtrs.Add(1)

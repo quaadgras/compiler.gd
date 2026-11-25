@@ -32,7 +32,7 @@ import (
 var rtMem struct {
 	n    atomic.Uint32
 	full atomic.Bool
-	r    [1 << 12]struct{ lo, hi atomic.Uintptr }
+	r    [1 << 13]struct{ lo, hi atomic.Uintptr }
 }
 
 // rtMemAdd says that the n bytes at p are the runtime's.
@@ -41,6 +41,20 @@ var rtMem struct {
 func rtMemAdd(p unsafe.Pointer, n uintptr) {
 	if p == nil || n == 0 {
 		return
+	}
+	// What the system gives next is mostly next to what it gave
+	// before: a range that the bytes begin or end at grows by them.
+	// (Two that meet stay two.)
+	lo, hi := uintptr(p), uintptr(p)+n
+	cnt := min(rtMem.n.Load(), uint32(len(rtMem.r)))
+	for i := uint32(0); i < cnt; i++ {
+		r := &rtMem.r[i]
+		if r.hi.Load() == lo && lo != 0 && r.hi.CompareAndSwap(lo, hi) {
+			return
+		}
+		if r.lo.Load() == hi && r.lo.CompareAndSwap(hi, lo) {
+			return
+		}
 	}
 	i := rtMem.n.Add(1) - 1
 	if i >= uint32(len(rtMem.r)) {
@@ -77,7 +91,7 @@ func rtMemRemove(p unsafe.Pointer, n uintptr) {
 }
 
 // rtMemOwned reports whether a is an address of memory that the runtime
-// keeps for itself, or of the program's own code and tables: not of an
+// keeps for itself, or of the program's own tables and data: not of an
 // object of the heap that is allocated, nor of a variable, which the
 // caller looked for first.
 func rtMemOwned(a uintptr) bool {
@@ -87,8 +101,10 @@ func rtMemOwned(a uintptr) bool {
 		// free.
 		return true
 	}
+	// (Not the program's code: the address of a function is a pointer
+	// that programs compare and pass on, and nothing is stored there.)
 	for datap := &firstmoduledata; datap != nil; datap = datap.next {
-		if datap.text <= a && a < datap.end || datap.minpc <= a && a < datap.maxpc {
+		if datap.etext <= a && a < datap.end {
 			return true
 		}
 	}

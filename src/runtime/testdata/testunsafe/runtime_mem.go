@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"runtime"
 	"unsafe"
 )
 
@@ -20,10 +19,11 @@ func ok()                    { fmt.Println("OK"); os.Exit(0) }
 var _ = vn
 
 func main() {
-	var ms runtime.MemStats
-	runtime.ReadMemStats(&ms)
-	u := uintptr(unsafe.Pointer(&victim)) &^ 0xfff
-	p := (*uintptr)(unsafe.Pointer(u - 4096*64))
-	fmt.Println(*p)
-	unsafeDone("read memory 64 pages before the data")
+	// What is 64 KB after a variable of the data: another variable,
+	// or what the runtime keeps between and after them.
+	u := uintptr(unsafe.Pointer(&victim)) + 1<<16
+	u ^= uintptr(vn)
+	p := (*uintptr)(unsafe.Pointer(u))
+	*p = 1
+	unsafeDone("stored 64 KB after a variable, through an integer")
 }
