@@ -37,8 +37,9 @@ memory (`runtime/checkptr.go`). A check that fails is a fatal error.
   An object is exposed when the program makes an integer of its address
   and keeps it: compiled code calls `runtime.exposeptr` where it converts
   a pointer to a `uintptr`, unless the integer only lives in an
-  expression that makes a pointer of it again, or the pointer is plainly
-  to a variable of the stack. The mark is a bit for the object, kept as
+  expression that makes a pointer of it again, or in a comparison, or
+  in a subtraction of one such integer from another, or the pointer is
+  plainly to a variable of the stack. The mark is a bit for the object, kept as
   the shared bit is. So `h := uintptr(unsafe.Pointer(p))` kept in a field
   and `(*T)(unsafe.Pointer(h))` later work, and `(*T)(unsafe.Pointer(h +
   64))` does if it is still in `p`'s object, and not if it is in the

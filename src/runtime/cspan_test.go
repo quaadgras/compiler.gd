@@ -474,3 +474,48 @@ func TestCSpanRace(t *testing.T) {
 		(*(**cLeaf)(unsafe.Add(p, w*8))).check(t, w)
 	}
 }
+
+var cHeaderGlobal [64]byte
+
+var cHeaderSink *[10]int
+
+// TestCSpanHeader checks what the compiled code is told of a pointer
+// once, for the checks of the pointers made of it (c23Header).
+func TestCSpanHeader(t *testing.T) {
+	// An object of C's: bounds as asked for, and its bits.
+	p := runtime.MallocC(40)
+	d, n, nc, b8, sh, bits := runtime.CHeader(unsafe.Add(p, 8))
+	if d != 8 || n != 40 || nc != 41 || sh != 3 {
+		t.Errorf("C: d=%d n=%d nc=%d sh=%d, want 8 40 41 3", d, n, nc, sh)
+	}
+	bit := func(off uintptr) bool {
+		w := (off + b8) >> sh
+		return *(*uint32)(unsafe.Pointer(bits + w/32*4))>>(w%32)&1 != 0
+	}
+	if bit(16) {
+		t.Errorf("C: a word of malloc's holds no pointer")
+	}
+	runtime.CScalars(unsafe.Add(p, 16), 8)
+	if !bit(16) || bit(8) || bit(24) {
+		t.Errorf("C: the bits do not follow a store of an integer")
+	}
+
+	// An object of Go's: its slot, and no conversion without a look.
+	g := new([10]int)
+	cHeaderSink = g
+	d, n, nc, _, _, _ = runtime.CHeader(unsafe.Pointer(&g[3]))
+	if d != 24 || n+1 < 80 || nc != 0 {
+		t.Errorf("Go: d=%d n=%d nc=%d", d, n, nc)
+	}
+
+	// The stack and the data: to their ends.
+	var local [16]byte
+	if d, n, nc, _, _, _ = runtime.CHeader(unsafe.Pointer(&local)); d != 0 || n < 16 || nc == 0 && n >= 4096 {
+		t.Errorf("stack: d=%d n=%d nc=%d", d, n, nc)
+	}
+	if _, n, _, _, _, _ = runtime.CHeader(unsafe.Pointer(&cHeaderGlobal[1])); n < 62 {
+		t.Errorf("data: n=%d", n)
+	}
+	runtime.KeepAlive(p)
+	runtime.KeepAlive(g)
+}

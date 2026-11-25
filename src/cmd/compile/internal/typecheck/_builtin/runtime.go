@@ -307,6 +307,7 @@ func asanwrite(addr, size uintptr)
 
 func checkptrAlignment(unsafe.Pointer, *byte, uintptr)
 func checkptrArithmetic(unsafe.Pointer, []unsafe.Pointer)
+func c23slow(unsafe.Pointer, unsafe.Pointer) bool
 func checkptrPartial(unsafe.Pointer)
 func checkptrView(unsafe.Pointer, *byte, uintptr)
 func exposeptr(unsafe.Pointer)

@@ -809,6 +809,107 @@ func c23Scalars(p unsafe.Pointer, n uintptr) {
 	cBitsSet(b, w, k, true)
 }
 
+// cConvMax is the size of the largest type that compiled code converts
+// a pointer to with no more than c23Header's word for it: what is that
+// far from the end of the stack, the data or the bss is in it whole.
+// (cmd/compile/internal/ssa's CConvMax.)
+const cConvMax = 4096
+
+// cNoBits is the bitmap of what is not C's, for c23Header: no word of it
+// holds no pointer.
+var cNoBits uint32
+
+// c23Header returns what does not change of where p points for as long
+// as what it points into is alive, for the checks and the stores that
+// compiled code makes through the pointers that are made of p
+// (cmd/compile/internal/ssa/cheaders.go): it is looked for once for p,
+// before a loop if p is from before it, and each check is then a
+// comparison in the compiled code, with the call it was for what the
+// comparison does not let through.
+//
+// A pointer q made of p is into what p points into, or to its end, if
+//
+//	uintptr(q) - uintptr(p) + d <= n
+//
+// which is so of nothing else. That is the object of the heap that p is
+// in, as far as it was asked for if it is one of C's; the goroutine's
+// stack from p on; or the section of data or bss that p is in. (The numbers
+// are relative to p, which the compiled code has: a stack that moves
+// takes p with it, and they stay as they are.) Of anything else, only
+// p itself is.
+//
+// A q that is converted to a pointer to a type of cConvMax bytes or
+// less, for which
+//
+//	uintptr(q) - uintptr(p) + d < nc
+//
+// needs no other check than that of its alignment (checkptrAlignmentC,
+// checkptrView): it is in an object of C's or at its end, or what the
+// type covers is in the stack, the data or the bss. nc is 0 for an
+// object of Go's, which has a type to look at.
+//
+// If p is in an object of C's, the bit of the word that q is at, which
+// says that the word holds no pointer, is bit w%32 of the uint32 at
+// bits + w/32*4, where
+//
+//	w = (uintptr(q) - uintptr(p) + d + b8) >> sh
+//
+// For what is not C's, that is a bit that is never set: its words may
+// all hold pointers.
+//
+//go:nosplit
+func c23Header(p unsafe.Pointer) (d, n, nc, b8, sh, bits uintptr) {
+	sh, bits = 63, uintptr(unsafe.Pointer(&cNoBits))
+	a := uintptr(p)
+	if gp := getg(); gp.stack.lo <= a && a < gp.stack.hi {
+		n = gp.stack.hi - a - 1
+		return 0, n, max(n+1, cConvMax) - cConvMax, 0, sh, bits
+	}
+	if s := spanOfHeap(a); s != nil {
+		if s.isUserArenaChunk {
+			return
+		}
+		i := s.objIndex(a)
+		base := s.base() + i*s.elemsize
+		if !s.spanclass.c() {
+			return a - base, s.elemsize - 1, 0, 0, sh, bits
+		}
+		b := s.cBitsOf()
+		if b == nil {
+			return
+		}
+		size := s.cSizeOf(i)
+		return a - base, size, size + 1, base - s.base(), 3, uintptr(unsafe.Pointer(b))
+	}
+	for _, datap := range activeModules() {
+		for _, r := range [...][2]uintptr{
+			{datap.data, datap.edata}, {datap.bss, datap.ebss},
+			{datap.noptrdata, datap.enoptrdata}, {datap.noptrbss, datap.enoptrbss},
+		} {
+			if r[0] <= a && a < r[1] {
+				n = r[1] - r[0] - 1
+				return a - r[0], n, max(n+1, cConvMax) - cConvMax, 0, sh, bits
+			}
+		}
+	}
+	return
+}
+
+// c23PointerSlot is for a store of a pointer at slot that compiled code
+// made itself, after it (c23Header): if something set the bit of the
+// word meanwhile, the word may hold a pointer all the same.
+//
+//go:nosplit
+func c23PointerSlot(slot unsafe.Pointer) {
+	cPointerSlot(uintptr(slot))
+}
+
+// c23slow reports whether a check of the pointer q, which is made of p,
+// is to be made by the runtime: compiled code calls it where it has
+// nothing of c23Header's for p, and the compiler makes of the call what
+// it knows.
+func c23slow(q, p unsafe.Pointer) bool { return true }
+
 // c23Malloc is malloc for C translated by cmd/cc (internal/c23): size
 // bytes, zeroed. If typ is not nil the object is for values of typ: its
 // words hold pointers where typ has them and nowhere else, until C

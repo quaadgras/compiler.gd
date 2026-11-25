@@ -175,6 +175,13 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 			return args[0]
 		},
 		all...)
+	// The check of pointer arithmetic that walk asks for where C's
+	// pointers are checked: what ssa's cheaders knows of it.
+	add("runtime", "c23slow",
+		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+			return s.newValue3I(ssa.OpC23Slow, types.Types[types.TBOOL], ssa.CSlowArith, args[0], args[1], s.mem())
+		},
+		all...)
 	add("runtime", "KeepAlive",
 		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 			data := s.newValue1(ssa.OpIData, s.f.Config.Types.BytePtr, args[0])

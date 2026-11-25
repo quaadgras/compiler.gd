@@ -612,6 +612,15 @@ var genericOps = []opData{
 	{name: "VarDef", argLength: 1, aux: "Sym", typ: "Mem", symEffect: "None", zeroWidth: true}, // aux is a *ir.Name of a variable that is about to be initialized.  arg0=mem, returns mem
 	// TODO: what's the difference between VarLive and KeepAlive?
 	{name: "VarLive", argLength: 1, aux: "Sym", symEffect: "Read", zeroWidth: true}, // aux is a *ir.Name of a variable that must be kept live.  arg0=mem, returns mem
+	// gd: C23Slow reports whether a check of arg0, a pointer made of the
+	// pointer arg1, is to be made by the runtime: before the store or
+	// the call that it is for. The pass "c headers" makes of it a
+	// comparison with what runtime.c23Header says of arg1, or true.
+	// auxint is the check (the cSlow constants), then the mask of the
+	// alignment that arg0 is to have <<8 and the size that it is
+	// converted to <<16.
+	{name: "C23Slow", argLength: 3, aux: "Int64", typ: "Bool"}, // arg2=mem
+
 	{name: "KeepAlive", argLength: 2, typ: "Mem", zeroWidth: true},                  // arg[0] is a value that must be kept alive until this mark.  arg[1]=mem, returns mem
 
 	// InlMark marks the start of an inlined function body. Its AuxInt field

@@ -18,6 +18,7 @@ type DebugFlags struct {
 	AlignHot              int    `help:"enable hot block alignment (currently requires -pgo)" concurrent:"ok"`
 	Append                int    `help:"print information about append compilation"`
 	AstDump               string `help:"for specified function/method, dump AST/IR at interesting points in compilation, to file pkg.func.ast. Use leading ~ for regular expression match."`
+	CHeaders              int    `help:"with 1, leave the checks of C's pointers and its stores of pointers to the runtime, each a call" concurrent:"ok"`
 	Checkptr              int    `help:"instrument unsafe pointer conversions\n0: instrumentation disabled\n1: conversions involving unsafe.Pointer are instrumented\n2: conversions to unsafe.Pointer force heap allocation" concurrent:"ok"`
 	Closure               int    `help:"print information about closure compilation"`
 	UnsafeWhole           int    `help:"report conversions that make a partial view of a string, slice or interface, instead of failing at run time\n1: report them\n2: also report those whose source is not known"`

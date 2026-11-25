@@ -115,10 +115,50 @@ func c0_name(c c23.UInt) *c23.Char {
   compiled without the compiler's checks, as the runtime is.
 - **Speed.** On that benchmark (a sorted vector of structs, a tree, a
   hash map with string keys, byte strings), against `gcc -O2`: 0.85 to
-  1.3 times with `-d=checkptr=0`. With the checks as they are today it
-  is 1 to 6.5 times: each arithmetic and conversion is a call into the
-  runtime. The typed code, which is most of C and C++, is at Go's speed
-  either way; making the checks of the rest cheap is the compiler's work.
+  1.3 times with `-d=checkptr=0`. With the checks it is 1.1 to 1.8
+  times (the vector 1.6, the strings 1.3, the tree 1.1, the hash map
+  1.8): most of them are a comparison in the compiled code (below,
+  "The checks in the compiled code"), and a call into the runtime only
+  for what the comparison does not let through.
+
+### The checks in the compiled code
+
+What a pointer points into does not change while that is alive: the
+bounds of its object, and where the bits of the object's words are if
+it is one of C's (below). So the runtime is asked once for a pointer,
+`runtime.c23Header`, and what it says holds for every pointer that is
+made of that one by an offset or an index
+(`cmd/compile/internal/ssa/cheaders.go`):
+
+- **Roots.** The compiler takes each checked pointer back to the one it
+  is made of, its root: through offsets, indexes and nil checks, and
+  through a phi whose arguments all have one root, which a pointer that
+  a loop steps is. Any other phi is a root of its own.
+- **Where it is looked up.** Before the outermost loop that the root is
+  from before, where it is checked inside the loop; otherwise where it
+  is first checked, if more checks follow. A root that is checked once
+  is not looked up: its check is the runtime's call, as before. A root
+  that is the address of a variable of the frame needs no lookup: its
+  size is known.
+- **The checks.** A pointer made by arithmetic is in its root's object,
+  or at its end. A conversion to `*T` is to a pointer in an object of
+  C's, or `T` is in the stack, the data or the bss whole (for types of
+  4096 bytes or less), and the pointer is aligned. A store of a pointer
+  finds the word's bit, and is a plain store if the word may hold a
+  pointer already, with the bit looked at again after it. A store of
+  integers in memory that has no type yet (below) is a look at the bit,
+  and a call only if it is clear.
+- **What fails a comparison** is the runtime's call, which makes the
+  whole check and says what it finds; the comparison only lets through
+  what the call would have.
+
+`-d=cheaders=1` leaves every check to the runtime, as `-N` and 32-bit
+targets do. `TestChecks` in cmd/cc runs C whose pointers leave their
+objects both ways.
+
+What a comparison of two pointers, or one less the other, makes of
+them is not an integer that is kept: their objects are not exposed for
+it (`unsafe.md`), which was a call for each `p < end` and `p - a`.
 
 Where C and Go's rules for pointers disagree:
 
@@ -216,8 +256,10 @@ How a word comes to be one or the other:
 - **A store of what has no pointer, in memory that has no type yet,**
   is the first to make something of it, and has a call to
   `runtime.c23Scalars` before it: the words that it writes in, whole
-  or in part, hold no pointer from then on. The compiler puts the call
-  only where it knows the pointer
+  or in part, hold no pointer from then on. With the checks in the
+  compiled code (above), a store in one word looks at the word's bit
+  first, and calls only if it is clear. The compiler does this only
+  where it knows the pointer
   (`cmd/compile/internal/ssa/cscalars.go`): it is the result of
   `malloc`, `calloc` or `realloc` that was given no type
   (`void *p = malloc(n)`) in the same function, after inlining, or is
@@ -227,10 +269,11 @@ How a word comes to be one or the other:
   loaded from memory, or into `(T *)malloc(n)`, whose words are T's
   already, is the plain store it was. Whether something was stored
   there since is not followed, so every such store in the function has
-  the call, which returns when it finds the bit set. Stores that
-  follow one another to the fields of one struct, with no word between
-  them, share one call. A store of a byte has none: C copies anything
-  a byte at a time, a pointer too.
+  the look at the bit, or the call, which returns when it finds the bit
+  set. Where the checks are the runtime's, stores that follow one
+  another to the fields of one struct, with no word between them,
+  share one call. A store of a byte has none: C copies anything a byte
+  at a time, a pointer too.
 - **A bit is set** before the words are written, and what they held is
   the collector's to see first, as for any pointer that is written
   over while it marks.
@@ -239,7 +282,8 @@ How a word comes to be one or the other:
   for them. (The call before a store of integers sets its bits without
   it: the store comes after the call, so a copy of those words
   meanwhile, which C does not define, may take a pointer that is about
-  to be written over for an integer.) A copy from one span of C's to another does, since it reads
+  to be written over for an integer.) A copy from one span of C's to
+  another does, since it reads
   bits and the words they are for together. If the sequence moved while
   it copied, it takes every word it wrote for a possible pointer.
 - **Go that is not C's** stores pointers with no call. Where such a
@@ -247,18 +291,13 @@ How a word comes to be one or the other:
   pointers, the conversion's check clears the bits of those words.
 
 What it costs, on the benchmark above, against the same translation
-with malloc as Go objects: the vector and the strings 0.7 times, the
-tree 1.2, the hash map 1.1. A store of a pointer through a pointer is
-a call that finds the span of the word; an object of C's is scanned by
-itself, not with its span; and each check of a pointer finds the span
-once, as before. (A store of a pointer in a variable is no call, and
-neither is one in the array of pointers that a check of arithmetic is
-given, which was one at first: that was a third of the vector's and
-the strings' time.) The call before a store of an integer in memory
-with no type is about 5 ns: a loop that only stores longs through such
-a pointer takes 14 ns a store, and 9 through a `long *` that malloc
-was converted to, with the checks of the pointer; allocating a struct
-and filling in seven fields, three calls, takes 1.2 to 1.3 times.
+with malloc as Go objects, when the checks were calls into the runtime:
+the vector and the strings 0.7 times, the tree 1.2, the hash map 1.1.
+An object of C's is scanned by itself, not with its span. A store of
+integers in memory with no type, the first time, is a call of about
+5 ns; after that a look at a bit: a loop that only stores longs through
+such a pointer takes 1.9 ns a store, and 0.9 through a `long *` that
+malloc was converted to, with the checks of the pointer.
 
 What this does not do:
 

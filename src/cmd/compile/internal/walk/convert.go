@@ -637,6 +637,28 @@ func walkCheckPtrArithmetic(gd *base.Invocation, n *ir.ConvExpr, init *ir.Nodes)
 	slice := typecheck.MakeDotArgs(gd, gd.Pos, types.NewSlice(types.Types[types.TUNSAFEPTR]), originals)
 	slice.SetEsc(ir.EscNone)
 
+	if len(originals) > 0 && gd.CObjects && gd.Flag.N == 0 && gd.Debug.CHeaders == 0 && types.PtrSize == 8 {
+		// Where C's pointers are checked, the compiled code may know
+		// what the first of the originals points into, and that
+		// the result is in it (ssa's cheaders): the runtime is
+		// asked only if it does not.
+		//
+		//	if c23slow(cheap, original) {
+		//		checkptrArithmetic(cheap, originals)
+		//	}
+		first := originals[0]
+		if c, ok := first.(*ir.ConvExpr); ok {
+			first = c.X
+		}
+		cond := mkcall(gd, "c23slow", types.Types[types.TBOOL], init, typecheck.ConvNop(gd, cheap, types.Types[types.TUNSAFEPTR]), typecheck.ConvNop(gd, first, types.Types[types.TUNSAFEPTR]))
+		var body ir.Nodes
+		body.Append(mkcall(gd, "checkptrArithmetic", nil, &body, typecheck.ConvNop(gd, cheap, types.Types[types.TUNSAFEPTR]), slice))
+		nif := ir.NewIfStmt(gd, gd.Pos, cond, body, nil)
+		nif.Likely = false
+		init.Append(typecheck.Stmt(gd, nif))
+		return cheap
+	}
+
 	init.Append(mkcall(gd, "checkptrArithmetic", nil, init, typecheck.ConvNop(gd, cheap, types.Types[types.TUNSAFEPTR]), slice))
 	// TODO(khr): Mark backing store of slice as dead. This will allow us to reuse
 	// the backing store for multiple calls to checkptrArithmetic.

@@ -1270,6 +1270,49 @@ func ShouldCheckPtr(gd *base.Invocation, fn *Func, level int) bool {
 	return true
 }
 
+// UnkeptAddrs returns the operands of n that are conversions of a pointer
+// to an integer which is not kept, so that the object it points into is
+// no more exposed for it (runtime.exposeptr) and shared with nothing:
+// the operands of a comparison, whose result is not an address, and the
+// two of a subtraction of one address from another, whose result is a
+// distance.
+func UnkeptAddrs(n *BinaryExpr) []*ConvExpr {
+	x, y := AddrConv(n.X), AddrConv(n.Y)
+	var cs []*ConvExpr
+	switch n.Op() {
+	case OEQ, ONE, OLT, OLE, OGT, OGE:
+		if x != nil {
+			cs = append(cs, x)
+		}
+		if y != nil {
+			cs = append(cs, y)
+		}
+	case OSUB:
+		if x != nil && y != nil {
+			cs = append(cs, x, y)
+		}
+	}
+	return cs
+}
+
+// AddrConv returns the conversion of a pointer to an integer that x is,
+// or is converted from to another integer as wide: uintptr(p), and
+// int64(uintptr(p)) where a pointer has 64 bits. It returns nil for
+// anything else.
+func AddrConv(x Node) *ConvExpr {
+	for x.Op() == OCONV || x.Op() == OCONVNOP {
+		c := x.(*ConvExpr)
+		if c.Type().IsUintptr() && c.X.Type().IsUnsafePtr() {
+			return c
+		}
+		if !c.Type().IsInteger() || !c.X.Type().IsInteger() || c.Type().Size() != c.X.Type().Size() || c.Type().Size() != int64(types.PtrSize) {
+			return nil
+		}
+		x = c.X
+	}
+	return nil
+}
+
 // UncheckedPkg reports whether the package with the given path is
 // compiled without -d=checkptr: the runtime's packages; the runtime of C
 // (internal/c23), which keeps pointers that the checks would not allow

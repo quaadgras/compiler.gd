@@ -27,10 +27,150 @@ import (
 //
 // What is stored is of a type that has no pointer, and that is not one
 // of bytes alone: C copies anything a byte at a time, a pointer too.
+//
+// Where the checks of C's pointers are made in the compiled code
+// (Config.CHeaders), each such store is a branch on a C23Slow, whose
+// pass (cheaders) makes of it a look at the word's bit: the call is
+// made only if the bit is not set yet. Elsewhere every such store has
+// the call (cscalarsCalls).
 func cscalars(f *Func) {
 	if !f.Config.gd.CStores {
 		return
 	}
+	if !f.Config.CHeaders() {
+		cscalarsCalls(f)
+		return
+	}
+	root := cRoots(f)
+	// isRaw reports whether r, a root, is malloc's with no type: one of
+	// its results, or a phi of nil and of such roots, one at least.
+	memo := map[*Value]int8{} // 1 if raw, 2 if not or being looked at
+	var isRaw func(r *Value) bool
+	isRaw = func(r *Value) bool {
+		if cRawResult(r) {
+			return true
+		}
+		if r.Op != OpPhi {
+			return false
+		}
+		if m := memo[r]; m != 0 {
+			return m == 1
+		}
+		memo[r] = 2
+		grounded := false
+		for _, a := range r.Args {
+			ar := root(a)
+			if ar == nil || ar.Op == OpConstNil || ar == r {
+				continue
+			}
+			if !isRaw(ar) {
+				return false
+			}
+			grounded = true
+		}
+		if grounded {
+			memo[r] = 1
+		}
+		return grounded
+	}
+	var stores []*Value
+	for _, b := range f.Blocks {
+		for _, v := range b.Values {
+			if cScalarStore(v) == 0 {
+				continue
+			}
+			if r := root(v.Args[0]); r != nil && isRaw(r) {
+				stores = append(stores, v)
+			}
+		}
+	}
+	for _, v := range stores {
+		cScalarSplit(f, v)
+	}
+}
+
+// cScalarSplit puts a branch before v, a store of what holds no pointer
+// through a pointer into malloc's memory with no type: on a C23Slow,
+// to a call of runtime.c23Scalars for the bytes that v stores. v, and
+// everything of its block that is made of it, goes to the block after.
+func cScalarSplit(f *Func, v *Value) {
+	b, pos, ptr, mem := v.Block, v.Pos, v.Args[0], v.MemoryArg()
+	size := cScalarStore(v)
+	align := v.Aux.(*types.Type).Alignment()
+
+	// What is made of v, in b.
+	moved := map[*Value]bool{v: true}
+	users := map[*Value][]*Value{}
+	for _, x := range b.Values {
+		if x.Op == OpPhi {
+			continue
+		}
+		for _, a := range x.Args {
+			if a.Block == b {
+				users[a] = append(users[a], x)
+			}
+		}
+	}
+	for work := []*Value{v}; len(work) > 0; {
+		x := work[len(work)-1]
+		work = work[:len(work)-1]
+		for _, u := range users[x] {
+			if !moved[u] {
+				moved[u] = true
+				work = append(work, u)
+			}
+		}
+	}
+
+	after := f.NewBlock(b.Kind)
+	for _, c := range b.ControlValues() {
+		after.AddControl(c)
+	}
+	after.Likely = b.Likely
+	after.AuxInt, after.Aux = b.AuxInt, b.Aux
+	for i, e := range b.Succs {
+		after.Succs = append(after.Succs, e)
+		e.b.Preds[e.i] = Edge{after, i}
+	}
+	b.Succs = b.Succs[:0]
+	b.ResetControls()
+	b.AuxInt, b.Aux = 0, nil
+	keep := b.Values[:0]
+	for _, x := range b.Values {
+		if moved[x] {
+			x.Block = after
+			after.Values = append(after.Values, x)
+		} else {
+			keep = append(keep, x)
+		}
+	}
+	for i := len(keep); i < len(b.Values); i++ {
+		b.Values[i] = nil
+	}
+	b.Values = keep
+
+	uintptrT := f.Config.Types.Uintptr
+	slow := b.NewValue3I(pos, OpC23Slow, f.Config.Types.Bool, CSlowAux(CSlowScalar, align-1, size), ptr, ptr, mem)
+	b.Kind = BlockIf
+	b.SetControl(slow)
+	b.Likely = BranchUnlikely
+	call := f.NewBlock(BlockPlain)
+	b.AddEdgeTo(call)
+	b.AddEdgeTo(after)
+	argTypes := []*types.Type{types.Types[types.TUNSAFEPTR], uintptrT}
+	aux := StaticAuxCall(f.fe.Syslook("c23Scalars"), f.ABIDefault.ABIAnalyzeTypes(argTypes, nil))
+	c := call.NewValue0A(pos, OpStaticLECall, aux.LateExpansionResultType(), aux)
+	c.AddArgs(ptr, f.ConstInt64(uintptrT, size), mem)
+	cmem := call.NewValue1I(pos, OpSelectN, types.TypeMem, 0, c)
+	call.AddEdgeTo(after)
+	phi := after.NewValue2(pos, OpPhi, types.TypeMem, mem, cmem)
+	v.SetArg(len(v.Args)-1, phi)
+}
+
+// cscalarsCalls is cscalars where the checks of C's pointers are calls:
+// a call before every such store, one for stores that follow one
+// another to the fields of a struct.
+func cscalarsCalls(f *Func) {
 	// The pointers that are made of other pointers, and of which.
 	derived := func(v *Value) bool {
 		switch v.Op {

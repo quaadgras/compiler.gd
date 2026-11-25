@@ -156,6 +156,10 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).
 		C23Scalars = typecheck.LookupRuntimeFunc(gd, "c23Scalars")
 	ir.Syms(gd).
+		C23Header = typecheck.LookupRuntimeFunc(gd, "c23Header")
+	ir.Syms(gd).
+		C23PointerSlot = typecheck.LookupRuntimeFunc(gd, "c23PointerSlot")
+	ir.Syms(gd).
 		CheckPtrView = typecheck.LookupRuntimeFunc(gd, "checkptrView")
 	ir.Syms(gd).
 		Deferproc = typecheck.LookupRuntimeFunc(gd, "deferproc")
@@ -1220,19 +1224,67 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 		// (ir.CObjType): what it is converted to may not fit there.
 		fn = ir.Syms(s.gd).CheckPtrAlignmentC
 	}
-	if count == nil {
-		count = s.constInt(types.Types[types.TUINTPTR], 1)
+	call := func() {
+		count := count
+		if count == nil {
+			count = s.constInt(types.Types[types.TUINTPTR], 1)
+		}
+		if count.Type.Size() != s.config.PtrSize {
+			s.Fatalf("expected count fit to a uintptr size, have: %d, want: %d", count.Type.Size(), s.config.PtrSize)
+		}
+		var rtype *ssa.Value
+		if rtypeExpr != nil {
+			rtype = s.expr(rtypeExpr)
+		} else {
+			rtype = s.reflectType(elem)
+		}
+		s.rtcall(fn, true, nil, v, rtype, count)
 	}
-	if count.Type.Size() != s.config.PtrSize {
-		s.Fatalf("expected count fit to a uintptr size, have: %d, want: %d", count.Type.Size(), s.config.PtrSize)
+	if c := fn == ir.Syms(s.gd).CheckPtrAlignmentC || fn == ir.Syms(s.gd).CheckPtrView && s.gd.CObjects; c && count == nil && size <= ssa.CConvMax && s.cHeaders() {
+		// What the pointer points into may be known by now, and
+		// that it is in it (ssa's cheaders).
+		var mask int64
+		if elem.HasPointers() {
+			mask = min(elem.Alignment(), int64(s.config.PtrSize)) - 1
+		}
+		s.cSlow(s.newValue3I(ssa.OpC23Slow, types.Types[types.TBOOL], ssa.CSlowAux(ssa.CSlowConv, mask, size), v, v, s.mem()), call, nil)
+		return
 	}
-	var rtype *ssa.Value
-	if rtypeExpr != nil {
-		rtype = s.expr(rtypeExpr)
-	} else {
-		rtype = s.reflectType(elem)
+	call()
+}
+
+// cHeaders reports whether the checks of C's pointers are made in the
+// compiled code where it knows what they point into (ssa's cheaders).
+func (s *state) cHeaders() bool {
+	return s.config.CHeaders()
+}
+
+// cSlow branches on slow, an ssa.OpC23Slow: if it is true the check is
+// the runtime's, which call makes, and otherwise it is what fast does,
+// if anything.
+func (s *state) cSlow(slow *ssa.Value, call, fast func()) {
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(slow)
+	b.Likely = ssa.BranchUnlikely
+	bSlow := s.f.NewBlock(ssa.BlockPlain)
+	bFast := s.f.NewBlock(ssa.BlockPlain)
+	bEnd := s.f.NewBlock(ssa.BlockPlain)
+	b.AddEdgeTo(bSlow)
+	b.AddEdgeTo(bFast)
+	s.startBlock(bSlow)
+	call()
+	if b := s.endBlock(); b != nil {
+		b.AddEdgeTo(bEnd)
 	}
-	s.rtcall(fn, true, nil, v, rtype, count)
+	s.startBlock(bFast)
+	if fast != nil {
+		fast()
+	}
+	if b := s.endBlock(); b != nil {
+		b.AddEdgeTo(bEnd)
+	}
+	s.startBlock(bEnd)
 }
 
 // reflectType returns an SSA value representing a pointer to typ's
@@ -7516,8 +7568,24 @@ func (s *state) storeTypePtrs(t *types.Type, left, right *ssa.Value) {
 		}
 		if s.cStore(left) && right.Op != ssa.OpConstNil {
 			// The word may be one of C's that holds no pointer
-			// (runtime/cspan.go).
-			s.rtcall(ir.Syms(s.gd).C23StorePtr, true, nil, left, right)
+			// (runtime/cspan.go), which the runtime is to
+			// know, unless the bit of the word is at hand
+			// and says that it may hold one (ssa's cheaders):
+			// then it is stored here, and the bit is looked at
+			// again after, for a store of an integer meanwhile.
+			if !s.cHeaders() {
+				s.rtcall(ir.Syms(s.gd).C23StorePtr, true, nil, left, right)
+				break
+			}
+			boolT := types.Types[types.TBOOL]
+			s.cSlow(s.newValue3I(ssa.OpC23Slow, boolT, ssa.CSlowStore, left, left, s.mem()), func() {
+				s.rtcall(ir.Syms(s.gd).C23StorePtr, true, nil, left, right)
+			}, func() {
+				s.store(t, left, right)
+				s.cSlow(s.newValue3I(ssa.OpC23Slow, boolT, ssa.CSlowStored, left, left, s.mem()), func() {
+					s.rtcall(ir.Syms(s.gd).C23PointerSlot, true, nil, left)
+				}, nil)
+			})
 			break
 		}
 		s.store(t, left, right)
@@ -10030,6 +10098,8 @@ func (e *ssafn) Syslook(name string) *obj.LSym {
 		return ir.Syms(e.gd).SliceHdrNotInHeap
 	case "c23Scalars":
 		return ir.Syms(e.gd).C23Scalars
+	case "c23Header":
+		return ir.Syms(e.gd).C23Header
 	}
 	e.Fatalf(src.NoXPos, "unknown Syslook func %v", name)
 	return nil

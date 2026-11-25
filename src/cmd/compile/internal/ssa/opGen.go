@@ -7108,6 +7108,7 @@ const (
 	OpUnknown
 	OpVarDef
 	OpVarLive
+	OpC23Slow
 	OpKeepAlive
 	OpInlMark
 	OpInt64Make
@@ -107448,6 +107449,12 @@ var opcodeTable = [...]opInfo{
 		zeroWidth: true,
 		symEffect: SymRead,
 		generic:   true,
+	},
+	{
+		name:    "C23Slow",
+		auxType: auxInt64,
+		argLen:  3,
+		generic: true,
 	},
 	{
 		name:      "KeepAlive",

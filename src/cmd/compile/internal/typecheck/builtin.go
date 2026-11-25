@@ -251,6 +251,7 @@ var runtimeDecls = [...]struct {
 	{"asanwrite", funcTag, 165},
 	{"checkptrAlignment", funcTag, 167},
 	{"checkptrArithmetic", funcTag, 169},
+	{"c23slow", funcTag, 150},
 	{"checkptrPartial", funcTag, 123},
 	{"checkptrView", funcTag, 167},
 	{"exposeptr", funcTag, 123},

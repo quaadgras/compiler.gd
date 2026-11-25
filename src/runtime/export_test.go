@@ -2277,6 +2277,8 @@ func CStorePtr(slot *unsafe.Pointer, val unsafe.Pointer) { c23StorePtr(slot, val
 
 func CScalars(p unsafe.Pointer, n uintptr) { c23Scalars(p, n) }
 
+func CHeader(p unsafe.Pointer) (d, n, nc, b8, sh, bits uintptr) { return c23Header(p) }
+
 // CScalar reports whether the word at p, in an object of C's, is known to
 // hold no pointer.
 func CScalar(p unsafe.Pointer) bool {
