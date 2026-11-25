@@ -7401,7 +7401,21 @@ func (s *state) rawStoreType(t *types.Type, left, right *ssa.Value, skip skipMas
 // memory that C allocates, which the runtime is to know of
 // (base.Invocation.CStores): dst is not a variable's address.
 func (s *state) cStore(dst *ssa.Value) bool {
-	return s.gd.CStores && !ssa.IsStackAddr(dst) && !ssa.IsGlobalAddr(dst)
+	if !s.gd.CStores {
+		return false
+	}
+	// (Through the nil checks too, which an element of an array that
+	// is a variable has until they are taken out: the pointers that a
+	// check of pointer arithmetic is given are stored in one.)
+	for {
+		switch dst.Op {
+		case ssa.OpNilCheck, ssa.OpOffPtr, ssa.OpAddPtr, ssa.OpPtrIndex, ssa.OpCopy:
+			dst = dst.Args[0]
+			continue
+		}
+		break
+	}
+	return !ssa.IsStackAddr(dst) && !ssa.IsGlobalAddr(dst)
 }
 
 // do *left = right for all scalar (non-pointer) parts of t.

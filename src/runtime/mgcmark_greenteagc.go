@@ -227,7 +227,8 @@ func (s *mspan) inlineMarkBits() *spanInlineMarkBits {
 
 func (s *mspan) markBitsForIndex(objIndex uintptr) (bits markBits) {
 	if s.usesInlineMarkBits() {
-		bits.bytep = &s.inlineMarkBits().marks[objIndex/8]
+		// (Not s.inlineMarkBits(): this is to be inlined.)
+		bits.bytep = &spanInlineMarkBitsFromBase(s.base()).marks[objIndex/8]
 	} else {
 		bits.bytep = s.gcmarkBits.bytep(objIndex / 8)
 	}
@@ -257,6 +258,18 @@ func (s *mspan) scannedBitsForIndex(objIndex uintptr) markBits {
 //go:nosplit
 func gcUsesSpanInlineMarkBits(size uintptr) bool {
 	return heapBitsInSpan(size) && size >= 16
+}
+
+// usesInlineMarkBits reports whether the span has its mark bits in
+// itself (gcUsesSpanInlineMarkBits): a span of C's objects
+// (cspan.go) never has, and is not scanned as a span.
+//
+//go:nosplit
+func (s *mspan) usesInlineMarkBits() bool {
+	// (gcUsesSpanInlineMarkBits(s.elemsize) && !s.spanclass.c(),
+	// written out: markBitsForIndex is to be inlined, and has little
+	// to spare.)
+	return s.spanclass < cSpanClasses && heapBitsInSpan(s.elemsize) && s.elemsize >= 16
 }
 
 // tryDeferToSpanScan tries to queue p on the span it points to, if it

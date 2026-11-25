@@ -59,15 +59,6 @@ type cBits struct {
 // where the collector expects a pointer (wbBufFlush1).
 var cSpansUsed bool
 
-// usesInlineMarkBits reports whether the span has its mark bits in
-// itself (gcUsesSpanInlineMarkBits): a span of C's objects never has,
-// and is not scanned as a span.
-//
-//go:nosplit
-func (s *mspan) usesInlineMarkBits() bool {
-	return gcUsesSpanInlineMarkBits(s.elemsize) && !s.spanclass.c()
-}
-
 // cBitsWords returns the number of uint32s of the bitmap of s.
 func (s *mspan) cBitsWords() uintptr {
 	return s.npages * (pageSize / goarch.PtrSize / cBitsWord)

@@ -37,6 +37,10 @@ func gcUsesSpanInlineMarkBits(_ uintptr) bool {
 	return false
 }
 
+func (s *mspan) usesInlineMarkBits() bool {
+	return false
+}
+
 func (s *mspan) inlineMarkBits() *spanInlineMarkBits {
 	return nil
 }

@@ -116,7 +116,7 @@ func c0_name(c c23.UInt) *c23.Char {
 - **Speed.** On that benchmark (a sorted vector of structs, a tree, a
   hash map with string keys, byte strings), against `gcc -O2`: 0.85 to
   1.3 times with `-d=checkptr=0`. With the checks as they are today it
-  is 0.9 to 10 times: each arithmetic and conversion is a call into the
+  is 1 to 6.5 times: each arithmetic and conversion is a call into the
   runtime. The typed code, which is most of C and C++, is at Go's speed
   either way; making the checks of the rest cheap is the compiler's work.
 
@@ -247,16 +247,18 @@ How a word comes to be one or the other:
   pointers, the conversion's check clears the bits of those words.
 
 What it costs, on the benchmark above, against the same translation
-with malloc as Go objects: the vector 0.9 times, the strings 1.1, the
-tree 1.2, the hash map 1.6. A store of a pointer through a pointer is
-a call that finds the span of the word (3 to 5% of the time); an
-object of C's is scanned by itself, not with its span; and each check
-of a pointer finds the span once, as before. The call before a store
-of an integer in memory with no type is about 5 ns: a loop that only
-stores longs through such a pointer takes 1.3 times what it takes
-through a `long *` that malloc was converted to (which is 16 ns a
-store, with the checks of the pointer), and allocating a struct and
-filling in seven fields, three calls, 1.35 times.
+with malloc as Go objects: the vector and the strings 0.7 times, the
+tree 1.2, the hash map 1.1. A store of a pointer through a pointer is
+a call that finds the span of the word; an object of C's is scanned by
+itself, not with its span; and each check of a pointer finds the span
+once, as before. (A store of a pointer in a variable is no call, and
+neither is one in the array of pointers that a check of arithmetic is
+given, which was one at first: that was a third of the vector's and
+the strings' time.) The call before a store of an integer in memory
+with no type is about 5 ns: a loop that only stores longs through such
+a pointer takes 14 ns a store, and 9 through a `long *` that malloc
+was converted to, with the checks of the pointer; allocating a struct
+and filling in seven fields, three calls, takes 1.2 to 1.3 times.
 
 What this does not do:
 
