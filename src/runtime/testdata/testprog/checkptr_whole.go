@@ -305,6 +305,16 @@ func viewLong() {
 	})
 }
 
+// viewPast returns p moved by n bytes to where its span has no object,
+// which checked arithmetic does not do: a pointer that leaves its
+// object for nothing that the runtime knows is refused.
+//
+//go:nocheckptr
+//go:noinline
+func viewPast(p unsafe.Pointer, n uintptr) unsafe.Pointer {
+	return unsafe.Add(p, n)
+}
+
 //go:noinline
 func viewPlain[T any](p *T) unsafe.Pointer {
 	sink2 = p
@@ -414,7 +424,7 @@ func viewSmall() {
 		const pageSize, size = 8192, unsafe.Sizeof([3]string{})
 		x := new([3]string)
 		p := viewPlain(x)
-		viewAs[[size]byte](unsafe.Add(p, pageSize/size*size-uintptr(p)%pageSize))
+		viewAs[[size]byte](viewPast(p, pageSize/size*size-uintptr(p)%pageSize))
 		runtime.KeepAlive(x)
 	})
 	viewCase(W+"ABIInterface", func() {

@@ -16,6 +16,7 @@ func init() {
 	register("CheckPtrAlignmentNilPtr", CheckPtrAlignmentNilPtr)
 	register("CheckPtrArithmetic", CheckPtrArithmetic)
 	register("CheckPtrArithmetic2", CheckPtrArithmetic2)
+	register("CheckPtrArithmeticLeavesHeap", CheckPtrArithmeticLeavesHeap)
 	register("CheckPtrArithmeticUnsafeAdd", CheckPtrArithmeticUnsafeAdd)
 	register("CheckPtrSize", CheckPtrSize)
 	register("CheckPtrSmall", CheckPtrSmall)
@@ -71,6 +72,15 @@ func CheckPtrArithmetic() {
 	var x int
 	i := uintptr(unsafe.Pointer(&x))
 	sink2 = (*int)(unsafe.Pointer(i))
+}
+
+func CheckPtrArithmeticLeavesHeap() {
+	// An address that is in no arena of the heap, and in no stack or
+	// data: the seventeenth page of memory.
+	x := new([2]int64)
+	sink2 = x
+	far := 1<<16 - uintptr(unsafe.Pointer(x))
+	sink2 = unsafe.Add(unsafe.Pointer(x), far)
 }
 
 func CheckPtrArithmetic2() {

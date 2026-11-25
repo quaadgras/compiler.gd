@@ -40,6 +40,9 @@ func TestCheckPtr(t *testing.T) {
 		// integer and kept, which makes it a pointer to that object.
 		{"CheckPtrArithmetic2", ""},
 		{"CheckPtrArithmeticUnsafeAdd", "fatal error: checkptr: pointer arithmetic result points to invalid allocation\n"},
+		// gd: a pointer to an object of the heap that is moved to
+		// where nothing of the program's is.
+		{"CheckPtrArithmeticLeavesHeap", "fatal error: checkptr: pointer arithmetic result is outside the object it was computed from\n"},
 		{"CheckPtrSize", "fatal error: checkptr: converted pointer straddles multiple allocations\n"},
 		{"CheckPtrSmall", "fatal error: checkptr: pointer arithmetic computed bad pointer value\n"},
 		{"CheckPtrSliceOK", ""},
