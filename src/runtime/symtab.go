@@ -425,6 +425,12 @@ type moduledata struct {
 	gofunc                     uintptr // go.func.*
 	epclntab                   uintptr
 
+	// The table of the variables of the program's data (datavar.go),
+	// and the start of the section of read-only data that has
+	// pointers, where that is a section of its own.
+	rodatarelro uintptr
+	datavars    uintptr
+
 	textsectmap []textsect
 
 	ptab []ptabEntry

@@ -117,6 +117,7 @@ func setupFlags(ctxt *Link) {
 	fs.IntVar(&ctxt.FlagDebugTramp, "debugtramp", 0, "debug trampolines")
 	fs.IntVar(&ctxt.FlagDebugTextSize, "debugtextsize", 0, "debug text section max size")
 	fs.BoolVar(&ctxt.flagDebugNosplit, "debugnosplit", false, "dump nosplit call graph")
+	fs.BoolVar(&ctxt.FlagDataVars, "datavars", true, "record the bounds and the types of the variables of the program's data")
 	fs.IntVar(&ctxt.FlagStrictDups, "strictdups", 0, "sanity check duplicate symbol contents during object file reading (1=warn 2=err).")
 	fs.Int64Var(&ctxt.FlagRound, "R", -1, "set address rounding `quantum`")
 	fs.Int64Var(&ctxt.FlagTextAddr, "T", -1, "set the start address of text symbols")

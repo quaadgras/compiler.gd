@@ -498,6 +498,7 @@ type FuncInfo struct {
 	ArgInfo            *LSym // argument info for traceback
 	ArgLiveInfo        *LSym // argument liveness info for traceback
 	WrapInfo           *LSym // for wrapper, info of wrapped function
+	StackVars          *LSym // the variables of the frame, for the checks of unsafe pointers
 	JumpTables         []JumpTable
 
 	FuncInfoSym *LSym

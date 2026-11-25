@@ -122,6 +122,7 @@ type linkState struct {
 	FlagDebugTextSize   int
 	flagDebugNosplit    bool
 	FlagStrictDups      int
+	FlagDataVars        bool
 	FlagRound           int64
 	FlagTextAddr        int64
 	FlagDataAddr        int64

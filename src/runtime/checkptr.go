@@ -48,10 +48,20 @@ func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, claim, load bool) {
 	}
 
 	// gd: these checks are on in every build (doc/gd/unsafe.md), so the
-	// two usual cases are found without looking for the allocation of
-	// each end: the goroutine's stack, and one object of the heap.
+	// usual cases are found without looking for the allocation of
+	// each end: a variable of the goroutine's stack, and one object of
+	// the heap.
 	size := n * elem.Size_
-	if gp := getg(); gp.stack.lo <= uintptr(p) && uintptr(p)+size <= gp.stack.hi && uintptr(p)+size >= uintptr(p) {
+	if gp := getg(); gp.stack.lo <= uintptr(p) && uintptr(p) < gp.stack.hi {
+		if claim {
+			if !checkptrAlignVar(p, elem, size, load) && (uintptr(p)+size > gp.stack.hi || uintptr(p)+size < uintptr(p)) {
+				// In no variable that is known, and not in
+				// the stack whole.
+				throw("checkptr: converted pointer straddles multiple allocations")
+			}
+		} else {
+			checkptrAlignVarC(p, elem, n)
+		}
 		return
 	}
 	if s := spanOfHeap(uintptr(p)); s != nil && !s.isUserArenaChunk {
@@ -94,8 +104,17 @@ func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, claim, load bool) {
 		return
 	}
 
-	// Not in the heap, and neither is its end: a global, or memory that
-	// is not Go's, which have no bounds here.
+	// A variable of the program's data.
+	if claim {
+		if checkptrAlignVar(p, elem, size, load) {
+			return
+		}
+	} else if checkptrAlignVarC(p, elem, n) {
+		return
+	}
+
+	// Not in the heap, and neither is its end: memory that is not Go's,
+	// which has no bounds here.
 	if size > 0 && uintptr(p)+size-1 >= uintptr(p) && spanOfHeap(uintptr(p)+size-1) == nil {
 		return
 	}
@@ -104,6 +123,134 @@ func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, claim, load bool) {
 	// TODO(mdempsky): Fix #46938 so we don't need to worry about overflow here.
 	if checkptrStraddles(p, size) {
 		throw("checkptr: converted pointer straddles multiple allocations")
+	}
+}
+
+// checkptrAlignVar is the check of the conversion of p to a pointer to
+// size bytes of values of elem, if p is in a variable of the stack or of
+// the program's data that is known (stackvar.go), and reports whether it
+// is: the values are in the variable, and elem is compatible with the
+// variable's type (checkptr_compat.go), as it is to be with the type of
+// an object of the heap. A variable that has no type is bytes: it has
+// no pointer.
+func checkptrAlignVar(p unsafe.Pointer, elem *_type, size uintptr, load bool) bool {
+	base, vsize, typ, typed, state := checkptrVar(uintptr(p))
+	if state != varFound {
+		return false
+	}
+	// (base is of the stack as it was: only where p is from it is
+	// used, which is the same wherever the stack is.)
+	checkptrConvVar(uintptr(p)-base, vsize, typ, typed, elem, size, true, load)
+	return true
+}
+
+// checkptrConvVar is the check of a conversion to a pointer to size
+// bytes of values of elem, at offset off of a variable of vsize bytes
+// whose type is typ, if typed is set.
+//
+// If claim is not set the conversion is one of a package that is C
+// translated by cmd/cc, where bytes may be over anything, and a pointer
+// of a type over a pointer to anything (checkptrCompatC).
+func checkptrConvVar(off, vsize uintptr, typ *_type, typed bool, elem *_type, size uintptr, claim, load bool) {
+	if size > vsize-off {
+		throw("checkptr: converted pointer straddles multiple allocations")
+	}
+	if size == 0 || !typed {
+		return
+	}
+	if typ == nil || !typ.Pointers() {
+		if elem.Pointers() {
+			checkptrIncompatible(compatPtrInt, elem, typ, off)
+		}
+		return
+	}
+	if typ == elem && (off == 0 || off%elem.Size_ == 0) {
+		// A pointer to what the variable is.
+		return
+	}
+	checkptrWhole(typ, 0, vsize, off, elem, size)
+	if claim {
+		checkptrCompat(typ, 0, vsize, off, elem, size, load)
+	} else {
+		checkptrCompatC(typ, vsize, off, elem, size)
+	}
+}
+
+// checkptrAlignVarC is checkptrAlignVar for a conversion of a package
+// that is C translated by cmd/cc, whose pointer may be to the end of a
+// variable, where nothing is looked at. The end of a variable is in no
+// variable: the compiler and the linker leave a byte after each that a
+// pointer can be to (stackvar.go). So is every address of the stack or
+// of the data that is in no variable that is known, and a pointer to one
+// is let be.
+func checkptrAlignVarC(p unsafe.Pointer, elem *_type, n uintptr) bool {
+	base, vsize, typ, typed, state := checkptrVar(uintptr(p))
+	if state == varNone {
+		return false
+	}
+	off := uintptr(p) - base
+	if elem.Pointers() && uintptr(p)&(uintptr(min(elem.Align_, goarch.PtrSize))-1) != 0 {
+		throw("checkptr: misaligned pointer conversion")
+	}
+	if state == varFound {
+		checkptrConvVar(off, vsize, typ, typed, elem, n*elem.Size_, false, false)
+	}
+	return true
+}
+
+// checkptrCompatC is checkptrCompat for a conversion of a package that
+// is C translated by cmd/cc, to a pointer to size bytes of values of
+// elem at offset off of a variable of size bytes, of type typ: with C's
+// two rules for the memory that malloc gives (cclaim.go). Bytes, a type
+// of alignment 1 without pointers, may be over anything. And a pointer
+// of a type may be over a pointer to anything, a void *, which C
+// converts the address of to fill in what it points to: what is stored
+// there is a pointer, and what is loaded from there as a pointer of
+// another type than was stored is converted as that when it is used.
+// An integer may be over an unsafe.Pointer, which is a word of a union.
+func checkptrCompatC(typ *_type, vsize, off uintptr, elem *_type, size uintptr) {
+	if !elem.Pointers() && elem.Align_ == 1 {
+		return
+	}
+	const word = goarch.PtrSize
+	mmask, vmask := getGCMask(typ), getGCMask(elem)
+	aligned := off&(word-1) == 0
+	var seen compatSeen
+	for w := off &^ (word - 1); w < off+size; w += word {
+		mo := w % typ.Size_
+		mp := compatMaskBit(typ, mmask, mo)
+		var vo uintptr
+		vp := false
+		if aligned {
+			vo = (w - off) % elem.Size_
+			vp = compatMaskBit(elem, vmask, vo)
+		}
+		if !mp && !vp {
+			continue
+		}
+		mk, mt, min := compatLeaf(typ, mo)
+		vk, vt, vin := uint8(compatScalar), (*_type)(nil), uintptr(0)
+		if aligned {
+			vk, vt, vin = compatLeaf(elem, vo)
+		}
+		if mk == compatUnsafe && min == 0 && vin == 0 {
+			switch vk {
+			case compatPtr, compatFunc, compatMap, compatChan:
+				continue
+			case compatScalar:
+				// An unsafe.Pointer is what cmd/cc has for a
+				// word of a union of C's library that holds a
+				// pointer or an integer (a sigval, the data of
+				// an epoll_event): the integer is looked at
+				// there. (A void * is a *c23.Void.)
+				if mt.Kind() == abi.UnsafePointer {
+					continue
+				}
+			}
+		}
+		if why := compatLeaves(mk, mt, min, vk, vt, vin, true, &seen); why != compatOK {
+			checkptrIncompatible(why, elem, typ, mo)
+		}
 	}
 }
 
@@ -121,7 +268,9 @@ func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, claim, load bool) {
 //
 // What malloc gave (cspan.go) ends where C asked it to, which the
 // runtime knows: there the pointer is to the object or to its end, and
-// to nothing after it.
+// to nothing after it. So does a variable of the stack or of the data
+// (stackvar.go), and a pointer in one is to a type that is in it whole
+// (checkptrAlignVarC).
 func checkptrAlignmentC(p unsafe.Pointer, elem *_type, n uintptr) {
 	if p != nil {
 		if s := spanOfHeap(uintptr(p)); s != nil && !s.isUserArenaChunk {
@@ -207,7 +356,25 @@ func checkptrViewKept(p unsafe.Pointer, elem *_type, n uintptr) {
 		return
 	}
 	s := spanOfHeap(uintptr(p))
-	if s == nil || s.isUserArenaChunk || s.spanclass.c() {
+	if s == nil {
+		// A variable of the stack or of the data has its type
+		// (stackvar.go).
+		if base, vsize, typ, typed, state := checkptrVar(uintptr(p)); state == varFound && typed {
+			off := uintptr(p) - base
+			switch {
+			case typ == nil || !typ.Pointers():
+				if elem.Pointers() {
+					checkptrIncompatible(compatPtrInt, elem, typ, off)
+				}
+			case typ != elem || off%elem.Size_ != 0:
+				size := n * elem.Size_
+				checkptrWhole(typ, 0, vsize, off, elem, size)
+				checkptrCompat(typ, 0, vsize, off, elem, size, false)
+			}
+		}
+		return
+	}
+	if s.isUserArenaChunk || s.spanclass.c() {
 		// (The words of an object of C's are what they are
 		// claimed for, and bytes claim nothing: cclaim.go.)
 		return
@@ -513,7 +680,12 @@ func checkptrPointersC(s *mspan, p uintptr, elem *_type, n uintptr) {
 				// lives while the word is read: a buffer of bytes
 				// that the system fills with a list whose links are
 				// addresses in the buffer (windows).
-				if v := *(*uintptr)(unsafe.Pointer(a)); v != 0 && spanOfHeap(v) != nil && !checkptrSameObject(s, a, v) {
+				//
+				// The address of a variable of the stack or of
+				// the data (stackvar.go) is a pointer as one into
+				// the heap is: an integer that holds it is not
+				// to be looked at as one.
+				if v := *(*uintptr)(unsafe.Pointer(a)); v != 0 && (spanOfHeap(v) != nil && !checkptrSameObject(s, a, v) || checkptrInVar(v)) {
 					throw("checkptr: converted pointer type has a pointer where the memory has an integer")
 				}
 			}
@@ -535,6 +707,19 @@ func checkptrStraddles(ptr unsafe.Pointer, size uintptr) bool {
 	}
 	end := add(ptr, size-1)
 
+	// gd: a variable of the stack or of the data is what its table
+	// says (stackvar.go). What is in no variable that is known is not
+	// known to straddle anything, if its end is no more known.
+	if gp := getg(); gp.stack.lo <= uintptr(ptr) && uintptr(ptr) < gp.stack.hi || spanOfHeap(uintptr(ptr)) == nil {
+		switch base, vsize, _, _, state := checkptrVar(uintptr(ptr)); state {
+		case varFound:
+			return size > vsize-(uintptr(ptr)-base)
+		case varUnknown:
+			_, _, _, _, state := checkptrVar(uintptr(end))
+			return state != varUnknown
+		}
+	}
+
 	// TODO(mdempsky): Detect when [ptr, end] contains Go allocations,
 	// but neither ptr nor end point into one themselves.
 
@@ -554,28 +739,66 @@ func checkptrArithmetic(p unsafe.Pointer, originals []unsafe.Pointer) {
 	//
 	// gd: the usual case first, with the span looked for once: p is
 	// in an object of the heap, and so is one of the originals.
+	var s *mspan
 	if gp := getg(); uintptr(p) < gp.stack.lo || uintptr(p) >= gp.stack.hi {
-		if s := spanOfHeap(uintptr(p)); s != nil {
-			i := s.objIndex(uintptr(p))
-			base := s.base() + i*s.elemsize
-			// What malloc gave C (cspan.go) ends where C asked
-			// it to, and a pointer of C's is to its object or
-			// to the end of it.
-			if s.spanclass.c() && uintptr(p)-base > s.cSizeOf(i) {
-				throw("checkptr: pointer arithmetic result is past the end of its object")
+		s = spanOfHeap(uintptr(p))
+	}
+	if s != nil {
+		i := s.objIndex(uintptr(p))
+		base := s.base() + i*s.elemsize
+		// What malloc gave C (cspan.go) ends where C asked
+		// it to, and a pointer of C's is to its object or
+		// to the end of it.
+		if s.spanclass.c() && uintptr(p)-base > s.cSizeOf(i) {
+			throw("checkptr: pointer arithmetic result is past the end of its object")
+		}
+		for _, original := range originals {
+			if uintptr(original)-base < s.elemsize {
+				return
 			}
+		}
+	} else {
+		// gd: a variable of the stack or of the data is one
+		// allocation (stackvar.go): p is in the variable that an
+		// original is in, or at its end.
+		switch base, size, _, _, state := checkptrVar(uintptr(p)); state {
+		case varNone:
+			// Memory that is not Go's: what arithmetic on a
+			// pointer to a variable does not give.
+			// (But the end of the last variable of a part of
+			// the data.)
+			if len(originals) != 0 && checkptrAllVars(originals) && !checkptrVarEnd(p, originals) {
+				throw("checkptr: pointer arithmetic result points to invalid allocation")
+			}
+			return
+		case varFound:
+			// (base is of the stack as it is now: it is compared
+			// before anything is called.)
 			for _, original := range originals {
-				if uintptr(original)-base < s.elemsize {
+				if uintptr(original)-base <= size {
+					return
+				}
+			}
+		case varUnknown:
+			// An address of the stack or of the data that is in
+			// no variable that is known, as the end of a
+			// variable may be, and what is in a frame that has no
+			// table: p is what an original is, which is no
+			// arithmetic, or the end of the variable that one is
+			// in.
+			for _, original := range originals {
+				if original == p {
 					return
 				}
 			}
 		}
-	}
-	base := checkptrBase(p)
-	if base == 0 {
-		return
+		if checkptrVarEnd(p, originals) {
+			return
+		}
+		throw("checkptr: pointer arithmetic result points to invalid allocation")
 	}
 
+	base := checkptrBase(p)
 	for _, original := range originals {
 		if base == checkptrBase(original) {
 			return
@@ -590,6 +813,42 @@ func checkptrArithmetic(p unsafe.Pointer, originals []unsafe.Pointer) {
 	}
 
 	throw("checkptr: pointer arithmetic result points to invalid allocation")
+}
+
+// checkptrVarEnd reports whether p is the end of a variable of the stack
+// or of the data that one of originals is in: the address that follows
+// the variable, which is in another one or in none.
+func checkptrVarEnd(p unsafe.Pointer, originals []unsafe.Pointer) bool {
+	for _, original := range originals {
+		if base, size, _, _, state := checkptrVar(uintptr(original)); state == varFound && uintptr(p)-base == size {
+			return true
+		}
+	}
+	return false
+}
+
+// checkptrInVar reports whether v is an address of the stack that is
+// running, or one in a variable of the program's data.
+func checkptrInVar(v uintptr) bool {
+	if gp := getg(); gp.stack.lo <= v && v < gp.stack.hi {
+		return true
+	}
+	_, _, _, _, state := dataVarAt(v)
+	return state == varFound
+}
+
+// checkptrAllVars reports whether each of originals is an address of the
+// stack that is running or of the program's data.
+func checkptrAllVars(originals []unsafe.Pointer) bool {
+	for _, original := range originals {
+		if gp := getg(); gp.stack.lo <= uintptr(original) && uintptr(original) < gp.stack.hi {
+			continue
+		}
+		if _, _, _, _, state := dataVarAt(uintptr(original)); state == varNone {
+			return false
+		}
+	}
+	return true
 }
 
 // Exposed objects.
@@ -690,37 +949,35 @@ func checkptrExposed(p uintptr) bool {
 //
 //go:linkname checkptrBase
 func checkptrBase(p unsafe.Pointer) uintptr {
-	// stack
-	if gp := getg(); gp.stack.lo <= uintptr(p) && uintptr(p) < gp.stack.hi {
-		// TODO(mdempsky): Walk the stack to identify the
-		// specific stack frame or even stack object that p
-		// points into.
-		//
-		// In the mean time, use "1" as a pseudo-address to
-		// represent the stack. This is an invalid address on
-		// all platforms, so it's guaranteed to be distinct
-		// from any of the addresses we might return below.
+	// gd: a variable of the stack, or of the program's data, is an
+	// allocation, and its address is the base (stackvar.go). An
+	// address of the stack or of the data that is in no variable
+	// that is known is its own base, which is that of nothing else.
+	// (The base of a variable of the stack is its address in the
+	// stack as it is now: the checks here do not go by it, since it
+	// is another once the stack has moved.)
+	gp := getg()
+	stack := gp.stack.lo <= uintptr(p) && uintptr(p) < gp.stack.hi
+	if !stack {
+		// heap (must check after stack because of #35068)
+		// (Not findObject: it throws for a pointer into a span that
+		// was freed, which an integer kept from before may well be;
+		// that is for this check to say, or not, as for any other
+		// address.)
+		if s := spanOfHeap(uintptr(p)); s != nil {
+			return s.base() + s.objIndex(uintptr(p))*s.elemsize
+		}
+	}
+	switch base, _, _, _, state := checkptrVar(uintptr(p)); state {
+	case varFound:
+		return base
+	case varUnknown:
+		return uintptr(p)
+	}
+	if stack {
+		// The system's stack.
 		return 1
 	}
-
-	// heap (must check after stack because of #35068)
-	// (Not findObject: it throws for a pointer into a span that was
-	// freed, which an integer kept from before may well be; that is
-	// for this check to say, or not, as for any other address.)
-	if s := spanOfHeap(uintptr(p)); s != nil {
-		return s.base() + s.objIndex(uintptr(p))*s.elemsize
-	}
-
-	// data or bss
-	for _, datap := range activeModules() {
-		if datap.data <= uintptr(p) && uintptr(p) < datap.edata {
-			return datap.data
-		}
-		if datap.bss <= uintptr(p) && uintptr(p) < datap.ebss {
-			return datap.bss
-		}
-	}
-
 	return 0
 }
 

@@ -1792,6 +1792,10 @@ func (ctxt *Link) dodata(symGroupType []sym.SymKind) {
 		ldr.SetAttrOnList(s, true)
 	}
 
+	// gd: the table of the data's variables has an entry for each of
+	// these.
+	ctxt.dataVarsSize(&state.data)
+
 	// SEH symbols are tracked in side lists (sehp.pdata/xdata), so make
 	// them follow the same reachability decision used for all other data.
 	filterReachableSEH := func(syms []loader.Sym) []loader.Sym {
@@ -1981,6 +1985,12 @@ func (state *dodataState) assignDsymsToSection(sect *sym.Section, syms []loader.
 		}
 		ldr.SetSymValue(s, int64(uint64(state.datsize)-sect.Vaddr))
 		state.datsize += ldr.SymSize(s)
+		if state.ctxt.dataVarsGap(s) {
+			// gd: a byte after a variable, so that the pointer
+			// to its end is not the address of the next one
+			// (datavars.go).
+			state.datsize++
+		}
 	}
 	sect.Length = uint64(state.datsize) - sect.Vaddr
 }
@@ -2366,7 +2376,8 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 	}
 
 	if len(state.data[sym.SRODATARELRO]) > 0 {
-		createRelroSect("", sym.SRODATARELRO)
+		sect := createRelroSect("", sym.SRODATARELRO)
+		ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.rodatarelro", 0), sect)
 	}
 
 	sect = createRelroSect(".go.type", sym.STYPE)
@@ -3348,6 +3359,13 @@ func (ctxt *Link) address() []*sym.Segment {
 	ctxt.xdefine("runtime.rodata", sym.SRODATA, int64(rodata.Vaddr))
 	ctxt.xdefine("runtime.erodata", sym.SRODATA, int64(rodata.Vaddr+rodata.Length))
 	ctxt.xdefine("runtime.types", sym.SRODATA, int64(types.Vaddr))
+	if relro := ldr.SymSect(ldr.LookupOrCreateSym("runtime.rodatarelro", 0)); relro != nil {
+		ctxt.xdefine("runtime.rodatarelro", sym.SRODATA, int64(relro.Vaddr))
+	} else {
+		// No such section: the symbol is where nothing of it is.
+		ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.rodatarelro", 0), types)
+		ctxt.xdefine("runtime.rodatarelro", sym.SRODATA, int64(types.Vaddr))
+	}
 	ctxt.xdefine("runtime.etypes", sym.SRODATA, int64(types.Vaddr+types.Length))
 
 	s := ldr.Lookup("runtime.gcdata", 0)

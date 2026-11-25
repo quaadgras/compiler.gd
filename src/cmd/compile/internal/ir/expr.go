@@ -1343,6 +1343,25 @@ func UncheckedPkg(path string) bool {
 	return objabi.LookupPkgSpecial(path).Runtime
 }
 
+// StackVars reports what the table of the variables of fn's frame is to
+// have, as -d=stackvars says it: nothing if it is 0. A function of the
+// runtime's packages has no table, and neither has one that the compiler
+// writes for a type (an equality or a hash function): no pointer to a
+// variable of theirs is given to code whose pointers are checked. It
+// goes by the function's own package, not by the one that is compiled:
+// a function that more than one package has a copy of, as a generic
+// function's instance is, is the same in each.
+func StackVars(gd *base.Invocation, fn *Func) int {
+	if gd.Debug.StackVars <= 0 {
+		return 0
+	}
+	sym := fn.Sym()
+	if sym == nil || sym.Pkg == nil || sym.Pkg.Path == "type" || objabi.LookupPkgSpecial(sym.Pkg.Path).Runtime {
+		return 0
+	}
+	return gd.Debug.StackVars
+}
+
 // ShouldAsanCheckPtr reports whether pointer checking should be enabled for
 // function fn when -asan is enabled.
 func ShouldAsanCheckPtr(gd *base.Invocation, fn *Func) bool {

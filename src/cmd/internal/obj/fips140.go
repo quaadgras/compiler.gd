@@ -260,6 +260,7 @@ func (s *LSym) setFIPSType(ctxt *Link) {
 				strings.HasSuffix(name, ".args_stackmap") ||
 				strings.HasSuffix(name, ".opendefer") ||
 				strings.HasSuffix(name, ".stkobj") ||
+				strings.HasSuffix(name, ".stkvar") ||
 				strings.HasSuffix(name, "·f") {
 				return
 			}

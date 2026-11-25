@@ -136,6 +136,39 @@ func TestCheckPtrCompat(t *testing.T) {
 	}
 }
 
+// TestCheckPtrVars is the checks of the pointers to the variables of the
+// stack and of the program's data, each of which is an allocation with a
+// type (testprog/checkptr_vars.go).
+func TestCheckPtrVars(t *testing.T) {
+	t.Parallel()
+	testenv.MustHaveGoRun(t)
+
+	exe, err := buildTestProg(t, "testprog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := testenv.CleanCmdEnv(exec.Command(exe, "CheckPtrVarList")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, list)
+	}
+	const fatal = "fatal error: checkptr: "
+	for _, name := range strings.Fields(string(list)) {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := testenv.CleanCmdEnv(exec.Command(exe, name)).CombinedOutput()
+			if strings.HasPrefix(name, "CheckPtrVarBad") {
+				if !strings.HasPrefix(string(got), fatal) {
+					t.Errorf("output:\n%s\n\nwant output starting with: %s", got, fatal)
+				}
+				return
+			}
+			if err != nil || len(got) > 0 {
+				t.Errorf("%v, output:\n%s\nwant no output", err, got)
+			}
+		})
+	}
+}
+
 func TestCheckPtr2(t *testing.T) {
 	// This test requires rebuilding packages with -d=checkptr=2,
 	// so it's somewhat slow.

@@ -93,6 +93,7 @@ type DebugFlags struct {
 	SkipExtInst           int    `help:"skip compiling generic instantiations owned by imported packages (1 skip, 2 skip+log)" concurrent:"ok"`
 	Slice                 int    `help:"print information about slice compilation"`
 	SoftFloat             int    `help:"force compiler to emit soft-float code" concurrent:"ok"`
+	StackVars             int    `help:"record the variables of each frame for the checks of unsafe pointers\n0: none\n1: those whose address is taken\n2: and those that have pointers (default)" concurrent:"ok"`
 	StaticCopy            int    `help:"print information about missed static copies" concurrent:"ok"`
 	SyncFrames            int    `help:"how many writer stack frames to include at sync points in unified export data" concurrent:"ok"`
 	TailCall              int    `help:"print information about tail calls"`

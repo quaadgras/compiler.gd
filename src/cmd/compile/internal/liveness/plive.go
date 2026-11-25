@@ -1527,6 +1527,14 @@ func Compute(gd *base.Invocation, curfn *ir.Func, f *ssa.Func, stkptrsize int64,
 		p.To.Sym = x
 	}
 
+	if x := lv.emitStackVars(gd); x != nil {
+		p := pp.Prog(gd, obj.AFUNCDATA)
+		p.From.SetConst(rtabi.FUNCDATA_StackVars)
+		p.To.Type = obj.TYPE_MEM
+		p.To.Name = obj.NAME_EXTERN
+		p.To.Sym = x
+	}
+
 	retLv := lv
 	if !retLiveness {
 		retLv = nil
@@ -1587,6 +1595,123 @@ func (lv *Liveness) emitStackObjects(gd *base.Invocation) *obj.LSym {
 	}
 
 	return x
+}
+
+// emitStackVars writes the table of the variables of the frame, which
+// the runtime's checks of unsafe pointers find the variable that an
+// address of the stack is in with, and its type (runtime/stackvar.go):
+// arithmetic on a pointer to a variable stays in the variable, and a
+// conversion of one is compared with the variable's type, as they are
+// for an object of the heap.
+//
+// It has every variable with a slot in the frame whose address is taken,
+// which are the ones that a pointer can be to, and with -d=stackvars=2
+// every one that has pointers besides, so that what a word of the frame
+// that holds a pointer is, is known too: the named variables, the
+// parameters and results, with the slots that the parameters passed in
+// registers are spilled to, the compiler's temporaries, and the slots
+// that values in registers are spilled to, each of which is for values of
+// one type (ssa's stackalloc).
+//
+// The slots that variables share (mergelocals) are of variables whose
+// address is not taken. One is in the table if the variables are of one
+// type, and otherwise not: no pointer is to it.
+//
+// The format must match runtime/stackvar.go:stackVarRecord.
+func (lv *Liveness) emitStackVars(gd *base.Invocation) *obj.LSym {
+	level := ir.StackVars(gd, lv.fn)
+	if level <= 0 || gd.Ctxt.Flag_linkshared {
+		// (A relative reference to a type of another shared object
+		// does not work: as emitWrappedFuncInfo.)
+		return nil
+	}
+	var vars []*ir.Name
+	for _, n := range lv.fn.Dcl {
+		if n.Op() != ir.ONAME {
+			continue
+		}
+		switch n.Class {
+		case ir.PAUTO:
+			if !n.Used() || n.Esc() == ir.EscHeap {
+				continue
+			}
+		case ir.PPARAM, ir.PPARAMOUT:
+		default:
+			continue
+		}
+		t := n.Type()
+		if t == nil || t.Size() <= 0 || !stackVarType(t) {
+			continue
+		}
+		if !n.Addrtaken() && (level < 2 || !t.HasPointers()) {
+			continue
+		}
+		vars = append(vars, n)
+	}
+	if len(vars) == 0 {
+		return nil
+	}
+
+	// From the lowest address to the highest: the locals, whose
+	// offsets are negative, and then the arguments.
+	slices.SortStableFunc(vars, func(a, b *ir.Name) int { return cmp.Compare(a.FrameOffset(), b.FrameOffset()) })
+
+	// Leave out the slots that variables of more than one type are in.
+	keep := vars[:0]
+	end := int64(math.MinInt64) // where the variables so far end
+	shared := false             // the last one kept is in a slot with another
+	for _, v := range vars {
+		off := v.FrameOffset()
+		if off >= end {
+			keep = append(keep, v)
+			end, shared = off+v.Type().Size(), false
+			continue
+		}
+		if !shared {
+			if last := keep[len(keep)-1]; last.FrameOffset() == off && types.Identical(last.Type(), v.Type()) {
+				continue
+			}
+			keep = keep[:len(keep)-1]
+			shared = true
+		}
+		end = max(end, off+v.Type().Size())
+	}
+	vars = keep
+	if len(vars) == 0 {
+		return nil
+	}
+
+	// (A function and its wrapper for the other ABI have one name.)
+	x := gd.Ctxt.Lookup(fmt.Sprintf("%s.%d.stkvar", lv.fn.LSym.Name, lv.fn.LSym.ABI()))
+	x.Set(obj.AttrContentAddressable, true)
+	x.Align = 4
+	lv.fn.LSym.Func().StackVars = x
+	off := objw.Uint32(gd, x, 0, uint32(len(vars)))
+	for _, v := range vars {
+		// As for a stack object: an offset that is not negative is
+		// from argp, and a negative one from varp.
+		frameOffset := v.FrameOffset()
+		if frameOffset != int64(int32(frameOffset)) {
+			gd.Fatalf("frame offset too big: %v %d", v, frameOffset)
+		}
+		off = objw.Uint32(gd, x, off, uint32(frameOffset))
+		// The size is the type's.
+		off = objw.SymPtrOff(gd, x, off, reflectdata.TypeLinksym(gd, v.Type()))
+	}
+	return x
+}
+
+// stackVarType reports whether t is a type that the runtime has a
+// descriptor for: not one of the compiler's own, which no variable that
+// a pointer is to has.
+func stackVarType(t *types.Type) bool {
+	switch t.Kind() {
+	case types.TSSA, types.TTUPLE, types.TRESULTS, types.TBLANK, types.TFORW, types.TNIL, types.TIDEAL, types.TFUNCARGS, types.TCHANARGS:
+		return false
+	case types.TFUNC:
+		return t.Recv() == nil
+	}
+	return !t.IsUntyped()
 }
 
 // isfat reports whether a variable of type t needs multiple assignments to initialize.

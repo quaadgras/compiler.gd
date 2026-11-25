@@ -2332,3 +2332,36 @@ func CUsable(p unsafe.Pointer) (uintptr, bool) { return c23Usable(p) }
 func CMemmove(dst, src unsafe.Pointer, n uintptr) { c23Memmove(dst, src, n) }
 
 func CMemset(dst unsafe.Pointer, c byte, n uintptr) { c23Memset(dst, c, n) }
+
+// CheckptrVarOf returns what checkptrVarOf says of the variable of the
+// stack or of the data that p is in: where p is in it, its size, and
+// its type, which is "" for a variable that is bytes to the program.
+func CheckptrVarOf(p unsafe.Pointer) (off, size uintptr, typ string, ok bool) {
+	base, size, t, ok := checkptrVarOf(uintptr(p))
+	off = uintptr(p) - base
+	if !ok {
+		return 0, 0, "", false
+	}
+	if t != nil {
+		typ = toRType(t).string()
+	}
+	return off, size, typ, true
+}
+
+// StackVarAddr reports whether p is an address of the stack that is
+// running.
+func StackVarAddr(p unsafe.Pointer) bool {
+	gp := getg()
+	return gp.stack.lo <= uintptr(p) && uintptr(p) < gp.stack.hi
+}
+
+// StackVarOf is CheckptrVarOf for an address of the stack, by
+// stackVarOf, which unwinds the stack.
+func StackVarOf(p unsafe.Pointer) (off, size uintptr, typ string, ok bool) {
+	base, size, t, ok := stackVarOf(getg(), uintptr(p))
+	off = uintptr(p) - base
+	if !ok {
+		return 0, 0, "", false
+	}
+	return off, size, toRType(t).string(), true
+}
