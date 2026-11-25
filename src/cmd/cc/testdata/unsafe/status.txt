@@ -1,33 +1,19 @@
-argv_over
 arith_cross_claim
 byte_forge
-fread_over
 global_conv
 global_over corrupts
 global_over_local corrupts
 heap_big_view
 heap_end_deref
 heap_partial
-heap_under
 int_as_ptr_heap
 intra_object
 memcpy_confuse
 memcpy_forge_heap
 memcpy_forge_stack
-memcpy_heap
-memcpy_read
-memset_heap
-mprotect_text
-munmap_heap
-qsort_size
-read_over
-snprintf_lie
-sprintf_heap
-sscanf_over
+memset_global
 stack_conv
-stack_over_frame
+stack_over_frame corrupts
 stack_over_local
-strcpy_heap
-strcpy_stack
+strlen_literal
 strlit_over
-va_confuse
