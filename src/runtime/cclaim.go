@@ -374,8 +374,7 @@ func c23Header(p unsafe.Pointer) (d, n, nc, b8, sh, bits uintptr) {
 	sh, bits = 63, uintptr(unsafe.Pointer(&cNoBits))
 	a := uintptr(p)
 	if gp := getg(); gp.stack.lo <= a && a < gp.stack.hi {
-		n = gp.stack.hi - a - 1
-		return 0, n, max(n+1, cConvMax) - cConvMax, 0, sh, bits
+		return c23HeaderVar(a)
 	}
 	if s := spanOfHeap(a); s != nil {
 		if s.isUserArenaChunk {
@@ -393,18 +392,60 @@ func c23Header(p unsafe.Pointer) (d, n, nc, b8, sh, bits uintptr) {
 		size := s.cSizeOf(i)
 		return a - base, size, size + 1, base - s.base(), 3, uintptr(unsafe.Pointer(b))
 	}
-	for _, datap := range activeModules() {
-		for _, r := range [...][2]uintptr{
-			{datap.data, datap.edata}, {datap.bss, datap.ebss},
-			{datap.noptrdata, datap.enoptrdata}, {datap.noptrbss, datap.enoptrbss},
-		} {
-			if r[0] <= a && a < r[1] {
-				n = r[1] - r[0] - 1
-				return a - r[0], n, max(n+1, cConvMax) - cConvMax, 0, sh, bits
-			}
-		}
+	return c23HeaderVar(a)
+}
+
+// c23HeaderVar is c23Header for an address that is in no object of the
+// heap: what it says is of the variable of the stack or of the program's
+// data that a is in (stackvar.go), and of a alone if it is in none that
+// is known.
+//
+// A variable ends where it does, as an object of C's: n is its size, and
+// a pointer is in it or at its end if it is less than nc from its start.
+// That is all that a conversion to bytes asks. The other conversions are
+// compared with the variable's type by the runtime (checkptrAlignVar),
+// but for one: if the variable has no pointer, a type of a few words
+// without pointers that is in it whole is let through by the compiled
+// code. What says so to that code is the classes of cVarScalar, as if
+// they were the variable's: b8 is such that the last whole word of the
+// variable has the last class of them that is for no pointer, and the
+// words after it have none, so that a type that does not end in the
+// variable's whole words is the runtime's to look at. For any other
+// variable the classes are cVarOther's, which let nothing through.
+//
+//go:nosplit
+func c23HeaderVar(a uintptr) (d, n, nc, b8, sh, bits uintptr) {
+	base, size, typ, typed, state := checkptrVar(a)
+	if state != varFound {
+		return 0, 0, 0, 0, 63, uintptr(unsafe.Pointer(&cNoBits))
 	}
-	return
+	// (base is of the stack as it is now, and d is not: it is where a
+	// is in the variable. b8 has of base only how it is aligned, which
+	// a stack that moves keeps.)
+	if end := base + size; typed && (typ == nil || !typ.Pointers()) && end>>3-base>>3 <= cVarWords {
+		return a - base, size, size + 1, base&7 + 8*(cVarWords-(end>>3-base>>3)), 3, uintptr(unsafe.Pointer(&cVarScalar))
+	}
+	// (With a shift of 59 every word is the first, and bit 2 of it is
+	// not set: the classes are looked at, as for an object of C's.)
+	return a - base, size, size + 1, 0, 59, uintptr(unsafe.Pointer(&cVarOther))
+}
+
+// cVarWords is the number of words of the largest variable without
+// pointers that compiled code is told the classes of.
+const cVarWords = 8192
+
+// cVarScalar is the classes of cVarWords words that are claimed for no
+// pointer, and after them of words that nothing claimed: as many as the
+// compiled code loads the classes of at a time (cheaders.go).
+var cVarScalar [cVarWords/cClassPer + 4]uint32
+
+// cVarOther is the classes of words that nothing claimed.
+var cVarOther [2]uint32
+
+func init() {
+	for i := 0; i < cVarWords/cClassPer; i++ {
+		cVarScalar[i] = 0x55555555 * cScalar
+	}
 }
 
 // c23slow reports whether a check of the pointer q, which is made of p,
@@ -431,23 +472,29 @@ func c23Convert(p unsafe.Pointer, elem *_type, n uintptr) {
 // stays there (internal/c23's intcap.go).
 //
 //go:linkname c23InObject
+//go:nosplit
 func c23InObject(p, r uintptr) bool {
-	if gp := getg(); gp.stack.lo <= p && p < gp.stack.hi {
-		return gp.stack.lo <= r && r <= gp.stack.hi
-	}
-	if s := spanOfHeap(p); s != nil {
-		i := s.objIndex(p)
-		base := s.base() + i*s.elemsize
-		size := s.elemsize
-		if s.spanclass.c() {
-			size = s.cSizeOf(i)
+	if gp := getg(); p < gp.stack.lo || p >= gp.stack.hi {
+		if s := spanOfHeap(p); s != nil {
+			i := s.objIndex(p)
+			base := s.base() + i*s.elemsize
+			size := s.elemsize
+			if s.spanclass.c() {
+				size = s.cSizeOf(i)
+			}
+			return r-base <= size
 		}
+	}
+	// A variable of the stack or of the data (stackvar.go), and what
+	// is in none that is known: that address alone.
+	switch base, size, _, _, state := checkptrVar(p); state {
+	case varFound:
 		return r-base <= size
+	case varUnknown:
+		return r == p
 	}
 	for _, datap := range activeModules() {
 		for _, sec := range [...][2]uintptr{
-			{datap.data, datap.edata}, {datap.bss, datap.ebss},
-			{datap.noptrdata, datap.enoptrdata}, {datap.noptrbss, datap.enoptrbss},
 			{datap.types, datap.etypes}, {datap.rodata, datap.etypes},
 		} {
 			if sec[0] <= p && p < sec[1] {
