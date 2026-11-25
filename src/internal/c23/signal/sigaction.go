@@ -120,7 +120,7 @@ func Sigaction(sig int32, act, oact *c23.Void) int32 {
 			return -1
 		}
 		a = c23.SigAction{
-			Handler: c23.LoadPtr(act),
+			Handler: c23.UnionPtr(act, 0), // the union of sa_handler and sa_sigaction
 			Mask:    c23.LoadSigset(c23.Add(act, saMaskOff)) &^ c23.SigUnblockable,
 			Flags:   c23.Load32(c23.Add(act, saFlagsOff)),
 		}
@@ -134,7 +134,7 @@ func Sigaction(sig int32, act, oact *c23.Void) int32 {
 	}
 	old := sigSet(sig, a, c23.Addr(act) != 0)
 	if c23.Addr(oact) != 0 {
-		c23.StorePtr(oact, old.Handler)
+		c23.SetUnionPtr(oact, 0, old.Handler)
 		c23.StoreSigset(c23.Add(oact, saMaskOff), old.Mask)
 		c23.Store32(c23.Add(oact, saFlagsOff), old.Flags)
 	}

@@ -86,8 +86,8 @@ func Sigtimedwait(set, info, timeout *c23.Void) int32 {
 func Sigwaitinfo(set, info *c23.Void) int32 { return Sigtimedwait(set, info, (*c23.Void)(nil)) }
 
 // Sigqueue is sigqueue: to the program's own process, the signal is sent
-// with si_code SI_QUEUE and si_value value (union sigval, passed as its
-// pointer member); to another, it is kill's, without the value. A signal
+// with si_code SI_QUEUE and si_value what value points to (the union
+// sigval); to another, it is kill's, without the value. A signal
 // already pending is not queued again, even a real-time one.
 func Sigqueue(pid, sig int32, value *c23.Void) int32 {
 	if sig < 0 || sig >= c23.Nsig {
@@ -97,7 +97,7 @@ func Sigqueue(pid, sig int32, value *c23.Void) int32 {
 	if pid != int32(os.Getpid()) || sig == 0 || sig == c23.SIGKILL || sig == c23.SIGSTOP {
 		return Kill(pid, sig)
 	}
-	c23.SigSendProcess(sig, c23.SigInfo{Code: SI_QUEUE, Pid: pid, Uid: int32(os.Getuid()), Value: value}, c23.SigSelf())
+	c23.SigSendProcess(sig, c23.SigInfo{Code: SI_QUEUE, Pid: pid, Uid: int32(os.Getuid()), Value: c23.LoadSigVal(value)}, c23.SigSelf())
 	return 0
 }
 

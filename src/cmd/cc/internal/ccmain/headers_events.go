@@ -43,8 +43,8 @@ typedef unsigned long pthread_t;
 #endif
 int sigtimedwait(const sigset_t *restrict set, siginfo_t *restrict info, const struct timespec *restrict timeout);
 int sigwaitinfo(const sigset_t *restrict set, siginfo_t *restrict info);
-int __cc_sigqueue(pid_t pid, int sig, void *value);
-static inline int sigqueue(pid_t pid, int sig, const union sigval value) { return __cc_sigqueue(pid, sig, value.sival_ptr); }
+int __cc_sigqueue(pid_t pid, int sig, const union sigval *value);
+static inline int sigqueue(pid_t pid, int sig, const union sigval value) { return __cc_sigqueue(pid, sig, &value); }
 int pthread_kill(pthread_t thread, int sig);
 int sigaltstack(const stack_t *restrict ss, stack_t *restrict old_ss);
 int siginterrupt(int sig, int flag);

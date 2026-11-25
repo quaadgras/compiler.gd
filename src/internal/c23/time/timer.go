@@ -42,8 +42,8 @@ type timer struct {
 	clock  int32
 	notify int32
 	signo  int32
-	value  *c23.Void // sigev_value, as its pointer member
-	fn     *c23.Void // sigev_notify_function
+	value  c23.SigVal // sigev_value
+	fn     *c23.Void  // sigev_notify_function
 
 	mu       sync.Mutex
 	t        *time.Timer
@@ -68,15 +68,6 @@ func timerOf(id *c23.Void) *timer {
 	return timers[c23.Addr(id)]
 }
 
-// The offsets in struct sigevent {union sigval sigev_value; int
-// sigev_signo; int sigev_notify; void (*sigev_notify_function)(union
-// sigval); void *sigev_notify_attributes; ...}.
-var (
-	sevSignoOff  = int(c23.WordSize)
-	sevNotifyOff = int(c23.WordSize) + 4
-	sevFnOff     = int(c23.WordSize) + 8
-)
-
 // TimerCreate is timer_create: a timer on CLOCK_REALTIME,
 // CLOCK_MONOTONIC, CLOCK_BOOTTIME or a CPU-time clock, which notifies as
 // evp says (if evp is null, SIGALRM with the timer's id as si_value).
@@ -89,9 +80,8 @@ func TimerCreate(clock int32, evp, timerid *c23.Void) int32 {
 	}
 	tm := &timer{clock: clock, notify: SIGEV_SIGNAL, signo: SIGALRM}
 	if c23.Addr(evp) != 0 {
-		tm.value = c23.LoadPtr(evp)
-		tm.signo = int32(c23.Load32(c23.Add(evp, sevSignoOff)))
-		tm.notify = int32(c23.Load32(c23.Add(evp, sevNotifyOff)))
+		ev := c23.LoadSigEvent(evp)
+		tm.value, tm.signo, tm.notify = ev.Value, ev.Signo, ev.Notify
 		switch tm.notify {
 		case SIGEV_SIGNAL:
 			if tm.signo <= 0 || tm.signo >= c23.Nsig {
@@ -99,7 +89,7 @@ func TimerCreate(clock int32, evp, timerid *c23.Void) int32 {
 				return -1
 			}
 		case SIGEV_THREAD:
-			tm.fn = c23.LoadPtr(c23.Add(evp, sevFnOff))
+			tm.fn = ev.Function
 			c23.FuncOf[func(*c23.Void)](tm.fn)
 		case SIGEV_NONE:
 		default:
@@ -113,7 +103,7 @@ func TimerCreate(clock int32, evp, timerid *c23.Void) int32 {
 	timers[tm.id] = tm
 	timersMu.Unlock()
 	if c23.Addr(evp) == 0 {
-		tm.value = c23.FromInt(tm.id)
+		tm.value = c23.SigVal{Int: uint64(tm.id)}
 	}
 	c23.StorePtr(timerid, c23.FromInt(tm.id))
 	return 0
@@ -280,8 +270,7 @@ func (tm *timer) expire(seq int) {
 		tm.overrun = missed
 		tm.mu.Unlock()
 		f := c23.FuncOf[func(*c23.Void)](tm.fn)
-		v := c23.Calloc(1, uint64(c23.WordSize)) // union sigval
-		c23.StorePtr(v, tm.value)
+		v := c23.NewSigVal(tm.value) // the union sigval, by value
 		c23.SpawnBlocked(c23.New[uint64](), func(*c23.Thread) { f(v) })
 	default:
 		tm.overrun = missed

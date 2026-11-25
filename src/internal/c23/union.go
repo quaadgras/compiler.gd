@@ -87,6 +87,114 @@ func UnionValuePtr(p *Void) (*Void, bool) {
 	return (*Void)(q), ok
 }
 
+// The unions of C's own headers that have a pointer in a member (union
+// sigval, epoll_data_t, the handlers of a struct sigaction) are laid
+// out as any other union is: the bytes of the members without a
+// pointer, and a UnionRef after them. The library is given the address
+// of one, and reads and writes it with these, as the code that cmd/cc
+// generates does for the members: the integers in the bytes, with
+// Load and Store, and the pointer in the union's value.
+
+// UnionRefs says whether a union that has a pointer in a member is its
+// bytes and a UnionRef: with 8-byte words (cmd/cc's unionPtr). With 4
+// it is its words, and its pointer is where its integers are.
+const UnionRefs = WordSize == 8
+
+// loadRef and storeRef load and store the UnionRef at slot, which the
+// caller checked to be in an object: the word is the union's, and is
+// claimed for nothing else by these.
+//
+//go:nocheckptr
+func loadRef(slot unsafe.Pointer) unsafe.Pointer { return *(*unsafe.Pointer)(slot) }
+
+//go:nocheckptr
+func storeRef(slot unsafe.Pointer, v unsafe.Pointer) { *(*unsafe.Pointer)(slot) = v }
+
+// refAt is the UnionRef at slot. (A conversion that is checked would
+// be one of C's to a type with a pointer, at the address of a union:
+// the union's value, as that type.)
+//
+//go:nocheckptr
+func refAt(slot unsafe.Pointer) *UnionRef { return (*UnionRef)(slot) }
+
+// UnionPtr returns the pointer that the union at u holds, whose bytes
+// are the first n of it: what C reads as a member of it that is a
+// pointer. It is nil if the union holds no pointer: an integer that
+// was stored in the union's bytes is not one.
+func UnionPtr(u *Void, n int) *Void {
+	if !UnionRefs {
+		return LoadPtr(u)
+	}
+	ref := loadRef(in(Add(u, n), int(WordSize)))
+	if ref == nil {
+		return nil
+	}
+	q, _ := unionPointer(ref)
+	return (*Void)(q)
+}
+
+// SetUnionPtr makes the union at u, whose bytes are the first n of it,
+// hold the pointer v, as C does when it stores a member that is a
+// pointer; if v is nil it holds none. The union's value points back to
+// the union, so what u points into is an object of the heap.
+func SetUnionPtr(u *Void, n int, v *Void) {
+	if !UnionRefs {
+		StorePtr(u, v)
+		return
+	}
+	slot := in(Add(u, n), int(WordSize))
+	if v == nil {
+		storeRef(slot, nil)
+		return
+	}
+	*UnionBox[*Void](refAt(slot)) = v
+}
+
+// A SigVal is a union sigval {int sival_int; void *sival_ptr;}, and an
+// epoll_data_t: the integer that is in its bytes, and the pointer that
+// it holds. C that stores one member and reads the other reads zero,
+// here as in the union.
+type SigVal struct {
+	Int uint64
+	Ptr *Void
+}
+
+// SigValSize is sizeof(union sigval).
+const SigValSize = (1 + UnionRefs2) * WordSize
+
+// UnionRefs2 is 1 if UnionRefs and 0 otherwise.
+const UnionRefs2 = WordSize / 8
+
+// LoadSigVal reads the union at p, whose bytes are a word.
+func LoadSigVal(p *Void) SigVal {
+	if !UnionRefs {
+		return SigVal{Int: uint64(Load32(p)), Ptr: LoadPtr(p)}
+	}
+	return SigVal{Int: Load64(p), Ptr: UnionPtr(p, int(WordSize))}
+}
+
+// StoreSigVal stores v in the union at p, whose bytes are a word.
+func StoreSigVal(p *Void, v SigVal) {
+	if !UnionRefs {
+		if v.Ptr != nil {
+			StorePtr(p, v.Ptr)
+		} else {
+			Store32(p, uint32(v.Int))
+		}
+		return
+	}
+	Store64(p, v.Int)
+	SetUnionPtr(p, int(WordSize), v.Ptr)
+}
+
+// NewSigVal allocates a union sigval that is v: what a function that
+// takes one by value is given the pointer to.
+func NewSigVal(v SigVal) *Void {
+	p := Calloc(1, uint64(SigValSize))
+	StoreSigVal(p, v)
+	return p
+}
+
 //go:linkname setUnionRef runtime.c23SetUnionRef
 func setUnionRef(t *abi.Type)
 

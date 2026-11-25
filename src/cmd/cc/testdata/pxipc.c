@@ -508,9 +508,9 @@ int main(void) {
 	printf("sizes: mq_attr %zu ipc_perm %zu msqid_ds %zu semid_ds %zu shmid_ds %zu sembuf %zu aiocb %zu sigevent %zu\n",
 		sizeof(struct mq_attr), sizeof(struct ipc_perm), sizeof(struct msqid_ds), sizeof(struct semid_ds),
 		sizeof(struct shmid_ds), sizeof(struct sembuf), sizeof(struct aiocb), sizeof(struct sigevent));
-	printf("offsets: aio_buf %zu aio_sigevent %zu aio_offset %zu notify_function %zu msg_qnum %zu shm_nattch %zu sem_nsems %zu\n",
+	printf("offsets: aio_buf %zu aio_sigevent %zu aio_offset %zu msg_qnum %zu shm_nattch %zu sem_nsems %zu\n",
 		offsetof(struct aiocb, aio_buf), offsetof(struct aiocb, aio_sigevent), offsetof(struct aiocb, aio_offset),
-		offsetof(struct sigevent, sigev_notify_function), offsetof(struct msqid_ds, msg_qnum),
+		offsetof(struct msqid_ds, msg_qnum),
 		offsetof(struct shmid_ds, shm_nattch), offsetof(struct semid_ds, sem_nsems));
 	testMqueue();
 	testMsg();

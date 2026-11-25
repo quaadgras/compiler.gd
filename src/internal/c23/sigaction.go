@@ -72,7 +72,7 @@ type SigAction struct {
 // A sigInfo is what siginfo_t tells of a signal.
 type SigInfo struct {
 	Code, Pid, Uid, Status int32
-	Value                  *Void   // si_value, of sigqueue or a timer
+	Value                  SigVal  // si_value, of sigqueue or a timer
 	Timer                  uintptr // the timer whose expiry it is (time.h's timer_create)
 }
 
@@ -246,13 +246,8 @@ func (t *SigThread) Run(sig int32, info SigInfo) {
 	t.Mask &^= SigUnblockable
 	SigMu.Unlock()
 	if act.Flags&SA_SIGINFO != 0 {
-		si := Calloc(1, sigInfoSize)
-		Store32(si, uint32(sig))
-		Store32(Add(si, 8), uint32(info.Code))
-		Store32(Add(si, 12), uint32(info.Pid))
-		Store32(Add(si, 16), uint32(info.Uid))
-		Store32(Add(si, 20), uint32(info.Status))
-		StorePtr(Add(si, SigInfoValueOff), info.Value)
+		si := Malloc(uint64(SigInfoSize))
+		StoreSigInfo(si, sig, info)
 		FuncOf[func(int32, *Void, *Void)](act.Handler)(sig, si, (*Void)(nil))
 		Free(si)
 	} else {
@@ -263,12 +258,11 @@ func (t *SigThread) Run(sig int32, info SigInfo) {
 	SigMu.Unlock()
 }
 
-// sizeof(siginfo_t): {int si_signo, si_errno, si_code; pid_t si_pid;
-// uid_t si_uid; int si_status; ...}.
-const sigInfoSize = 128
-
-// SigInfoSize is sizeof(siginfo_t) on the target: 116 bytes on wasm32.
-const SigInfoSize = 24 + 3*WordSize + 80
+// SigInfoSize is sizeof(siginfo_t): {int si_signo, si_errno, si_code;
+// pid_t si_pid; uid_t si_uid; int si_status; void *si_addr; union
+// sigval si_value; long si_band; int __pad[20];}, 136 bytes, and 116 on
+// wasm32.
+const SigInfoSize = 24 + WordSize + SigValSize + WordSize + 80
 
 // SigInfoValueOff is the offset of si_value in siginfo_t, after
 // void *si_addr at 24.
@@ -282,7 +276,7 @@ func StoreSigInfo(si *Void, sig int32, info SigInfo) {
 	Store32(Add(si, 12), uint32(info.Pid))
 	Store32(Add(si, 16), uint32(info.Uid))
 	Store32(Add(si, 20), uint32(info.Status))
-	StorePtr(Add(si, SigInfoValueOff), info.Value)
+	StoreSigVal(Add(si, SigInfoValueOff), info.Value)
 }
 
 // Take takes the lowest signal of w pending for t or for the process,

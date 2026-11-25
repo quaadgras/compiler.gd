@@ -108,7 +108,6 @@ type record struct {
 	// after them a pointer to what of it has one: see unionPtr.
 	uptr   bool
 	ubytes int64
-	sys    bool // declared in one of cc's own headers
 
 	sc   *scope     // C++: the scope it is declared in
 	cls  *classInfo // C++: a class's members that are not fields (cxxclass.go)
@@ -884,12 +883,6 @@ func (r *record) layout() {
 // the same memory as an integer, and neither can be made of the other.
 func (r *record) unionPtr() bool {
 	if !r.union || r.packed > 0 || target.ptrSize != 8 {
-		return false
-	}
-	if r.sys {
-		// A union of the library's (sigval, epoll_data_t): what
-		// internal/c23 has for it is its bytes, at the offsets
-		// that the system's own headers give them.
 		return false
 	}
 	ptr := false

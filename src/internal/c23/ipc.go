@@ -250,13 +250,16 @@ const (
 
 // A SigEvent is a struct sigevent:
 //
-//	union sigval sigev_value; int sigev_signo; int sigev_notify;	// 0, 8, 12 (0, 4, 8 on wasm32)
-//	void (*sigev_notify_function)(union sigval);			// 16 (12)
-//	pthread_attr_t *sigev_notify_attributes;			// 24 (16)
+//	union sigval sigev_value; int sigev_signo; int sigev_notify;	// 0, 16, 20 (0, 4, 8 on wasm32)
+//	void (*sigev_notify_function)(union sigval);			// 24 (12)
+//	void *sigev_notify_attributes;					// 32 (16)
+//	pid_t sigev_notify_thread_id;					// 40 (20)
 //
-// in 64 bytes.
+// in 64 bytes. It is the library's own layout, which no system call
+// is given: glibc's and musl's have the function and the thread's id
+// in a union.
 type SigEvent struct {
-	Value    *Void
+	Value    SigVal
 	Signo    int32
 	Notify   int32
 	Function *Void
@@ -265,14 +268,21 @@ type SigEvent struct {
 // SigEventSize is sizeof(struct sigevent).
 const SigEventSize = 64
 
+// The offsets of sigev_signo, sigev_notify and sigev_notify_function
+// in a struct sigevent.
+const (
+	SigEventSignoOff  = int(SigValSize)
+	SigEventNotifyOff = int(SigValSize) + 4
+	SigEventFuncOff   = int(SigValSize) + 8
+)
+
 // LoadSigEvent reads the struct sigevent at p.
 func LoadSigEvent(p *Void) SigEvent {
-	fn := (int(WordSize) + 8 + int(WordSize) - 1) &^ (int(WordSize) - 1)
 	return SigEvent{
-		Value:    LoadPtr(p),
-		Signo:    int32(Load32(Add(p, int(WordSize)))),
-		Notify:   int32(Load32(Add(p, int(WordSize)+4))),
-		Function: LoadPtr(Add(p, fn)),
+		Value:    LoadSigVal(p),
+		Signo:    int32(Load32(Add(p, SigEventSignoOff))),
+		Notify:   int32(Load32(Add(p, SigEventNotifyOff))),
+		Function: LoadPtr(Add(p, SigEventFuncOff)),
 	}
 }
 
@@ -315,9 +325,7 @@ func (ev *SigEvent) Fire(code int32, self *SigThread) {
 			ThreadsMu.Lock()
 			delete(Threads, uint64(LoadLong(thr)))
 			ThreadsMu.Unlock()
-			v := Malloc(uint64(WordSize)) // the union sigval, by value
-			StorePtr(v, val)
-			FuncOf[func(*Void)](fn)(v)
+			FuncOf[func(*Void)](fn)(NewSigVal(val)) // the union sigval, by value
 		})
 	}
 }

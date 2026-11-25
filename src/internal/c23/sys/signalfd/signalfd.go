@@ -76,7 +76,12 @@ func storeInfo(b []byte, sig int32, info c23.SigInfo) {
 	put32(12, uint32(info.Pid))
 	put32(16, uint32(info.Uid))
 	put32(40, uint32(info.Status))
-	v := uint64(c23.Addr(info.Value))
+	// ssi_int and ssi_ptr: the union's integer, or its pointer's
+	// address if it holds one.
+	v := info.Value.Int
+	if a := c23.Addr(info.Value.Ptr); a != 0 {
+		v = uint64(a)
+	}
 	put32(44, uint32(v))
 	put32(48, uint32(v))
 	put32(52, uint32(v>>32))

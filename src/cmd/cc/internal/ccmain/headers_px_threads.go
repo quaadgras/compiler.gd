@@ -164,17 +164,11 @@ typedef struct sigevent {
 	union sigval sigev_value;
 	int sigev_signo;
 	int sigev_notify;
-	union {
-		int _pad[(64 - 2 * sizeof(int) - sizeof(union sigval)) / sizeof(int)];
-		pid_t _tid;
-		struct {
-			void (*_function)(union sigval);
-			void *_attribute;
-		} _sigev_thread;
-	} _sigev_un;
+	void (*sigev_notify_function)(union sigval);
+	void *sigev_notify_attributes;
+	pid_t sigev_notify_thread_id;
+	char __pad[64 - sizeof(union sigval) - 2 * sizeof(int) - 2 * sizeof(void *) - sizeof(pid_t)];
 } sigevent_t;
-#define sigev_notify_function _sigev_un._sigev_thread._function
-#define sigev_notify_attributes _sigev_un._sigev_thread._attribute
 #endif
 #define SIG_HOLD ((void (*)(int))2)
 int killpg(pid_t pgrp, int sig);

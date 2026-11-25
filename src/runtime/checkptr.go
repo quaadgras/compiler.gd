@@ -377,6 +377,12 @@ func checkptrConvC1(p unsafe.Pointer, elem *_type, load bool) unsafe.Pointer {
 		checkptrConvVar(a-base, vsize, typ, typed, elem, elem.Size_, load, true)
 		return p
 	}
+	if s := spanOfHeap(a); s != nil && !s.isUserArenaChunk {
+		// An object of Go's: its slot.
+		if base := s.base() + s.objIndex(a)*s.elemsize; elem.Size_ > base+s.elemsize-a {
+			return unsafe.Pointer(a | cEnd)
+		}
+	}
 	if !elem.Pointers() && elem.Align_ == 1 {
 		// Bytes, which C looks at everything as.
 		checkptrView(p, elem, 1)
@@ -812,6 +818,25 @@ func checkptrArithmetic(p unsafe.Pointer, originals []unsafe.Pointer) {
 			// the data.)
 			if len(originals) != 0 && checkptrAllVars(originals) && !checkptrVarEnd(p, originals) {
 				throw("checkptr: pointer arithmetic result points to invalid allocation")
+			}
+			// Nor what arithmetic on pointers to objects of
+			// the heap gives: p is in none of their objects,
+			// and what it is the address of, if anything, is
+			// not the program's: another thread's stack, what
+			// the runtime keeps outside the heap. (An integer
+			// that is no address, which C makes of a pointer
+			// less itself, is let be.)
+			if uintptr(p) >= minLegalPointer && len(originals) > 0 {
+				left := true
+				for _, original := range originals {
+					if spanOfHeap(uintptr(original)) == nil {
+						left = false
+						break
+					}
+				}
+				if left {
+					throw("checkptr: pointer arithmetic result is outside the object it was computed from")
+				}
 			}
 			return
 		case varFound:
