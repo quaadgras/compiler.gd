@@ -417,6 +417,10 @@ document.addEventListener('keydown', e => {
 $('scratch').addEventListener('keydown', e => {
   if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertText', false, '\t'); }
 });
+window.addEventListener('hashchange', () => {
+  const f = new URLSearchParams(location.hash.slice(1)).get('file');
+  if (f && f !== state.path && !state.scratch) { state.path = f; state.sel = -1; $('file').value = f; translate(); }
+});
 init();
 </script>
 </body>
