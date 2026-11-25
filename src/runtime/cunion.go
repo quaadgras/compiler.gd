@@ -118,6 +118,9 @@ func cUnionValueAt(a uintptr) *cUnionHdr {
 //
 //go:linkname c23UnionBox
 func c23UnionBox(slot *unsafe.Pointer, typ *_type) unsafe.Pointer {
+	if !cUnionsUsed {
+		cUnionsUsed = true
+	}
 	old := cUnionValue(*slot)
 	if old != nil && old.typ == typ && old.back == unsafe.Pointer(slot) {
 		return add(unsafe.Pointer(old), cUnionHeader)
@@ -205,6 +208,21 @@ var cUnionRefType *_type
 //
 //go:linkname c23SetUnionRef
 func c23SetUnionRef(t *_type) { cUnionRefType = t }
+
+// cUnionsUsed says that the program has a union with pointers: C that
+// declares one says so as the program starts (c23HasUnions), and a
+// conversion looks for the union that its pointer may be the address of
+// only then.
+var cUnionsUsed bool
+
+// c23HasUnions is what the code that cmd/cc generates for a union with
+// pointers calls as the program starts. It returns true.
+//
+//go:linkname c23HasUnions
+func c23HasUnions() bool {
+	cUnionsUsed = true
+	return true
+}
 
 // cIntcapType is internal/c23's Intcap, an intptr_t or a uintptr_t of
 // C's in memory: nil in a program that has no C. cCapID is the id of a

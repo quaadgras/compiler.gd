@@ -1256,6 +1256,11 @@ func cMoveBounds(a, n uintptr) *mspan {
 		size := s.elemsize
 		if s.spanclass.c() {
 			size = s.cSizeOf(i)
+		} else if cGoObjectWhole(s, s.base()+i*s.elemsize) {
+			// What holds a string, a slice or an interface of
+			// Go's is not bytes to C: what the library keeps
+			// for itself is made of them (c23Extent).
+			throw("checkptr: memory copied or set in an object of Go's that is not bytes")
 		}
 		if n > size-(a-s.base()-i*s.elemsize) {
 			throw("checkptr: memory copied or set past the end of its object")

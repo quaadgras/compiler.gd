@@ -151,7 +151,8 @@ func cObjectOf(a uintptr) (base, size uintptr, kind int) {
 		}
 		return base, s.elemsize, cObjGo
 	}
-	switch base, size, _, _, state := dataVarAt(a); state {
+	// (checkptrVar keeps the last few that it found.)
+	switch base, size, _, _, state := checkptrVar(a); state {
 	case varFound:
 		return base, size, cObjData
 	case varUnknown:
@@ -349,7 +350,7 @@ func checkptrConvC1(p unsafe.Pointer, elem *_type, load bool) unsafe.Pointer {
 	}
 	a &^= cPtrBits
 	p = unsafe.Pointer(a)
-	if cUnionRefType != nil && elem.Pointers() && !getg().m.cprobe {
+	if cUnionsUsed && elem.Pointers() && !getg().m.cprobe {
 		if q := cUnionConv(a, elem); q != nil {
 			return q
 		}

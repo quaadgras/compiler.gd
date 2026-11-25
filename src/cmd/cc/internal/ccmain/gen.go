@@ -42,26 +42,27 @@ type genError struct{ msg string }
 
 // pkgGen generates the Go of a package: one or more units.
 type pkgGen struct {
-	o        options
-	libcPkgs map[string]bool // the packages of internal/c23/... it calls (libcpkg.go)
-	file     string
-	units    []*unit
-	types    strings.Builder   // the mirror types
-	vars     strings.Builder   // package-level variables
-	inits    strings.Builder   // func init's statements
-	tdescs   map[string]string // the variable holding each mirror type's c23.Type
-	tdVars   strings.Builder   // their declarations
-	descInit strings.Builder   // the function descriptors' assignments
-	funcs    strings.Builder
-	mirrors  map[string]string // a record's layout key to its mirror's name
-	strs     map[string]string
-	ext      map[string]*symbol // the definitions with external linkage
-	names    map[*symbol]string
-	descs    map[string]bool    // function descriptors made
-	objs     map[*symbol]string // the Go expression of an object's value, known statically
-	recN     int
-	uses     map[string]bool  // imports used
-	stubs    map[*symbol]bool // undefined functions that have a stub (options.undef)
+	hasUnions bool // a union with pointers was declared: see mirror
+	o         options
+	libcPkgs  map[string]bool // the packages of internal/c23/... it calls (libcpkg.go)
+	file      string
+	units     []*unit
+	types     strings.Builder   // the mirror types
+	vars      strings.Builder   // package-level variables
+	inits     strings.Builder   // func init's statements
+	tdescs    map[string]string // the variable holding each mirror type's c23.Type
+	tdVars    strings.Builder   // their declarations
+	descInit  strings.Builder   // the function descriptors' assignments
+	funcs     strings.Builder
+	mirrors   map[string]string // a record's layout key to its mirror's name
+	strs      map[string]string
+	ext       map[string]*symbol // the definitions with external linkage
+	names     map[*symbol]string
+	descs     map[string]bool    // function descriptors made
+	objs      map[*symbol]string // the Go expression of an object's value, known statically
+	recN      int
+	uses      map[string]bool  // imports used
+	stubs     map[*symbol]bool // undefined functions that have a stub (options.undef)
 	// The 1:1 translation's objects whose initializer is in their Go
 	// declaration (thin.go's staticInit), and, while one's is being made,
 	// what it refers to.
@@ -565,6 +566,12 @@ func (g *gen) record(t *ctype) string {
 		}
 		fmt.Fprintf(&b, "// %s is C's %s, as Go sees it: the bytes of its members that have no\n// pointer, and the pointer to what of it has one.\ntype %s struct {\n\t_ [0]uint64\n%s\tp c23.UnionRef\n}\n\n",
 			name, what, name, own)
+		if !g.hasUnions {
+			// The runtime looks for the unions that pointers are
+			// the addresses of in a program that has one.
+			g.hasUnions = true
+			b.WriteString("var _ = c23.HasUnions()\n\n")
+		}
 	} else if bytes {
 		// As cgo does for unions, Go sees the bytes. The tag tells
 		// internal/c23 that they may hold pointers C stores, whose

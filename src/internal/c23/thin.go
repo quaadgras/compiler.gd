@@ -161,14 +161,14 @@ func Strcmp1(a, b *Void) int32 {
 }
 
 // Memcpy1 is memcpy and memmove: the n bytes are in the object that
-// each pointer points into.
+// each pointer points into, which the runtime's copy sees to
+// (runtime.c23Memmove).
 func Memcpy1(to, from *Void, n uint64) *Void {
 	if n != 0 {
 		if n != uint64(uintptr(n)) {
 			outside(to, ^uintptr(0), 0, true)
 		}
-		Check(from, uintptr(n))
-		memmove(Check(to, uintptr(n)), unsafe.Pointer(from), uintptr(n))
+		memmove(unsafe.Pointer(to), unsafe.Pointer(from), uintptr(n))
 	}
 	return to
 }
@@ -179,7 +179,7 @@ func Memset1(to *Void, c int32, n uint64) *Void {
 		if n != uint64(uintptr(n)) {
 			outside(to, ^uintptr(0), 0, true)
 		}
-		memset(Check(to, uintptr(n)), byte(c), uintptr(n))
+		memset(unsafe.Pointer(to), byte(c), uintptr(n))
 	}
 	return to
 }

@@ -210,5 +210,14 @@ func UnionGlobal[T any](p *T) bool {
 	return true
 }
 
+// HasUnions tells the runtime that the program has a union with
+// pointers: cmd/cc's code calls it for a file that declares one, and
+// the library does, whose own headers have some (a sigval). The
+// runtime looks for the union that a pointer may be the address of only
+// then (runtime.checkptrConvC). It returns true.
+//
+//go:linkname HasUnions runtime.c23HasUnions
+func HasUnions() bool
+
 //go:linkname unionGlobal runtime.c23UnionGlobal
 func unionGlobal(p unsafe.Pointer, t *abi.Type)
