@@ -6,8 +6,9 @@
 //
 //	misc/ccview/ccview [-addr localhost:8787] [-root ~/git/go-cfront] [dir or file]...
 //
-// The files offered are cmd/cc's testdata (thin, cxx and the top-level
-// C programs) and any directories or files named on the command line.
+// The files offered are cmd/cc's testdata (thin, cxx, the top-level
+// C programs and slimcc's tests) and any directories or files named on
+// the command line.
 package main
 
 import (
@@ -114,6 +115,7 @@ func handleFiles(w http.ResponseWriter, r *http.Request) {
 		{"testdata/thin", listDir(filepath.Join(td, "thin"))},
 		{"testdata/cxx", listDir(filepath.Join(td, "cxx"))},
 		{"testdata", listDir(td)},
+		{"testdata/slimcc", listDir(filepath.Join(td, "slimcc"))},
 	}
 	for _, x := range extra {
 		x, _ = filepath.Abs(x)
