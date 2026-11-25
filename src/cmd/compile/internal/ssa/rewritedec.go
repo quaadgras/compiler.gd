@@ -414,7 +414,7 @@ func rewriteValuedec_OpITab(v *Value) bool {
 	}
 	// match: (ITab x:(Load <t> ptr mem))
 	// cond: t.IsInterface()
-	// result: @x.Block (Load <typ.Uintptr> ptr mem)
+	// result: @x.Block (Load <typ.ITab> ptr mem)
 	for {
 		x := v_0
 		if x.Op != OpLoad {
@@ -427,7 +427,7 @@ func rewriteValuedec_OpITab(v *Value) bool {
 			break
 		}
 		b = x.Block
-		v0 := b.NewValue0(v.Pos, OpLoad, typ.Uintptr)
+		v0 := b.NewValue0(v.Pos, OpLoad, typ.ITab)
 		v.copyOf(v0)
 		v0.AddArg2(ptr, mem)
 		return true
@@ -594,7 +594,7 @@ func rewriteValuedec_OpLoad(v *Value) bool {
 	}
 	// match: (Load <t> ptr mem)
 	// cond: t.IsInterface()
-	// result: (IMake (Load <typ.Uintptr> ptr mem) (Load <typ.BytePtr> (OffPtr <typ.BytePtrPtr> [config.PtrSize] ptr) mem) (Load <typ.Float64> (OffPtr <typ.Float64Ptr> [2*config.PtrSize] ptr) mem) (Load <typ.Float64> (OffPtr <typ.Float64Ptr> [2*config.PtrSize+8] ptr) mem))
+	// result: (IMake (Load <typ.ITab> ptr mem) (Load <typ.BytePtr> (OffPtr <typ.BytePtrPtr> [config.PtrSize] ptr) mem) (Load <typ.Float64> (OffPtr <typ.Float64Ptr> [2*config.PtrSize] ptr) mem) (Load <typ.Float64> (OffPtr <typ.Float64Ptr> [2*config.PtrSize+8] ptr) mem))
 	for {
 		t := v.Type
 		ptr := v_0
@@ -603,7 +603,7 @@ func rewriteValuedec_OpLoad(v *Value) bool {
 			break
 		}
 		v.reset(OpIMake)
-		v0 := b.NewValue0(v.Pos, OpLoad, typ.Uintptr)
+		v0 := b.NewValue0(v.Pos, OpLoad, typ.ITab)
 		v0.AddArg2(ptr, mem)
 		v1 := b.NewValue0(v.Pos, OpLoad, typ.BytePtr)
 		v2 := b.NewValue0(v.Pos, OpOffPtr, typ.BytePtrPtr)
@@ -957,7 +957,7 @@ func rewriteValuedec_OpStore(v *Value) bool {
 		return true
 	}
 	// match: (Store dst (IMake itab data real imag) mem)
-	// result: (Store {typ.Float64} (OffPtr <typ.Float64Ptr> [2*config.PtrSize+8] dst) imag (Store {typ.Float64} (OffPtr <typ.Float64Ptr> [2*config.PtrSize] dst) real (Store {typ.BytePtr} (OffPtr <typ.BytePtrPtr> [config.PtrSize] dst) data (Store {typ.Uintptr} dst itab mem))))
+	// result: (Store {typ.Float64} (OffPtr <typ.Float64Ptr> [2*config.PtrSize+8] dst) imag (Store {typ.Float64} (OffPtr <typ.Float64Ptr> [2*config.PtrSize] dst) real (Store {typ.BytePtr} (OffPtr <typ.BytePtrPtr> [config.PtrSize] dst) data (Store {typ.ITab} dst itab mem))))
 	for {
 		dst := v_0
 		if v_1.Op != OpIMake {
@@ -984,7 +984,7 @@ func rewriteValuedec_OpStore(v *Value) bool {
 		v4.AuxInt = int64ToAuxInt(config.PtrSize)
 		v4.AddArg(dst)
 		v5 := b.NewValue0(v.Pos, OpStore, types.TypeMem)
-		v5.Aux = typeToAux(typ.Uintptr)
+		v5.Aux = typeToAux(typ.ITab)
 		v5.AddArg3(dst, itab, mem)
 		v3.AddArg3(v4, data, v5)
 		v1.AddArg3(v2, real, v3)

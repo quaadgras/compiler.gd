@@ -108,7 +108,7 @@ func c128hash(p unsafe.Pointer, h uintptr) uintptr {
 
 func interhash(p unsafe.Pointer, h uintptr) uintptr {
 	x := (*iface)(p)
-	if x.tab == 0 {
+	if x.tab == typeWordOf(nil) {
 		return h
 	}
 	return ifaceHash((*itab)(unsafe.Pointer(x.tab)).Type, (*eface)(p), h)
@@ -116,7 +116,7 @@ func interhash(p unsafe.Pointer, h uintptr) uintptr {
 
 func nilinterhash(p unsafe.Pointer, h uintptr) uintptr {
 	x := (*eface)(p)
-	if x._type == 0 {
+	if x._type == typeWordOf(nil) {
 		return h
 	}
 	return ifaceHash((*_type)(unsafe.Pointer(x._type)), x, h)

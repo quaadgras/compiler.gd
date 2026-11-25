@@ -7796,10 +7796,10 @@ func rewriteValuegeneric_OpConstInterface(v *Value) bool {
 	b := v.Block
 	typ := &b.Func.Config.Types
 	// match: (ConstInterface)
-	// result: (IMake (ConstNil <typ.Uintptr>) (ConstNil <typ.BytePtr>) (Const64F <typ.Float64> [0]) (Const64F <typ.Float64> [0]))
+	// result: (IMake (ConstNil <typ.ITab>) (ConstNil <typ.BytePtr>) (Const64F <typ.Float64> [0]) (Const64F <typ.Float64> [0]))
 	for {
 		v.reset(OpIMake)
-		v0 := b.NewValue0(v.Pos, OpConstNil, typ.Uintptr)
+		v0 := b.NewValue0(v.Pos, OpConstNil, typ.ITab)
 		v1 := b.NewValue0(v.Pos, OpConstNil, typ.BytePtr)
 		v2 := b.NewValue0(v.Pos, OpConst64F, typ.Float64)
 		v2.AuxInt = float64ToAuxInt(0)

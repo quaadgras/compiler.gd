@@ -2774,7 +2774,7 @@ func (s *state) inlineStagePtr(pos src.XPos, resultT *types.Type, iface *ssa.Val
 func (s *state) inlineOrBoxedPtr(pos src.XPos, iface *ssa.Value, srcT *types.Type) *ssa.Value {
 	byteptr := s.f.Config.Types.BytePtr
 	u8 := types.Types[types.TUINT8]
-	itab := s.newValue1(ssa.OpITab, types.Types[types.TUINTPTR], iface)
+	itab := s.newValue1(ssa.OpITab, s.f.Config.Types.ITab, iface)
 
 	// Stage inline halves unconditionally — writes are to a fresh
 	// pointer-free stack temp, so the boxed side pays only a couple
@@ -7017,7 +7017,7 @@ func ifaceExtSig(sig *types.Type) *types.Type {
 // that rebuilds its receiver from the data word and the payload.
 func (s *state) getClosureAndRcvrExt(fn *ir.SelectorExpr) (closure, rcvr, re, im *ssa.Value) {
 	i := s.expr(fn.X)
-	itab := s.newValue1(ssa.OpITab, types.Types[types.TUINTPTR], i)
+	itab := s.newValue1(ssa.OpITab, s.f.Config.Types.ITab, i)
 	s.nilCheck(itab)
 	itabidx := fn.Offset() + rttype.ITab.OffsetOf("Fun")
 	closure = s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.UintptrPtr, itabidx, itab)
@@ -7032,7 +7032,7 @@ func (s *state) getClosureAndRcvrExt(fn *ir.SelectorExpr) (closure, rcvr, re, im
 // interface call
 func (s *state) getClosureAndRcvr(fn *ir.SelectorExpr) (*ssa.Value, *ssa.Value) {
 	i := s.expr(fn.X)
-	itab := s.newValue1(ssa.OpITab, types.Types[types.TUINTPTR], i)
+	itab := s.newValue1(ssa.OpITab, s.f.Config.Types.ITab, i)
 	s.nilCheck(itab)
 	itabidx := fn.Offset() + rttype.ITab.OffsetOf("Fun")
 	closure := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.UintptrPtr, itabidx, itab)

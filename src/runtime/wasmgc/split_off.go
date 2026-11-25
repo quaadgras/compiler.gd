@@ -22,3 +22,10 @@ func newarray(t *_type, n int) unsafe.Pointer      { panic("split") }
 func splitmove(dst, src unsafe.Pointer, n uintptr) { panic("split") }
 func splitzero(p unsafe.Pointer, n uintptr)        { panic("split") }
 func splitslots(n uintptr) uintptr                 { panic("split") }
+
+// typeWord is the word of an interface that holds its type or its
+// table: an integer in memory.
+type typeWord = uintptr
+
+func typeWordOf(p unsafe.Pointer) typeWord  { return uintptr(p) }
+func typeWordPtr(w typeWord) unsafe.Pointer { return unsafe.Pointer(w) }

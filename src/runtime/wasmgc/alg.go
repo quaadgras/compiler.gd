@@ -29,7 +29,7 @@ func interequal(p, q unsafe.Pointer) bool {
 	if x.tab != y.tab {
 		return false
 	}
-	if x.tab == 0 {
+	if x.tab == typeWordOf(nil) {
 		return true
 	}
 	return ifaceEqual((*itab)(unsafe.Pointer(x.tab)).Type, (*eface)(p), (*eface)(q))
@@ -41,7 +41,7 @@ func nilinterequal(p, q unsafe.Pointer) bool {
 	if x._type != y._type {
 		return false
 	}
-	if x._type == 0 {
+	if x._type == typeWordOf(nil) {
 		return true
 	}
 	return ifaceEqual((*_type)(unsafe.Pointer(x._type)), x, y)

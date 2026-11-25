@@ -72,7 +72,7 @@ func KeepAlive(x any) {}
 // specification allows (a finalizer needs the object, which the host
 // has collected when it says so). runtime.AddCleanup works.
 func SetFinalizer(obj any, finalizer any) {
-	if efaceOf(&obj)._type == 0 {
+	if efaceOf(&obj)._type == typeWordOf(nil) {
 		panic(plainError("runtime.SetFinalizer: first argument is nil"))
 	}
 }
@@ -391,7 +391,7 @@ func printslice(s []byte) {
 func printeface(e any) {
 	x := efaceOf(&e)
 	printstring("(")
-	printhex(uint64(x._type))
+	printhex(uint64(uintptr(unsafe.Pointer(x._type))))
 	printstring(",")
 	printpointer(x.data)
 	printstring(")")

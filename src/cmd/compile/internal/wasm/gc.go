@@ -106,6 +106,7 @@ type gcGen struct {
 	scratchI32, scratchRef, scratchI64 int32              // scratch locals, or -1
 	scratchI32b                        int32              // a second i32 scratch local (split), or -1
 	fptr                               int32              // split: the local of the pointer to the frame
+	checked                            bool               // split: what is loaded and stored through a pointer is in what it points into (gcsplit.go)
 	framePtrs                          map[*ir.Name]int32 // split: the local of the pointer to each variable with pointers in the frame
 	scratchNil                         int32              // the scratch local of intToPtr, or -1
 	pos                                src.XPos           // of the value being generated
@@ -809,8 +810,9 @@ func (g *gcGen) onStack(v *ssa.Value, extend bool) {
 		g.prog(wasm.AI32WrapI64)
 		g.br(wasm.ABrIf, blk, nil)
 		g.prog(wasm.ADrop)
-		g.spPushPtrRel(g.spResolve(v.Args[0]))
-		g.helper(wasm.GCSplitLoadPtr)
+		a := g.spResolve(v.Args[0])
+		g.spPushPtrRel(a)
+		g.helper(g.splitHelperAt(wasm.GCSplitLoadPtr, a))
 		g.prog(wasm.AEnd)
 
 	case ssa.OpCopy, ssa.OpWasmLoweredConvert, ssa.OpConvert:
@@ -913,7 +915,7 @@ func (g *gcGen) ptrToInt() {
 // to a pointer.
 func (g *gcGen) intToPtr() {
 	if gcSplit() {
-		g.helper(wasm.GCSplitIntToPtr)
+		g.helper(g.splitHelper(wasm.GCSplitIntToPtr))
 		return
 	}
 	// 0 is nil.
@@ -3191,6 +3193,7 @@ func gcRemat(v *ssa.Value) bool {
 func genWasmGC(s *ssagen.State, f *ssa.Func) {
 	g := &gcGen{s: s, f: f, ctxt: s.GD().Ctxt, scratchI32: -1, scratchRef: -1, scratchI64: -1, scratchNil: -1, scratchI32b: -1, fptr: -1, fused: make(map[ssa.ID]bool)}
 	s.WasmGC = g
+	g.checked = splitChecked(s, f)
 	defer func() {
 		// TODO: nothing should be unsupported.
 		switch e := recover().(type) {

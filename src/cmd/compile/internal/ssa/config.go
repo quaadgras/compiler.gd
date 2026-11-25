@@ -106,6 +106,14 @@ type Types struct {
 	Uintptr    *types.Type
 	String     *types.Type
 	BytePtr    *types.Type // TODO: use unsafe.Pointer instead?
+	// ITab is the type of the word of an interface that holds its
+	// type or its table: an integer, as Go has it, which the collector
+	// does not look at. With GOWASM=gc,split it is a pointer in memory
+	// as it is in a register, so that it is read as the pointer that
+	// was stored, with the size of what it points to
+	// (cmd/compile/internal/wasm/gcsplit.go), and never made of the
+	// integer that a program may have written there.
+	ITab *types.Type
 	Int32Ptr   *types.Type
 	UInt32Ptr  *types.Type
 	IntPtr     *types.Type
@@ -153,6 +161,10 @@ func (t *Types) SetTypPtrs() {
 	t.Uintptr = types.Types[types.TUINTPTR]
 	t.String = types.Types[types.TSTRING]
 	t.BytePtr = types.NewPtr(types.Types[types.TUINT8])
+	t.ITab = t.Uintptr
+	if buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.Split {
+		t.ITab = t.BytePtr
+	}
 	t.Int32Ptr = types.NewPtr(types.Types[types.TINT32])
 	t.UInt32Ptr = types.NewPtr(types.Types[types.TUINT32])
 	t.IntPtr = types.NewPtr(types.Types[types.TINT])

@@ -433,7 +433,7 @@ func reflectlite_ifaceE2I(t *_type, e any, dst unsafe.Pointer) {
 func ifaceE2I(t *_type, e any, dst unsafe.Pointer) {
 	x := efaceOf(&e)
 	d := (*iface)(dst)
-	d.tab = uintptr(unsafe.Pointer(getitab((*interfacetype)(unsafe.Pointer(t)), (*_type)(unsafe.Pointer(x._type)), false)))
+	d.tab = typeWordOf(unsafe.Pointer(getitab((*interfacetype)(unsafe.Pointer(t)), (*_type)(unsafe.Pointer(x._type)), false)))
 	d.data = x.data
 	d.w0 = x.w0
 	d.w1 = x.w1

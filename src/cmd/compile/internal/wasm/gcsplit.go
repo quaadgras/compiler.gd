@@ -8,6 +8,7 @@ import (
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/reflectdata"
 	"cmd/compile/internal/ssa"
+	"cmd/compile/internal/ssagen"
 	"cmd/compile/internal/types"
 	"cmd/internal/obj"
 	"cmd/internal/obj/wasm"
@@ -15,6 +16,7 @@ import (
 	"cmp"
 	"internal/buildcfg"
 	"math"
+	"os"
 	"slices"
 )
 
@@ -40,6 +42,66 @@ import (
 
 func gcSplit() bool { return buildcfg.GOWASM.Split }
 
+// Bounds.
+//
+// A pointer has the size of what it points into (wasm.GCPtrLim), and
+// how far its address is from where that begins (wasm.GCPtrOff): the
+// block of an allocation, a variable of a frame, the data. Code that is
+// not the runtime's loads and stores through a pointer only what is
+// inside (wasm.GCSplitCheck), whatever made the pointer: the program
+// may have added anything to it, and converted it to a pointer to
+// anything (package unsafe, C that cmd/cc compiled). A pointer made of
+// an integer has no size, and nothing is loaded through it. So a
+// program reaches the memory that it was given pointers to and no
+// other, whatever it does: doc/gd/cc.md, "On wasm".
+//
+// What is not checked: an address that the compiler made itself, of a
+// variable of the frame or of the data, at a constant offset or at an
+// index that Go checked; and the runtime, which makes pointers of
+// addresses.
+
+// splitChecked reports whether the code of f is checked.
+func splitChecked(s *ssagen.State, f *ssa.Func) bool {
+	if !gcSplit() || os.Getenv("GOWASMGC_NOBOUNDS") != "" {
+		return false
+	}
+	if s.GD().Flag.CompilingRuntime {
+		return false
+	}
+	if fn := f.Frontend().Func(); fn != nil && fn.Pragma&ir.NoCheckPtr != 0 {
+		return false
+	}
+	return true
+}
+
+// splitHelper returns the function name of the linker's, or the form
+// of it that checked code calls.
+func (g *gcGen) splitHelper(name string) string {
+	if g.checked {
+		return wasm.GCSplitChecked(name)
+	}
+	return name
+}
+
+// integer reports whether a is an address that the compiler has as an
+// integer: the word of an interface that holds its type or its table,
+// which is the address of a descriptor in the data, and what is read
+// from there. (An integer that the program converts to a pointer is a
+// pointer, of no size, before anything is loaded through it.)
+func (g *gcGen) integer(a spAddr) bool {
+	return a.kind == spBase && g.wtype(a.base.Type) == 'l'
+}
+
+// splitHelperAt is splitHelper for a load or a store at a.
+func (g *gcGen) splitHelperAt(name string, as ...spAddr) string {
+	for _, a := range as {
+		if g.integer(a) {
+			return name
+		}
+	}
+	return g.splitHelper(name)
+}
+
 func (g *gcGen) ptrSym() *obj.LSym { return wasm.GCTypeSym(g.ctxt, wasm.GCPtr) }
 
 // The kinds of base of an address.
@@ -57,6 +119,7 @@ type spTerm struct {
 
 type spAddr struct {
 	kind  int
+	added bool       // an offset was added that Go did not check (unsafe.Add, pointer arithmetic)
 	base  *ssa.Value // spBase
 	local int32      // spLocal
 	sym   *obj.LSym  // spStatic
@@ -82,6 +145,7 @@ func (g *gcGen) spResolve(v *ssa.Value) spAddr {
 			continue
 		case ssa.OpAddPtr:
 			a.addTerm(v.Args[1], 1)
+			a.added = true
 			v = v.Args[0]
 			continue
 		case ssa.OpLocalAddr:
@@ -173,6 +237,53 @@ func (g *gcGen) spPushAddr(a spAddr) int64 {
 	return off
 }
 
+// direct reports whether a, the address of n bytes, is one that the
+// compiler made itself and needs no check: of a variable of the frame
+// or of the data, with nothing added but what Go checked. It returns
+// -1 if a load or a store there is to be checked, and 1 if not.
+func (a spAddr) direct(g *gcGen, n int64) int {
+	switch a.kind {
+	case spFrame:
+		if a.added {
+			return -1
+		}
+		// (A constant offset may be what was added, folded.)
+		if in := a.off - g.frame[a.name]; len(a.dyn) == 0 && (in < 0 || in+n > a.name.Type().Size()) {
+			return -1
+		}
+		return 1
+	case spStatic:
+		if a.added {
+			return -1
+		}
+		return 1
+	}
+	return -1
+}
+
+// spPushAddrN is spPushAddr for a load or a store of n bytes at a,
+// which in checked code are in what the pointer points into.
+func (g *gcGen) spPushAddrN(a spAddr, n int64) int64 {
+	if !g.checked || a.direct(g, n) > 0 || g.integer(a) {
+		return g.spPushAddr(a)
+	}
+	g.spPushPtrRel(a)
+	switch n {
+	case 1:
+		g.helper(wasm.GCSplitCheck1)
+	case 2:
+		g.helper(wasm.GCSplitCheck2)
+	case 4:
+		g.helper(wasm.GCSplitCheck4)
+	case 8:
+		g.helper(wasm.GCSplitCheck8)
+	default:
+		i32Const(g.s, int32(n))
+		g.helper(wasm.GCSplitCheck)
+	}
+	return 0
+}
+
 // spPushPtrRel pushes a pointer and an offset in bytes from it (an
 // i32) that a is.
 func (g *gcGen) spPushPtrRel(a spAddr) {
@@ -188,6 +299,11 @@ func (g *gcGen) spPushPtrRel(a spAddr) {
 		if l, ok := g.framePtrs[a.name]; ok {
 			// A variable with pointers: its own pointer, and array.
 			g.local(wasm.ALocalGet, l)
+			a.off -= g.frame[a.name]
+		} else if g.checked {
+			// A pointer to the variable alone: what is added to
+			// it stays in it.
+			g.splitFrameVar(a.name)
 			a.off -= g.frame[a.name]
 		} else {
 			g.local(wasm.ALocalGet, g.fptr)
@@ -267,10 +383,10 @@ func (g *gcGen) splitLoad(v *ssa.Value) {
 	t := spScalar(v.Type)
 	if g.wtype(v.Type) == 'r' {
 		g.spPushPtrRel(a)
-		g.helper(wasm.GCSplitLoadPtr)
+		g.helper(g.splitHelperAt(wasm.GCSplitLoadPtr, a))
 		return
 	}
-	off := g.spPushAddr(a)
+	off := g.spPushAddrN(a, t.Size())
 	p := g.prog(loadOp(t))
 	p.From = obj.Addr{Type: obj.TYPE_CONST, Offset: off}
 	if w := g.wtype(t); w != g.wtype(v.Type) {
@@ -286,11 +402,11 @@ func (g *gcGen) splitStore(addr *ssa.Value, t *types.Type, have byte, val func()
 		g.spPushPtrRel(a)
 		val()
 		g.spConvert(have, 'r', v)
-		g.helper(wasm.GCSplitStorePtr)
+		g.helper(g.splitHelperAt(wasm.GCSplitStorePtr, a))
 		return
 	}
 	st := spScalar(t)
-	off := g.spPushAddr(a)
+	off := g.spPushAddrN(a, st.Size())
 	val()
 	g.spConvert(have, g.wtype(st), v)
 	p := g.prog(storeOp(st))
@@ -328,7 +444,7 @@ func (g *gcGen) splitPointer(v *ssa.Value) {
 	case a.kind == spBase && a.off == 0 && len(a.dyn) == 0:
 		g.get(a.base, false)
 		if g.wtype(a.base.Type) == 'l' {
-			g.helper(wasm.GCSplitIntToPtr)
+			g.helper(g.splitHelper(wasm.GCSplitIntToPtr))
 		}
 		return
 	}
@@ -363,12 +479,12 @@ func (g *gcGen) splitMove(v *ssa.Value, t *types.Type) {
 		g.spPushPtrRel(dst)
 		g.spPushPtrRel(src)
 		i32Const(g.s, int32(size))
-		g.helper(wasm.GCSplitMove)
+		g.helper(g.splitHelperAt(wasm.GCSplitMove, dst, src))
 		return
 	}
 	d, s := g.scratch('i'), g.scratch2()
-	g.spAddrLocal(dst, d)
-	g.spAddrLocal(src, s)
+	g.spAddrLocal(dst, d, size)
+	g.spAddrLocal(src, s, size)
 	if size > spSmall {
 		g.local(wasm.ALocalGet, d)
 		g.local(wasm.ALocalGet, s)
@@ -397,11 +513,11 @@ func (g *gcGen) splitZero(v *ssa.Value, t *types.Type) {
 	if t.HasPointers() {
 		g.spPushPtrRel(a)
 		i32Const(g.s, int32(size))
-		g.helper(wasm.GCSplitZero)
+		g.helper(g.splitHelperAt(wasm.GCSplitZero, a))
 		return
 	}
 	d := g.scratch('i')
-	g.spAddrLocal(a, d)
+	g.spAddrLocal(a, d, size)
 	if size > spSmall {
 		g.local(wasm.ALocalGet, d)
 		i32Const(g.s, 0)
@@ -418,9 +534,9 @@ func (g *gcGen) splitZero(v *ssa.Value, t *types.Type) {
 	}
 }
 
-// spAddrLocal sets the i32 local l to the address a.
-func (g *gcGen) spAddrLocal(a spAddr, l int32) {
-	if off := g.spPushAddr(a); off != 0 {
+// spAddrLocal sets the i32 local l to the address a, of n bytes.
+func (g *gcGen) spAddrLocal(a spAddr, l int32, n int64) {
+	if off := g.spPushAddrN(a, n); off != 0 {
 		i32Const(g.s, int32(off))
 		g.prog(wasm.AI32Add)
 	}
@@ -621,6 +737,20 @@ func (g *gcGen) splitCall(v *ssa.Value, name string, args []*ssa.Value) bool {
 		i32Const(g.s, 0)
 		g.get(args[2], true)
 		g.helper(wasm.GCSplitMove)
+	case "runtime.splitmovec":
+		// The runtime's copy for the program: of what the two
+		// pointers point into.
+		g.get(args[0], false)
+		i32Const(g.s, 0)
+		g.get(args[1], false)
+		i32Const(g.s, 0)
+		g.get(args[2], true)
+		g.helper(wasm.GCSplitChecked(wasm.GCSplitMove))
+	case "runtime.splitzeroc":
+		g.get(args[0], false)
+		i32Const(g.s, 0)
+		g.get(args[1], true)
+		g.helper(wasm.GCSplitChecked(wasm.GCSplitZero))
 	case "runtime.splitzero":
 		g.get(args[0], false)
 		i32Const(g.s, 0)

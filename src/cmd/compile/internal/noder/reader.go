@@ -2899,7 +2899,7 @@ func (r *reader) funcInst(pos src.XPos) (wrapperFn, baseFn, dictPtr ir.Node) {
 		// TODO(mdempsky): Is there a more robust way to get the
 		// dictionary pointer type here?
 		dictPtrType := baseFn.Type().Param(0).Type
-		dictPtr = typecheck.Expr(r.gd, ir.NewConvExpr(r.gd, pos, ir.OCONVNOP, dictPtrType, r.dictWord(pos, r.dict.subdictsOffset()+idx)))
+		dictPtr = r.dictPtrWord(pos, r.dict.subdictsOffset()+idx, dictPtrType)
 
 		return
 	}
@@ -3192,7 +3192,7 @@ func (r *reader) methodExpr() (wrapperFn, baseFn, dictPtr ir.Node) {
 		// TODO(mdempsky): Is there a more robust way to get the
 		// dictionary pointer type here?
 		dictPtrType := shapedFn.Type().Param(1).Type
-		dictPtr := typecheck.Expr(r.gd, ir.NewConvExpr(r.gd, pos, ir.OCONVNOP, dictPtrType, r.dictWord(pos, r.dict.subdictsOffset()+idx)))
+		dictPtr := r.dictPtrWord(pos, r.dict.subdictsOffset()+idx, dictPtrType)
 
 		return nil, shapedFn, dictPtr
 	}
@@ -3597,7 +3597,25 @@ func (r *reader) dictWord(pos src.XPos, idx int) ir.Node {
 // rttiWord is like dictWord, but converts it to *byte (the type used
 // internally to represent *runtime._type and *runtime.itab).
 func (r *reader) rttiWord(pos src.XPos, idx int) ir.Node {
-	return typecheck.Expr(r.gd, ir.NewConvExpr(r.gd, pos, ir.OCONVNOP, types.NewPtr(types.Types[types.TUINT8]), r.dictWord(pos, idx)))
+	return r.dictPtrWord(pos, idx, types.NewPtr(types.Types[types.TUINT8]))
+}
+
+// dictPtrWord returns the word idx of the dictionary as a pointer of
+// type typ: the address of a descriptor, a table or another dictionary.
+//
+// With GOWASM=gc,split a pointer is not made of an integer: the word is
+// loaded as the pointer that it is (the linker gives every word of the
+// data that is an address its pointer), so that what is loaded through
+// it can be told to be inside what it points to
+// (cmd/compile/internal/wasm/gcsplit.go).
+func (r *reader) dictPtrWord(pos src.XPos, idx int, typ *types.Type) ir.Node {
+	word := r.dictWord(pos, idx)
+	if !(buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.Split) {
+		return typecheck.Expr(r.gd, ir.NewConvExpr(r.gd, pos, ir.OCONVNOP, typ, word))
+	}
+	addr := ir.NewConvExpr(r.gd, pos, ir.OCONVNOP, types.Types[types.TUNSAFEPTR], typecheck.NodAddrAt(r.gd, pos, word))
+	p := ir.NewConvExpr(r.gd, pos, ir.OCONVNOP, types.NewPtr(typ), addr)
+	return typecheck.Expr(r.gd, ir.NewStarExpr(r.gd, pos, p))
 }
 
 // rtype reads a type reference from the element bitstream, and

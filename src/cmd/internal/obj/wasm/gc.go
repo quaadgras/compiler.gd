@@ -256,6 +256,20 @@ const (
 	GCSplitNew      = "wasm.snew"     // (addr i32, nslots i32, size i32) ptr: a pointer to a new block of size bytes
 	GCSplitStrLen   = "wasm.strlen"   // (a, b i64) i64: the length of the string of wasm32 whose A and B these are (with 4-byte words only)
 
+	// What code that is not the runtime's loads and stores through a
+	// pointer is in what the pointer points into: GCSplitCheck (p, rel
+	// i32, n i32) i32 returns the address of the n bytes at rel from
+	// p, and traps if they are not all between GCPtrOff - GCPtrOff
+	// and GCPtrLim. GCSplitCheck1 and the others are that for 1, 2, 4
+	// and 8 bytes. The functions above have a form that asks the same
+	// (GCSplitChecked), and whose pointer made of an integer is one
+	// with no size, which nothing is loaded through.
+	GCSplitCheck  = "wasm.chk"
+	GCSplitCheck1 = "wasm.chk1"
+	GCSplitCheck2 = "wasm.chk2"
+	GCSplitCheck4 = "wasm.chk4"
+	GCSplitCheck8 = "wasm.chk8"
+
 	// GCGlobalSlots is the global (with split) that holds the array of
 	// the program's data, which covers all of it from address 0, and
 	// GCGlobalStatic the one that holds a GCPtr to address 0 with that
@@ -813,6 +827,11 @@ func (t *gcLineTable) write(ctxt *obj.Link, s *obj.LSym, w *bytes.Buffer) {
 	})
 	w.Write(t.buf.Bytes())
 }
+
+// GCSplitChecked returns the name of the form of the function name
+// (GCSplitLoadPtr, GCSplitStorePtr, GCSplitIntToPtr, GCSplitMove or
+// GCSplitZero) that code which is not the runtime's calls.
+func GCSplitChecked(name string) string { return name + "c" }
 
 // GCTypeAddr is the WebAssembly type of an address in linear memory,
 // of the fields GCPtrAddr and GCPtrOff of a GCPtr, and of an address

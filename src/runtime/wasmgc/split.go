@@ -148,3 +148,12 @@ func splitbase(p unsafe.Pointer) uintptr {
 	}
 	return a - ptroff(p)
 }
+
+// typeWord is the word of an interface that holds its type or its
+// table. With split it is a pointer in memory, as the compiler has it
+// (cmd/compile/internal/ssa's Types.ITab): it is read as the pointer
+// that was stored there, and not made of an integer.
+type typeWord = unsafe.Pointer
+
+func typeWordOf(p unsafe.Pointer) typeWord  { return p }
+func typeWordPtr(w typeWord) unsafe.Pointer { return w }

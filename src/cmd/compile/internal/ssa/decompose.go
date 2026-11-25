@@ -260,7 +260,7 @@ func decomposeComplexPhi(v *Value) {
 func decomposeInterfacePhi(v *Value) {
 	// gd fat-interface: split phi of iface into four sub-phis matching
 	// OpIMake's 4 args (itab, data, inline_real, inline_imag).
-	uintptrType := v.Block.Func.Config.Types.Uintptr
+	uintptrType := v.Block.Func.Config.Types.ITab
 	ptrType := v.Block.Func.Config.Types.BytePtr
 	f64Type := v.Block.Func.Config.Types.Float64
 

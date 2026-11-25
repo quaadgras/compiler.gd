@@ -96,6 +96,16 @@ var gcSplitHelpers = []string{
 	gcSplitSlotsOf,
 	gcSplitMkPtr,
 	gcSplitSetPtr,
+	wasm.GCSplitCheck,
+	wasm.GCSplitCheck1,
+	wasm.GCSplitCheck2,
+	wasm.GCSplitCheck4,
+	wasm.GCSplitCheck8,
+	wasm.GCSplitLoadPtr + "c",
+	wasm.GCSplitStorePtr + "c",
+	wasm.GCSplitIntToPtr + "c",
+	wasm.GCSplitMove + "c",
+	wasm.GCSplitZero + "c",
 }
 
 // gcSplitSlotsOf is the function, exported to the host as "slotsof",
@@ -306,6 +316,20 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 		gcSplitMkPtr:         "iaii.r",
 		gcSplitSetPtr:        "rii.",
 		wasm.GCSplitStrLen:   "ll.l",
+		wasm.GCSplitCheck:    "rii.i",
+		wasm.GCSplitCheck1:   "ri.i",
+		wasm.GCSplitCheck2:   "ri.i",
+		wasm.GCSplitCheck4:   "ri.i",
+		wasm.GCSplitCheck8:   "ri.i",
+	}
+	// The form of a function that checked code calls (see
+	// wasm.GCSplitChecked) is the function with a check before it.
+	for _, name := range []string{wasm.GCSplitLoadPtr, wasm.GCSplitStorePtr, wasm.GCSplitIntToPtr, wasm.GCSplitMove, wasm.GCSplitZero} {
+		sigs[wasm.GCSplitChecked(name)] = sigs[name]
+	}
+	chkWord := wasm.GCSplitCheck4
+	if l.ptrSize() == 8 {
+		chkWord = wasm.GCSplitCheck8
 	}
 	index := func(name string) int {
 		i, _ := l.splitHelperIndex(name)
@@ -330,13 +354,83 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 	var fns []*wasmFunc
 	for _, name := range l.splitHelperNames() {
 		a := &gcAsm{l: l}
-		switch name {
+		// checked is set for the form of a function that code which is
+		// not the runtime's calls.
+		checked := false
+		kind := name
+		if _, ok := sigs[name[:len(name)-1]]; ok && name[len(name)-1] == 'c' && name != wasm.GCSplitCheck {
+			checked, kind = true, name[:len(name)-1]
+		}
+		intToPtr := index(wasm.GCSplitIntToPtr)
+		if checked {
+			intToPtr = index(wasm.GCSplitChecked(wasm.GCSplitIntToPtr))
+		}
+		// inBlock traps unless the n bytes (n < 0: as many as local
+		// nloc) at local rel from the pointer of local p are in what
+		// it points into.
+		inBlock := func(p, rel uint32, n int64, nloc uint32) {
+			if !checked {
+				return
+			}
+			a.get(p)
+			a.get(rel)
+			switch {
+			case n < 0:
+				a.get(nloc)
+				a.call(index(wasm.GCSplitCheck))
+			case n == l.ptrSize():
+				a.call(index(chkWord))
+			default:
+				a.i32(n)
+				a.call(index(wasm.GCSplitCheck))
+			}
+			a.op(0x1A) // drop
+		}
+		switch kind {
+		case wasm.GCSplitCheck, wasm.GCSplitCheck1, wasm.GCSplitCheck2, wasm.GCSplitCheck4, wasm.GCSplitCheck8:
+			// The bytes from off+rel on, n of them, end at lim or
+			// before it: in 64 bits, so that nothing wraps. (An
+			// offset that is negative is a large one.)
+			// p 0, rel 1 (, n 2)
+			a.splitLocals("")
+			a.get(0)
+			get(a, wasm.GCPtrOff)
+			a.get(1)
+			a.op(0x6A) // i32.add
+			a.op(0xAD) // i64.extend_i32_u
+			switch kind {
+			case wasm.GCSplitCheck:
+				a.get(2)
+				a.op(0xAD)
+			case wasm.GCSplitCheck1:
+				a.op(0x42, 1) // i64.const
+			case wasm.GCSplitCheck2:
+				a.op(0x42, 2)
+			case wasm.GCSplitCheck4:
+				a.op(0x42, 4)
+			case wasm.GCSplitCheck8:
+				a.op(0x42, 8)
+			}
+			a.op(0x7C) // i64.add
+			a.get(0)
+			get(a, wasm.GCPtrLim)
+			a.op(0xAD)
+			a.op(0x56) // i64.gt_u
+			a.if_()
+			a.unreachable()
+			a.end()
+			a.get(0)
+			get(a, wasm.GCPtrAddr)
+			a.get(1)
+			a.op(0x6A)
+			a.end()
 		case wasm.GCSplitLoadPtr:
 			// The element of the array, if there is one and its
 			// address is what memory holds; or else the address in
 			// memory, made a pointer (it was written as an integer).
 			// p 0, rel 1; arr 2, i 3, r 4, addr 5
 			a.splitLocals("airi")
+			inBlock(0, 1, l.ptrSize(), 0)
 			a.get(0)
 			get(a, wasm.GCPtrAddr)
 			a.get(1)
@@ -375,11 +469,12 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.end()
 			a.get(5)
 			a.loadWord(0)
-			a.call(index(wasm.GCSplitIntToPtr))
+			a.call(intToPtr)
 			a.end()
 		case wasm.GCSplitStorePtr:
 			// p 0, rel 1, v 2; arr 3, i 4
 			a.splitLocals("ai")
+			inBlock(0, 1, l.ptrSize(), 0)
 			a.get(0)
 			get(a, wasm.GCPtrAddr)
 			a.get(1)
@@ -444,9 +539,11 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.get(0)
 			isNull(a)
 			a.if_()
+			// (Nil and an offset is an integer: a pointer with no
+			// size.)
 			a.get(1)
 			a.op(0xAD)
-			a.call(index(wasm.GCSplitIntToPtr))
+			a.call(index(wasm.GCSplitChecked(wasm.GCSplitIntToPtr)))
 			ret(a)
 			a.end()
 			a.get(0)
@@ -494,6 +591,16 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			refNull(a)
 			ret(a)
 			a.end()
+			if checked {
+				a.get(0)
+				a.op(0xA7) // i32.wrap_i64
+				refNull(a)
+				a.i32(0)
+				a.i32(0)
+				a.gc(0x00, ptr)
+				a.end()
+				break
+			}
 			a.get(0)
 			a.op(0xA7) // i32.wrap_i64
 			a.tee(1)
@@ -528,6 +635,8 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 		case wasm.GCSplitMove:
 			// d 0, drel 1, s 2, srel 3, n 4; da 5, sa 6, di 7, si 8, cnt 9, first 10, k 11
 			a.splitLocals("aaiiiii")
+			inBlock(0, 1, -1, 4)
+			inBlock(2, 3, -1, 4)
 			a.get(0)
 			get(a, wasm.GCPtrAddr)
 			a.get(1)
@@ -627,6 +736,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 		case wasm.GCSplitZero:
 			// p 0, rel 1, n 2; arr 3, first 4, cnt 5
 			a.splitLocals("aii")
+			inBlock(0, 1, -1, 2)
 			a.get(0)
 			get(a, wasm.GCPtrAddr)
 			a.get(1)
