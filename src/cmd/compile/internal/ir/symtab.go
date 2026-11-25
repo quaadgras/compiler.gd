@@ -39,6 +39,7 @@ type SymsStruct struct {
 	CgoCheckPtrWrite          *obj.LSym
 	CheckPtrAlignment         *obj.LSym
 	CheckPtrAlignmentC        *obj.LSym
+	CheckPtrConvC             *obj.LSym
 	CheckPtrAlignmentLoad     *obj.LSym
 	C23Header                 *obj.LSym
 	CheckPtrView              *obj.LSym

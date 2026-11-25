@@ -834,6 +834,9 @@ func (g *gen) unionCast(e expr, to *ctype) (string, bool) {
 	}
 	var u string
 	if pt := e.ty(); of == nil && pt.isPtr() && pt.elem != nil && pt.elem.kind == kStruct && pt.elem.rec.complete && pt.elem.rec.uptr {
+		if t.kind == kStruct && t.rec == pt.elem.rec {
+			return "", false // to the union's own type
+		}
 		// A pointer to the union, whatever it is the value of: C
 		// lets it be converted to a pointer to a member.
 		g.mirror(pt.elem)
@@ -851,6 +854,9 @@ func (g *gen) unionCast(e expr, to *ctype) (string, bool) {
 		g.mirror(m.x.ty())
 		u = g.tlv(m.x, true).x
 	} else if ot := of.ty(); ot.kind == kStruct && ot.rec.uptr {
+		if t.kind == kStruct && t.rec == ot.rec {
+			return "", false // to the union's own type
+		}
 		// The union itself.
 		g.mirror(ot)
 		u = g.tlv(of, true).x
@@ -1057,6 +1063,11 @@ func (g *gen) tglobalVar(s *symbol) {
 		inDecl = true
 	} else {
 		fmt.Fprintf(&g.vars, "var %s %s\n", name, g.mirror(s.t))
+	}
+	if x == name && hasUnionPtr(s.t) {
+		// The runtime knows where the unions of the heap are, from
+		// its types and claims: of a variable's it is told.
+		fmt.Fprintf(&g.vars, "var _ = c23.UnionGlobal(&%s)\n", name)
 	}
 	save, saveInd := g.out, g.ind
 	g.out, g.ind = &g.inits, 1

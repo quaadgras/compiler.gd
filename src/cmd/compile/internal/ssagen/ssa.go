@@ -152,6 +152,8 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).
 		CheckPtrAlignmentC = typecheck.LookupRuntimeFunc(gd, "checkptrAlignmentC")
 	ir.Syms(gd).
+		CheckPtrConvC = typecheck.LookupRuntimeFunc(gd, "checkptrConvC")
+	ir.Syms(gd).
 		CheckPtrAlignmentLoad = typecheck.LookupRuntimeFunc(gd, "checkptrAlignmentLoad")
 	ir.Syms(gd).
 		C23Header = typecheck.LookupRuntimeFunc(gd, "c23Header")
@@ -1194,7 +1196,12 @@ func (s *state) newObjectNonSpecialized(typ *types.Type, rtype *ssa.Value) *ssa.
 	return s.rtcall(ir.Syms(s.gd).Newobject, true, []*types.Type{types.NewPtr(typ)}, rtype)[0]
 }
 
-func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value) {
+// checkPtrAlignment checks the conversion n of v, an unsafe.Pointer, to
+// a pointer, and returns the pointer that the conversion gives: v, but
+// in a package of C's for a conversion to a pointer to a type with
+// pointers, where the runtime may give another (runtime.checkptrConvC:
+// a union's member is not where the union is).
+func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value) *ssa.Value {
 	if !n.Type().IsPtr() {
 		s.Fatalf("expected pointer type: %v", n.Type())
 	}
@@ -1213,7 +1220,7 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 	fn := ir.Syms(s.gd).CheckPtrAlignment
 	if elem.Alignment() == 1 && (size == 0 || size == 1 || count == nil) {
 		if size == 0 || n.View != ir.ViewUnknown {
-			return
+			return v
 		}
 		fn = ir.Syms(s.gd).CheckPtrView
 		if !s.gd.CObjects && !n.LoadOnly {
@@ -1232,6 +1239,11 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 		// C's pointer may be to the end of its object, and no further
 		// (ir.CObjType): what it is converted to may not fit there.
 		fn = ir.Syms(s.gd).CheckPtrAlignmentC
+	}
+	// conv: the call gives the pointer.
+	conv := s.gd.CObjects && fn == ir.Syms(s.gd).CheckPtrAlignmentC && count == nil && elem.HasPointers()
+	if conv {
+		defer delete(s.vars, convVar)
 	}
 	call := func() {
 		count := count
@@ -1258,6 +1270,10 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 		} else {
 			rtype = s.reflectType(elem)
 		}
+		if conv {
+			s.vars[convVar] = s.rtcall(ir.Syms(s.gd).CheckPtrConvC, true, []*types.Type{v.Type}, v, rtype, count)[0]
+			return
+		}
 		s.rtcall(fn, true, nil, v, rtype, count)
 	}
 	if c := fn == ir.Syms(s.gd).CheckPtrAlignmentC || fn == ir.Syms(s.gd).CheckPtrView && s.gd.CObjects; c && count == nil && size <= ssa.CConvMax && s.cHeaders() {
@@ -1280,10 +1296,21 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 		case elem.IsUnsafePtr() || elem.IsPtr() && elem.Elem().Size() == 0:
 			check = ssa.CSlowConvUntyped
 		}
-		s.cSlow(s.newValue3I(ssa.OpC23Slow, types.Types[types.TBOOL], ssa.CSlowAux(check, mask, size), v, v, s.mem()), call, nil)
-		return
+		var fast func()
+		if conv {
+			fast = func() { s.vars[convVar] = v }
+		}
+		s.cSlow(s.newValue3I(ssa.OpC23Slow, types.Types[types.TBOOL], ssa.CSlowAux(check, mask, size), v, v, s.mem()), call, fast)
+		if conv {
+			return s.variable(convVar, v.Type)
+		}
+		return v
 	}
 	call()
+	if conv {
+		return s.variable(convVar, v.Type)
+	}
+	return v
 }
 
 // cHeaders reports whether the checks of C's pointers are made in the
@@ -1593,6 +1620,7 @@ var (
 
 	// marker nodes for temporary variables
 	ptrVar       = ssaMarker("ptr")
+	convVar      = ssaMarker("conv") // what a conversion of C's gives (checkPtrAlignment)
 	lenVar       = ssaMarker("len")
 	capVar       = ssaMarker("cap")
 	typVar       = ssaMarker("typ")
@@ -4477,7 +4505,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 		// unsafe.Pointer <--> *T
 		if to.IsUnsafePtr() && from.IsPtrShaped() || from.IsUnsafePtr() && to.IsPtrShaped() {
 			if s.checkPtrEnabled && checkPtrOK && !n.CheckPtr() && to.IsPtr() && from.IsUnsafePtr() {
-				s.checkPtrAlignment(n, v, nil)
+				v = s.checkPtrAlignment(n, v, nil)
 			}
 			return v
 		}

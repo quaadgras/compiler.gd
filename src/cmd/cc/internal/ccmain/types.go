@@ -860,9 +860,15 @@ func (r *record) layout() {
 		}
 	}
 	if r.unionPtr() {
-		// The bytes, in words, and the pointer after them.
+		// The bytes of the largest member that has no pointer, in
+		// words, and the pointer after them.
 		r.uptr = true
-		r.ubytes = (max(size, 1) + 7) / 8 * 8
+		r.ubytes = 0
+		for _, f := range r.fields {
+			if !hasPointers(f.t) {
+				r.ubytes = max(r.ubytes, (f.t.sizeof()+7)/8*8)
+			}
+		}
 		size, align = r.ubytes+target.ptrSize, 8
 	}
 	r.align = align

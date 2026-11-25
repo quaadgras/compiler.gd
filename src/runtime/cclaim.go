@@ -203,9 +203,23 @@ func cClaim(s *mspan, i, p uintptr, elem *_type, n uintptr, load bool) {
 		w := (a - sbase) / word
 		want, id := uint32(cScalar), uint32(0)
 		if aligned {
-			if off := (a - p) % elem.Size_; compatMaskBit(elem, mask, off) {
+			off := (a - p) % elem.Size_
+			if compatMaskBit(elem, mask, off) {
 				k, leaf, _ := compatLeaf(elem, off)
 				want, id = cWant(k, leaf)
+			}
+			if c, uid := cUnionID(elem, off); uid != 0 {
+				// A union's first word, or its pointer to its
+				// value: the id says so, whatever claimed the
+				// word before (cunion.go).
+				want, id = c, uid
+				ids := s.cIDsOf()
+				if ids == nil {
+					ids = s.newCIDs()
+				}
+				if atomic.Load(ids.word(w)) != uid {
+					atomic.Store(ids.word(w), uid)
+				}
 			}
 		}
 		have := cClass(b, w)
@@ -243,7 +257,8 @@ func cClaim(s *mspan, i, p uintptr, elem *_type, n uintptr, load bool) {
 // may be over one of the type that old stands for: checkptr_compat.go's
 // rule for the words of a view.
 func cCompatIDs(old, id uint32) bool {
-	if old == 0 {
+	if old == 0 || old >= cUnionStartID || id >= cUnionStartID {
+		// (No type, or what says where a union is: cunion.go.)
 		return false
 	}
 	mt, vt := cTypeOf(old), cTypeOf(id)
@@ -292,13 +307,13 @@ func cReclaim(s *mspan, b *cBits, w, a uintptr, have, want, id uint32, elem *_ty
 		print("c claim: word ", w, " at ", hex(a), " of class ", have)
 		if have == cTyped {
 			if ids := s.cIDsOf(); ids != nil {
-				if old := atomic.Load(ids.word(w)); old != 0 {
+				if old := atomic.Load(ids.word(w)); old != 0 && old < cUnionStartID {
 					print(" (", toRType(cTypeOf(old)).string(), ")")
 				}
 			}
 		}
 		print(" claimed for class ", want)
-		if want == cTyped {
+		if want == cTyped && id < cUnionStartID {
 			print(" (", toRType(cTypeOf(id)).string(), ")")
 		}
 		print(" by a conversion to *", toRType(elem).string(), "\n")
@@ -466,13 +481,16 @@ func cClaimValues(s *mspan, b *cBits, w uintptr, typ *_type, size uintptr) {
 				k, leaf, _ := compatLeaf(typ, f*word)
 				class, id = cWant(k, leaf)
 			}
+			if c, uid := cUnionID(typ, f*word); uid != 0 {
+				class, id = c, uid
+			}
 			if f < uintptr(len(first)) {
 				first[f].class, first[f].id = class, id
 			}
 		} else {
 			class, id = first[f].class, first[f].id
 		}
-		if class == cTyped {
+		if id != 0 {
 			if ids == nil {
 				if ids = s.cIDsOf(); ids == nil {
 					ids = s.newCIDs()
@@ -570,9 +588,11 @@ func c23Memmove(dst, src unsafe.Pointer, n uintptr) {
 				from = 0x55555555 * cScalar & all
 			}
 			if take := from & free; take != 0 {
-				// The types of the pointers first.
+				// The types of the pointers first, and what
+				// says where a union is (cunion.go).
 				for j := uintptr(0); j < k; j++ {
-					if take>>(2*j)&3 != cTyped {
+					c := take >> (2 * j) & 3
+					if c == cUnclaimed || c != cTyped && sids == nil {
 						continue
 					}
 					if ids == nil {
@@ -580,10 +600,14 @@ func c23Memmove(dst, src unsafe.Pointer, n uintptr) {
 					}
 					if ids == nil || sids == nil {
 						// (Not here: this cannot allocate.)
-						take &^= 1 << (2 * j) // cUntyped
+						if c == cTyped {
+							take &^= 1 << (2 * j) // cUntyped
+						}
 						continue
 					}
-					atomic.Store(ids.word(w+i+j), atomic.Load(sids.word(sw0+i+j)))
+					if id := atomic.Load(sids.word(sw0 + i + j)); c == cTyped || id != 0 {
+						atomic.Store(ids.word(w+i+j), id)
+					}
 				}
 				// (Only where nothing claimed the word
 				// meanwhile.)

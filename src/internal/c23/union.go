@@ -80,3 +80,21 @@ func UnionValuePtr(p *Void) (*Void, bool) {
 	q, ok := unionPointer(ref)
 	return (*Void)(q), ok
 }
+
+//go:linkname setUnionRef runtime.c23SetUnionRef
+func setUnionRef(t *abi.Type)
+
+func init() { setUnionRef(abi.TypeFor[UnionRef]()) }
+
+// UnionGlobal tells the runtime of a variable of the program's data, of
+// type T, that has a union with pointers in it: a pointer with no type
+// that is the address of that union is then known for what it is when C
+// converts it to a pointer to a member (runtime.checkptrConvC), as one
+// into the heap is from the heap's types. It returns true.
+func UnionGlobal[T any](p *T) bool {
+	unionGlobal(unsafe.Pointer(p), abi.TypeFor[T]())
+	return true
+}
+
+//go:linkname unionGlobal runtime.c23UnionGlobal
+func unionGlobal(p unsafe.Pointer, t *abi.Type)

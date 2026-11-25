@@ -162,3 +162,319 @@ func c23UnionPointer(x unsafe.Pointer) (unsafe.Pointer, bool) {
 	}
 	return *(*unsafe.Pointer)(add(x, cUnionHeader)), true
 }
+
+// Where the unions are.
+//
+// A pointer with no type that C converts to a pointer to a type with
+// pointers may be the address of a union, whose member of that type is
+// not at that address but in the union's value. So the runtime knows
+// where the unions are in what it has a type or claims for: in an
+// object of Go's, from the object's type, in which a union is a struct
+// whose last field is internal/c23's UnionRef; and in an object of C's
+// from the claims of the union's first word and of its UnionRef, which
+// have ids that no type has (cUnionStartID, cUnionRefID) and the number
+// of words of the union's bytes. A union in a variable of the stack or
+// in the program's data is not known here.
+
+// cUnionRefType is internal/c23's UnionRef, the type of the pointer of
+// a union to its value: nil in a program that has no C.
+var cUnionRefType *_type
+
+// c23SetUnionRef tells the runtime the type of a union's pointer.
+//
+//go:linkname c23SetUnionRef
+func c23SetUnionRef(t *_type) { cUnionRefType = t }
+
+// The ids of the claims of a union's first word, which is claimed for
+// no pointer, and of its UnionRef, which is claimed for a pointer of a
+// type: with the number of words of the union's bytes in the low bits.
+const (
+	cUnionStartID = 0x80000000
+	cUnionRefID   = 0xC0000000
+	cUnionWords   = 0x3FFFFFFF
+)
+
+// cUnionMirror reports whether t is what Go has for a union with
+// pointers, and returns the number of bytes before its UnionRef.
+func cUnionMirror(t *_type) (uintptr, bool) {
+	if cUnionRefType == nil || t.Kind() != abi.Struct {
+		return 0, false
+	}
+	st := (*structtype)(unsafe.Pointer(t))
+	if n := len(st.Fields); n > 0 && st.Fields[n-1].Typ == cUnionRefType {
+		return st.Fields[n-1].Offset, true
+	}
+	return 0, false
+}
+
+// What cUnionIn finds at an offset.
+const (
+	cUnionNone  = iota
+	cUnionStart // the first of the bytes of a union that has bytes
+	cUnionRef   // the UnionRef of a union
+)
+
+// cUnionIn reports whether a union begins, or has its UnionRef, at
+// offset off of a value of type t, and returns the number of bytes
+// before the UnionRef.
+func cUnionIn(t *_type, off uintptr) (int, uintptr) {
+	for {
+		switch t.Kind() {
+		case abi.Array:
+			a := (*arraytype)(unsafe.Pointer(t))
+			if a.Len == 0 || a.Elem.Size_ == 0 {
+				return cUnionNone, 0
+			}
+			off %= a.Elem.Size_
+			t = a.Elem
+		case abi.Struct:
+			if n, ok := cUnionMirror(t); ok {
+				switch off {
+				case n:
+					return cUnionRef, n
+				case 0:
+					return cUnionStart, n
+				}
+				return cUnionNone, 0
+			}
+			st := (*structtype)(unsafe.Pointer(t))
+			var f *abi.StructField
+			for i := range st.Fields {
+				if g := &st.Fields[i]; g.Typ.Size_ != 0 && g.Offset <= off && off < g.Offset+g.Typ.Size_ {
+					f = g
+					break
+				}
+			}
+			if f == nil {
+				return cUnionNone, 0
+			}
+			off -= f.Offset
+			t = f.Typ
+		default:
+			return cUnionNone, 0
+		}
+	}
+}
+
+// cUnionID returns the id of the claim of the word at offset off of a
+// value of type t, if a union begins or has its UnionRef there, and
+// the class that goes with it; 0 otherwise.
+func cUnionID(t *_type, off uintptr) (class, id uint32) {
+	if cUnionRefType == nil {
+		return 0, 0
+	}
+	switch k, n := cUnionIn(t, off); k {
+	case cUnionStart:
+		return cScalar, cUnionStartID | uint32(n/goarch.PtrSize)
+	case cUnionRef:
+		return cTyped, cUnionRefID | uint32(n/goarch.PtrSize)
+	}
+	return 0, 0
+}
+
+// cUnionAt returns the address of the UnionRef of the union that begins
+// at a, or nil if no union is known to begin there.
+func cUnionAt(a uintptr) *unsafe.Pointer {
+	const word = goarch.PtrSize
+	s := spanOfHeap(a)
+	if s == nil {
+		// A variable of the program's data that the runtime was
+		// told of?
+		if g, ok := cUnionGlobalAt(a); ok {
+			switch k, n := cUnionIn(g.typ, a-g.base); {
+			case k == cUnionStart:
+				return (*unsafe.Pointer)(unsafe.Pointer(a + n))
+			case k == cUnionRef && n == 0:
+				return (*unsafe.Pointer)(unsafe.Pointer(a))
+			}
+		}
+		return nil
+	}
+	if a%word != 0 || s.isUserArenaChunk {
+		return nil
+	}
+	i := s.objIndex(a)
+	if s.isFree(i) {
+		return nil
+	}
+	if s.spanclass.c() {
+		b, ids := s.cBitsOf(), s.cIDsOf()
+		if b == nil || ids == nil {
+			return nil
+		}
+		w := (a - s.base()) / word
+		id := atomic.Load(ids.word(w))
+		if id == cUnionValueID || id < cUnionStartID {
+			return nil
+		}
+		n := uintptr(id & cUnionWords)
+		if id >= cUnionRefID {
+			if n != 0 || cClass(b, w) != cTyped {
+				return nil
+			}
+			return (*unsafe.Pointer)(unsafe.Pointer(a))
+		}
+		// The first of its bytes: its UnionRef says the same.
+		if cClass(b, w+n) != cTyped || atomic.Load(ids.word(w+n)) != cUnionRefID|uint32(n) {
+			return nil
+		}
+		return (*unsafe.Pointer)(unsafe.Pointer(a + n*word))
+	}
+	base := s.base() + i*s.elemsize
+	typ, tbase := checkptrObjectType(s, base)
+	if typ == nil || a < tbase || typ.Size_ == 0 {
+		return nil
+	}
+	switch k, n := cUnionIn(typ, (a-tbase)%typ.Size_); {
+	case k == cUnionStart:
+		return (*unsafe.Pointer)(unsafe.Pointer(a + n))
+	case k == cUnionRef && n == 0:
+		return (*unsafe.Pointer)(unsafe.Pointer(a))
+	}
+	return nil
+}
+
+// cViewOK reports whether a value of type v may be looked at where a
+// value of type m is: checkptr_compat.go's rule, for every word of v.
+func cViewOK(m, v *_type) bool {
+	if m == v {
+		return true
+	}
+	if v.Size_ > m.Size_ {
+		return false
+	}
+	const word = goarch.PtrSize
+	mmask, vmask := getGCMask(m), getGCMask(v)
+	var seen compatSeen
+	for w := uintptr(0); w < v.Size_; w += word {
+		if !compatMaskBit(m, mmask, w) && !compatMaskBit(v, vmask, w) {
+			continue
+		}
+		mk, mt, min := compatLeaf(m, w)
+		vk, vt, vin := compatLeaf(v, w)
+		if compatLeaves(mk, mt, min, vk, vt, vin, true, &seen) != compatOK {
+			return false
+		}
+	}
+	return true
+}
+
+// checkptrConvC is checkptrAlignmentC for a conversion to a pointer to
+// a type with pointers, and returns the pointer that the conversion
+// gives, which is p but for a union's:
+//
+//   - if p is the address of a union, and elem is not a type that begins
+//     with one, the conversion is to the union's member of that type,
+//     which C has at the union's address: the union's value as an elem
+//     (c23UnionBox);
+//   - if p is the address of a union's value, and elem is not a type
+//     that the value may be looked at as, the conversion goes back
+//     through the union that the value is the value of, if it still
+//     is: to the union itself if elem is its type, and otherwise to the
+//     union's value as an elem.
+//
+// p has no bit of cPtrBits after it.
+func checkptrConvC(p unsafe.Pointer, elem *_type, n uintptr) unsafe.Pointer {
+	if p == nil {
+		return nil
+	}
+	p = unsafe.Pointer(uintptr(p) &^ cPtrBits)
+	if cUnionRefType != nil && elem.Pointers() {
+		if q := cUnionConv(uintptr(p), elem); q != nil {
+			return q
+		}
+	}
+	checkptrAlignmentC(p, elem, n)
+	return p
+}
+
+// cUnionConv returns what the conversion of a to a pointer to elem
+// gives, if that is not a itself.
+func cUnionConv(a uintptr, elem *_type) unsafe.Pointer {
+	if k, _ := cUnionIn(elem, 0); k != cUnionNone {
+		// To a type that begins with a union: a's own, if a is one.
+		// But a pointer to a union's value goes back to the union.
+		// (If the value is not itself something that begins with a
+		// union: then a is the address of that.)
+		h := cUnionValueOf(a)
+		if h != nil {
+			if k, _ := cUnionIn(h.typ, 0); k != cUnionNone {
+				h = nil
+			}
+		}
+		if h != nil {
+			if n, ok := cUnionMirror(elem); ok && *(*unsafe.Pointer)(h.back) == unsafe.Pointer(h) {
+				if start := uintptr(h.back) - n; cUnionAt(start) == (*unsafe.Pointer)(h.back) {
+					return unsafe.Pointer(start)
+				}
+			}
+		}
+		return nil
+	}
+	if ref := cUnionAt(a); ref != nil {
+		return c23UnionBox(ref, elem)
+	}
+	if h := cUnionValueOf(a); h != nil && !cViewOK(h.typ, elem) && *(*unsafe.Pointer)(h.back) == unsafe.Pointer(h) {
+		return c23UnionBox((*unsafe.Pointer)(h.back), elem)
+	}
+	return nil
+}
+
+// cUnionValueOf returns the header of the union value whose value
+// begins at a, or nil.
+func cUnionValueOf(a uintptr) *cUnionHdr {
+	if a < cUnionHeader {
+		return nil
+	}
+	return cUnionValue(unsafe.Pointer(a - cUnionHeader))
+}
+
+// A cUnionGlobal is a variable of the program's data that has a union
+// with pointers in it.
+type cUnionGlobal struct {
+	base uintptr
+	typ  *_type
+}
+
+// cUnionGlobals is the list of them, in blocks outside the heap: one is
+// written and then counted, so a reader needs no lock.
+var cUnionGlobals struct {
+	lock   mutex
+	n      atomic.Uintptr
+	blocks [64]*[cUnionGlobalBlock]cUnionGlobal
+}
+
+const cUnionGlobalBlock = 256
+
+// c23UnionGlobal tells the runtime of a variable at p, of type typ,
+// that has a union with pointers in it: cmd/cc's code calls it for each
+// as the program starts.
+//
+//go:linkname c23UnionGlobal
+func c23UnionGlobal(p unsafe.Pointer, typ *_type) {
+	g := &cUnionGlobals
+	lock(&g.lock)
+	n := g.n.Load()
+	if n/cUnionGlobalBlock < uintptr(len(g.blocks)) {
+		b := g.blocks[n/cUnionGlobalBlock]
+		if b == nil {
+			b = (*[cUnionGlobalBlock]cUnionGlobal)(persistentalloc(unsafe.Sizeof(*b), 0, &memstats.other_sys))
+			g.blocks[n/cUnionGlobalBlock] = b
+		}
+		b[n%cUnionGlobalBlock] = cUnionGlobal{uintptr(p), typ}
+		g.n.Store(n + 1)
+	}
+	unlock(&g.lock)
+}
+
+// cUnionGlobalAt returns the variable that a is in, if the runtime was
+// told of it.
+func cUnionGlobalAt(a uintptr) (cUnionGlobal, bool) {
+	g := &cUnionGlobals
+	for i, n := uintptr(0), g.n.Load(); i < n; i++ {
+		if v := g.blocks[i/cUnionGlobalBlock][i%cUnionGlobalBlock]; a-v.base < v.typ.Size_ {
+			return v, true
+		}
+	}
+	return cUnionGlobal{}, false
+}
