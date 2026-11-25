@@ -53,7 +53,7 @@ func Readv(fd int32, iov *c23.Void, cnt int32) int64 {
 	rest := b[:n]
 	for i, base := range bases {
 		k := min(lens[i], len(rest))
-		copy(c23.BytesAt(base, uintptr(k)), rest[:k])
+		copy(c23.Writable(base, uintptr(k)), rest[:k])
 		rest = rest[k:]
 	}
 	return int64(n)

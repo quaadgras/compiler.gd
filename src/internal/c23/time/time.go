@@ -165,7 +165,7 @@ func Asctime(p *c23.Void) *c23.Void {
 		c23.SetErrno(c23.EOVERFLOW)
 		return (*c23.Void)(nil)
 	}
-	copy(c23.BytesAt(ascBuf, uintptr(len(b))), b)
+	copy(c23.Writable(ascBuf, uintptr(len(b))), b)
 	return ascBuf
 }
 
@@ -195,7 +195,7 @@ func Strftime(s *c23.Void, max uint64, format, p *c23.Void) uint64 {
 	if uint64(len(b)) >= max {
 		return 0
 	}
-	copy(c23.BytesAt(s, uintptr(len(b)+1)), append(b, 0))
+	copy(c23.Writable(s, uintptr(len(b)+1)), append(b, 0))
 	return uint64(len(b))
 }
 

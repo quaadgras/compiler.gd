@@ -58,7 +58,7 @@ func selectFds(nfds int32, rd, wr, ex *c23.Void, deadline time.Time, poll bool) 
 	want := [3][]byte{}
 	for i, p := range [3]*c23.Void{rd, wr, ex} {
 		if c23.Addr(p) != 0 {
-			sets[i] = c23.BytesAt(p, nb)
+			sets[i] = c23.Writable(p, nb)
 			want[i] = append([]byte(nil), sets[i]...)
 		}
 	}

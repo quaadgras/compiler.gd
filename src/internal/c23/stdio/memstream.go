@@ -38,6 +38,8 @@ func Fmemopen(buf *c23.Void, size uint64, mode *c23.Void) *c23.Void {
 	}
 	if c23.Addr(buf) == 0 {
 		m.Buf = c23.Malloc(size)
+	} else {
+		c23.Check(buf, uintptr(size))
 	}
 	switch md[0] {
 	case 'r':

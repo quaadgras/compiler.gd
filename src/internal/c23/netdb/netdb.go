@@ -191,7 +191,7 @@ func Getaddrinfo(node, service, hints, res *c23.Void) int32 {
 			c23.Store32(c23.Add(ai, 12), uint32(k.proto))
 			c23.Store32(c23.Add(ai, 16), uint32(len(sa)))
 			addr := c23.Add(ai, aiSize)
-			copy(c23.BytesAt(addr, uintptr(len(sa))), sa)
+			copy(c23.Writable(addr, uintptr(len(sa))), sa)
 			c23.StorePtr(c23.Add(ai, aiAddr), addr)
 			if n == 0 && flags&AI_CANONNAME != 0 && canon != "" {
 				c23.StorePtr(c23.Add(ai, aiCanon), c23.CString(canon))
@@ -321,7 +321,7 @@ func putString(p *c23.Void, n uint32, s string) bool {
 	if uint32(len(s)) >= n {
 		return false
 	}
-	copy(c23.BytesAt(p, uintptr(len(s)+1)), s+"\x00")
+	copy(c23.Writable(p, uintptr(len(s)+1)), s+"\x00")
 	return true
 }
 
@@ -418,7 +418,7 @@ func newHostent(name string, family int32, addrs [][]byte) *c23.Void {
 	list := c23.Malloc(uint64((len(addrs) + 1) * ws))
 	for i, a := range addrs {
 		p := c23.Malloc(uint64(len(a)))
-		copy(c23.BytesAt(p, uintptr(len(a))), a)
+		copy(c23.Writable(p, uintptr(len(a))), a)
 		c23.StorePtr(c23.Add(list, i*ws), p)
 	}
 	c23.StorePtr(c23.Add(list, len(addrs)*ws), (*c23.Void)(nil))

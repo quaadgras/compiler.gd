@@ -34,7 +34,7 @@ func SchedGetaffinity(pid int32, n uint64, mask *c23.Void) int32 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
 	}
-	b := c23.BytesAt(mask, uintptr(n))
+	b := c23.Writable(mask, uintptr(n))
 	clear(b)
 	for i := range cpus {
 		b[i/8] |= 1 << (i % 8)

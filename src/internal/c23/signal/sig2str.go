@@ -43,7 +43,7 @@ func Sig2str(sig int32, str *c23.Void) int32 {
 	default:
 		return -1
 	}
-	copy(c23.BytesAt(str, uintptr(len(s)+1)), s+"\x00")
+	copy(c23.Writable(str, uintptr(len(s)+1)), s+"\x00")
 	return 0
 }
 

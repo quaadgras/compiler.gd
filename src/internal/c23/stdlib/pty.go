@@ -101,6 +101,6 @@ func PtsnameR(fd int32, buf *c23.Void, n uint64) int32 {
 	if uint64(len(name)) >= n {
 		return c23.ERANGE
 	}
-	copy(c23.BytesAt(buf, uintptr(len(name)+1)), name+"\x00")
+	copy(c23.Writable(buf, uintptr(len(name)+1)), name+"\x00")
 	return 0
 }

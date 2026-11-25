@@ -67,6 +67,6 @@ func Ctermid(s *c23.Void) *c23.Void {
 	if c23.Addr(s) == 0 {
 		return c23.CString("/dev/tty")
 	}
-	copy(c23.BytesAt(s, 9), "/dev/tty\x00")
+	copy(c23.Writable(s, 9), "/dev/tty\x00")
 	return s
 }

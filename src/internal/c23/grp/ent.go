@@ -93,7 +93,7 @@ func grResultR(e []string, ok bool, gr, buf *c23.Void, n uint64, result *c23.Voi
 	off := int(pad) + (len(members)+1)*int(ws)
 	str := func(s string) *c23.Void {
 		p := c23.Add(buf, off)
-		copy(c23.BytesAt(p, uintptr(len(s)+1)), s+"\x00")
+		copy(c23.Writable(p, uintptr(len(s)+1)), s+"\x00")
 		off += len(s) + 1
 		return p
 	}
