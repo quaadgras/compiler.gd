@@ -835,10 +835,17 @@ func (g *gen) unionCast(e expr, to *ctype) (string, bool) {
 	case *addrOf:
 		of = e.x
 	}
+	var u string
+	if pt := e.ty(); of == nil && pt.isPtr() && pt.elem != nil && pt.elem.kind == kStruct && pt.elem.rec.complete && pt.elem.rec.uptr {
+		// A pointer to the union, whatever it is the value of: C
+		// lets it be converted to a pointer to a member.
+		g.mirror(pt.elem)
+		u = tderef(g.rv(e))
+		return g.unionAs(u, t, to), true
+	}
 	if of == nil || !isLvalue(of) {
 		return "", false
 	}
-	var u string
 	if m, ok := of.(*member); ok && m.f.bits < 0 && !hasPointers(m.t) {
 		// A member with no pointer: the bytes.
 		if xt := m.x.ty(); xt.kind != kStruct || !xt.rec.uptr || !isLvalue(m.x) {
@@ -853,6 +860,12 @@ func (g *gen) unionCast(e expr, to *ctype) (string, bool) {
 	} else {
 		return "", false
 	}
+	return g.unionAs(u, t, to), true
+}
+
+// unionAs is the pointer, of type to, to what the union u holds as a t,
+// a type with pointers.
+func (g *gen) unionAs(u string, t, to *ctype) string {
 	var p string
 	switch {
 	case t.kind == kPtr || t.kind == kNullptr:
@@ -862,7 +875,7 @@ func (g *gen) unionCast(e expr, to *ctype) (string, bool) {
 	default:
 		p = fmt.Sprintf("c23.UnionBox[%s](&%s.p)", g.mirror(t), u)
 	}
-	return g.retype(p, "*"+g.mirror(t), g.gt(to)), true
+	return g.retype(p, "*"+g.mirror(t), g.gt(to))
 }
 
 // onePointer reports whether t is a struct that is one pointer and

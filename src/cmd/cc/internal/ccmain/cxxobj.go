@@ -1053,7 +1053,7 @@ func (p *parser) newExpr(at pos) expr {
 		opName = "operatornew[]"
 	}
 	args := append([]expr{size}, placement...)
-	if sym := p.resolve(p.allocFuncs(opName, t), nil, args, at, opName, true); sym != nil {
+	if sym := p.resolve(p.allocFuncs(opName, t), nil, args, at, opName, true); sym != nil && !stdPlacementNew(sym, placement) {
 		mem = &cast{node{pt, at}, p.rvalue(p.callFunc(sym, nil, args, at))}
 	} else if len(placement) == 1 && p.rvalue(placement[0]).ty().isPtr() {
 		mem = &cast{node{pt, at}, p.rvalue(placement[0])}
@@ -1322,4 +1322,17 @@ func (p *parser) typeidExpr(at pos) expr {
 		p.restoreFunc(st)
 	}
 	return &varRef{node{tt, at}, sym}
+}
+
+// stdPlacementNew reports whether sym is the placement allocation
+// function of the language, operator new(size_t, void *), which a
+// program may not replace and which returns its second argument: the
+// object is made at that pointer, with no call, so that what is made in
+// the bytes of a union is seen for what it is (thin.go's unionCast).
+func stdPlacementNew(sym *symbol, placement []expr) bool {
+	if len(placement) != 1 || sym.t == nil || sym.t.kind != kFunc || sym.t.fn == nil {
+		return false
+	}
+	ps := sym.t.fn.params
+	return len(ps) == 2 && !sym.t.fn.variadic && ps[1].kind == kPtr && ps[1].elem.kind == kVoid && sym.t.fn.ret.kind == kPtr && sym.t.fn.ret.elem.kind == kVoid
 }

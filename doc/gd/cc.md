@@ -102,9 +102,12 @@ func c0_name(c c23.UInt) *c23.Char {
   (below): n bytes to every check, and words that are what the first
   conversion of a pointer over them claims them for, which later
   conversions are compared with. `free` does nothing.
-- **A union** (and a struct that Go cannot lay out as C does: packed,
-  over-aligned) is its bytes to Go; its words, each a possible pointer,
-  if a member is a pointer, so that the collector sees what C stores.
+- **A union** with no pointer in it is its bytes to Go. One that has a
+  pointer is its bytes and a Go interface value, in which whatever of
+  it has a pointer is ("Unions", below): 32 bytes more than in C. A
+  struct that Go cannot lay out as C does (packed, over-aligned) is its
+  bytes; its words, each a possible pointer, if a member is a pointer,
+  so that the collector sees what C stores.
 - **What Go has no variable for** is reached through its address, with
   internal/c23's loads and stores: bit-fields, `_Atomic`, `long double`
   and `_Complex` in memory, `va_arg`. A variable length array and a
@@ -450,27 +453,81 @@ local on the stack). A pointer with no capability may be `malloc`'s
 result that went through a `long`: `free` lets it be, and `realloc`,
 which cannot copy its object, faults.
 
-## Unions and untyped memory
+## Unions
 
-Go sees a union as its bytes, as cgo makes it (`type union_value struct
-{ _ [0]uint64; b [8]byte }`, aligned as the union is). C's untyped
-memory (`malloc` into a `char *` or `void *`, which placement `new`
-carves objects out of) is bytes too (`c23.Raw`). Their words are *split*
-words:
+In C the members of a union are the same bytes, so a word of one is an
+integer to one member and a pointer to another, and nothing says which
+it is now. Go sees a union that has no pointer in any member as its
+bytes, as cgo does, and nothing more is needed: integers and floats may
+be taken for one another. A union that has a pointer in a member is, to
+Go, its bytes and one interface value after them (`cmd/cc`'s
+`record.unionPtr`):
 
-- to Go and the collector they are scalars, so Go reads and copies them
-  freely and no union can hand Go a pointer;
-- C may store pointers in them: the capability goes in the side table
-  first, so that what it points to stays alive, then the address as
-  bytes;
-- a pointer C loads from a split word gets the capability kept for the
-  word whatever the bytes hold now, as in Fil-C, and every access is
-  checked against it: after a `double` is stored over a pointer, reading
-  the union as the pointer gives an address far outside the old object.
+```go
+type union_value struct {
+	_ [0]uint64
+	b [16]byte // the members that have no pointer
+	p any      // whatever of it has a pointer
+}
+```
 
-Objects that C places in untyped memory work fully in C, with pointers
-between them; Go sees them only as bytes (a `*struct_node` into a pool
-comes back tagged), which is cgo's rule too.
+- **A member with no pointer** is in the bytes, at its offset, as
+  before. The members that are integers, floats and arrays of them
+  share the bytes as C has it.
+- **A member that is a pointer** is the pointer that the interface
+  value holds, whose type is the member's (`c23.UnionPtr`): `u.p` is
+  `(*c23.UnionPtr[*T](&u.p))`, the address of the value's own pointer
+  word, so `&u.p` is a `T **` as it is in C. The members that are
+  pointers share it. One that is read after another of another type
+  was stored is that pointer converted, which is checked as a
+  conversion of C's is (`void *` to anything, and the reverse, as
+  always).
+- **A member with a pointer inside it** (a struct, an array of
+  pointers) is an object of the heap of its own, which the interface
+  value points to (`c23.UnionBox`, a `c23.Box[M]`). `&u.m` is a pointer
+  to that object. When the union is used for something else, the value
+  points to something else, and a pointer that was taken before still
+  points to the object it was taken of, which is what it was: nothing
+  is claimed again, and no pointer is made of an integer.
+- **A cast of the address of the bytes** to a pointer to a type with
+  pointers, `(T *)u.bytes` or `(T *)&u`, where it is written as that
+  (`thin.go`'s `unionCast`: a cast, a placement `new`), is taken for
+  what it means: the union holds a `T`. If `T` is one pointer and
+  nothing else, it is the interface value's own pointer
+  (`c23.UnionVal`); otherwise it is an object of its own, as a member
+  is. This is how Godot's Variant keeps a String, an Array or a
+  Callable in an array of bytes. A cast to a type with no pointer is to
+  the bytes.
+- **A copy** of a struct that has such a union, by assignment, gives
+  the copy an object of its own (`c23.UnionClone`).
+
+What is not C's:
+
+- **The size.** Such a union is its size in C, rounded to 8, and 32
+  bytes. A program that asserts it, or lays a file or a message out
+  with it, sees the difference. Godot asserts that a Callable, which
+  has a union of an id and a pointer, is 16 bytes and fits in a
+  Variant's bytes (`register_core_types.cpp`, `variant.cpp`): it is 48
+  here, and is kept in an object of its own, so the two assertions are
+  about what no longer happens, and fail.
+- **A pointer and an integer are not the same bytes.** What is stored
+  as a pointer member is not read as an integer member, and the
+  reverse: the integer is what the bytes last were, the pointer what
+  the interface value last held. An object that a member is in begins
+  as zero, whatever another member was.
+- **`memcpy` of a union** copies the interface value, and with it the
+  pointer to an object that the two then share. (`realloc`, which
+  leaves one of them, is as it was.)
+- **The address of the bytes that is kept** in a `void *` and cast
+  later, in another expression, is a cast of a pointer to bytes: it
+  does not find the union. In malloc's memory it claims the bytes
+  again; in a variable, the pointer that is stored there is one that
+  the collector does not see.
+- **The unions of cc's own headers** (`union sigval`, `epoll_data_t`)
+  are their words, as before: internal/c23 reads them at the offsets
+  that the system gives them. `semctl` looks for the pointer of a
+  `union semun`, which the program declares, where it is now.
+- With 4-byte words (wasm) a union is its words, as before.
 
 ## What the tests show (`go test cmd/cc`)
 
