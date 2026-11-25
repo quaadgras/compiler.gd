@@ -7,6 +7,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"runtime"
 	"slices"
 	"unsafe"
 )
@@ -54,7 +55,7 @@ type (
 	compatInts struct {
 		a, b int
 	}
-	// 512 bytes or less: only where the pointers are is known.
+	// 512 bytes or less: the span has what it was allocated for.
 	compatSmall struct {
 		p *int
 		n int
@@ -62,6 +63,15 @@ type (
 	compatSmall2 struct {
 		q *uint
 		m uint
+	}
+	// The pointers where compatSmall has its own, to something else.
+	compatSmallWrong struct {
+		p *[1000]int
+		n int
+	}
+	compatSmallString struct {
+		p *byte
+		n int
 	}
 )
 
@@ -71,6 +81,15 @@ type (
 func compatHide[T any](p *T) unsafe.Pointer { return unsafe.Pointer(p) }
 
 func compatAs[T any](p unsafe.Pointer) { sink2 = (*T)(p) }
+
+// compatNew returns a new T that generic code allocated: as T's shape.
+//
+//go:noinline
+func compatNew[T any]() *T {
+	p := new(T)
+	checkptrSink = p
+	return p
+}
 
 func init() {
 	register("CheckPtrCompatList", func() {
@@ -156,7 +175,73 @@ func init() {
 		compatAs[compatSmall](compatHide(&a[7].n))
 	})
 
-	// An object that has only a bitmap, or no pointers.
+	// A small object, which has no header, and one with no pointers.
+	compatCase(C+"SmallSame", func() { compatAs[compatSmall](compatHide(small())) })
+	compatCase(C+"SmallPointer", func() {
+		p := new(*compatSmall)
+		checkptrSink = p
+		compatAs[*compatSmall2](compatHide(p))
+		compatAs[unsafe.Pointer](compatHide(p))
+	})
+	compatCase(C+"SmallSlice", func() {
+		a := make([]compatSmall, 5)
+		checkptrSink = a
+		compatAs[[2]compatSmall2](compatHide(&a[3]))
+		sink2 = unsafe.Slice((*compatSmall2)(compatHide(&a[1])), 4)
+	})
+	compatCase(C+"SmallReused", func() {
+		// A slot is what it was last allocated for.
+		for i := range 5000 {
+			if i%2 == 0 {
+				compatAs[compatSmall2](compatHide(small()))
+			} else {
+				w := new(compatSmallWrong)
+				checkptrSink = w
+				compatAs[compatSmallWrong](compatHide(w))
+			}
+			if i%1000 == 0 {
+				runtime.GC()
+			}
+		}
+	})
+	compatCase(C+"SmallOfGeneric", func() {
+		// What generic code allocates has a shape for its type, in
+		// which a pointer is to anything.
+		compatAs[*compatSmall](compatHide(compatNew[*compatSmall]()))
+		compatAs[map[int32]int32](compatHide(compatNew[map[int32]int32]()))
+		compatAs[chan *int](compatHide(compatNew[chan *int]()))
+		compatAs[func(*int) int32](compatHide(compatNew[func(*int) int32]()))
+		compatAs[compatSmall2](compatHide(compatNew[compatSmall]()))
+		compatAs[io.Reader](compatHide(compatNew[io.Reader]()))
+	})
+	compatCase(I+"SmallOfGenericKind", func() { compatAs[uintptr](compatHide(compatNew[*compatSmall]())) })
+	compatCase(I+"SmallOfGenericMap", func() { compatAs[map[int64]int32](compatHide(compatNew[map[int32]int32]())) })
+	compatCase(I+"SmallPointee", func() { compatAs[compatSmallWrong](compatHide(small())) })
+	compatCase(I+"SmallPointerPointee", func() {
+		p := new(*compatSmall)
+		checkptrSink = p
+		compatAs[*compatSmallWrong](compatHide(p))
+	})
+	compatCase(I+"SmallPointerOverUnsafe", func() {
+		p := new(unsafe.Pointer)
+		checkptrSink = p
+		compatAs[*int](compatHide(p))
+	})
+	compatCase(I+"SmallStringOverPlain", func() {
+		p := new(compatSmallString)
+		checkptrSink = p
+		compatAs[string](compatHide(p))
+	})
+	compatCase(I+"SmallFunc", func() {
+		f := new(func(int) int)
+		checkptrSink = f
+		compatAs[func()](compatHide(f))
+	})
+	compatCase(I+"SmallSlicePointee", func() {
+		a := make([]compatSmall, 5)
+		checkptrSink = a
+		compatAs[[2]compatSmallWrong](compatHide(&a[3]))
+	})
 	compatCase(C+"Small", func() { compatAs[compatSmall2](compatHide(small())) })
 	compatCase(C+"SmallBytesLoaded", func() { sink2 = *(*[16]byte)(compatHide(small())) })
 	compatCase(C+"SmallBytesOverInteger", func() { compatAs[[8]byte](compatHide(&small().n)) })

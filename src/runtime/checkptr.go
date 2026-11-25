@@ -153,15 +153,22 @@ func checkptrAlignmentC(p unsafe.Pointer, elem *_type, n uintptr) {
 }
 
 // checkptrObjectType returns the type that the object at base of the span
-// s records, and where the values of that type begin, or nil if it has only
-// a bitmap, or no pointers.
+// s was allocated for, and where the values of that type begin, or nil if
+// it has only a bitmap (a small object of a type that the program made as
+// it ran), or no pointers.
 func checkptrObjectType(s *mspan, base uintptr) (*_type, uintptr) {
-	if s.spanclass.noscan() || heapBitsInSpan(s.elemsize) {
+	if s.spanclass.noscan() {
 		return nil, 0
 	}
-	if s.isFree(s.objIndex(base)) {
+	i := s.objIndex(base)
+	if s.isFree(i) {
 		// A pointer kept from before: its first word is not a type.
 		return nil, 0
+	}
+	if heapBitsInSpan(s.elemsize) {
+		// No header: the span has what it was allocated for
+		// (mobjtypes.go), unless that is a type without a number.
+		return s.objType(i), base
 	}
 	if s.spanclass.sizeclass() != 0 {
 		// The object begins with its type.

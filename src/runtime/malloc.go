@@ -1585,6 +1585,14 @@ func mallocgcSmallScanNoHeader(size uintptr, typ *_type, local bool) (unsafe.Poi
 	if span.needzero != 0 {
 		memclrNoHeapPointers(x, size)
 	}
+	if objTypesEnabled {
+		// What the object is allocated for (mobjtypes.go).
+		if t := span.otypes; t != nil {
+			*t.word(span.objIndex(uintptr(x))) = objTypeID(typ)
+		} else {
+			span.setObjType(span.objIndex(uintptr(x)), typ)
+		}
+	}
 	if goarch.PtrSize == 8 && sizeclass == 1 {
 		// initHeapBits already set the pointer bits for the 8-byte sizeclass
 		// on 64-bit platforms.

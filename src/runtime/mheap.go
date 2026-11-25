@@ -495,6 +495,7 @@ type mspan struct {
 	wholeBits   *wholeBits // states of the words of small objects, if the span holds a string, slice or interface (mwholebits.go); accessed atomically
 	cbits       *cBits     // what a span of C's objects keeps for them (cspan.go); accessed atomically
 	cids        *cBits     // the types of its words that are typed pointers (cclaim.go); accessed atomically
+	otypes      *cBits     // the types that its objects were allocated for, if they have pointers and no header (mobjtypes.go); written by the allocation, read atomically
 	csize       uintptr    // the bytes that the object of a large span of C's was asked for
 
 	// sweep generation:
@@ -1732,6 +1733,7 @@ func (h *mheap) freeSpan(s *mspan) {
 		lock(&h.lock)
 		s.freeWholeBits()
 		s.freeCBits()
+		s.freeObjTypes()
 		if msanenabled {
 			// Tell msan that this entire span is no longer in use.
 			base := unsafe.Pointer(s.base())
@@ -1900,6 +1902,7 @@ func (span *mspan) init(base uintptr, npages uintptr) {
 	span.wholeBits = nil
 	span.cbits = nil
 	span.cids = nil
+	span.otypes = nil
 	span.csize = 0
 	span.state.set(mSpanDead)
 	lockInit(&span.speciallock, lockRankMspanSpecial)

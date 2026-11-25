@@ -323,13 +323,6 @@ type (
 		a, b uint64
 		c    uint64
 	}
-	// What a string's words are: a pointer and an integer.
-	viewPlainPairs struct {
-		p *byte
-		n uint64
-		q *byte
-		m uint64
-	}
 	viewPadded struct {
 		p *int
 		f float64
@@ -442,10 +435,18 @@ func viewSmall() {
 		viewAs[byte](viewPlain(&v.n))
 	})
 	viewCase(W+"PlainMemory", func() {
-		// A string's type over memory that holds no whole value, in
-		// a span that has a bitmap.
+		// A string's type over memory of a type that the program
+		// made as it ran, of which the span has only where the
+		// pointers are. (Over a struct of a pointer and an integer
+		// that it was compiled with, it is refused:
+		// checkptr_compat.go.)
 		sink2 = new([2]string)
-		viewAs[[2]string](viewPlain(new(viewPlainPairs)))
+		v := reflect.New(reflect.StructOf([]reflect.StructField{
+			{Name: "P", Type: reflect.TypeFor[*byte]()},
+			{Name: "N", Type: reflect.TypeFor[uint64]()},
+		}))
+		sink2 = v.Interface()
+		viewAs[string](v.UnsafePointer())
 	})
 	viewCase(W+"Reflect", func() {
 		t := reflect.StructOf([]reflect.StructField{

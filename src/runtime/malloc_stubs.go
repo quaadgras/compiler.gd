@@ -263,6 +263,14 @@ func smallStub(mp *m, size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 		if span.needzero != 0 {
 			memclrNoHeapPointers(x, elemsize)
 		}
+		if objTypesEnabled {
+			// What the object is allocated for (mobjtypes.go).
+			if t := span.otypes; t != nil {
+				*t.word((uintptr(x) - span.base()) / elemsize) = objTypeID(typ)
+			} else {
+				span.setObjType((uintptr(x)-span.base())/elemsize, typ)
+			}
+		}
 		if goarch.PtrSize == 8 && elemsize == 8 {
 			// initHeapBits already set the pointer bits for the 8-byte sizeclass
 			// on 64-bit platforms.

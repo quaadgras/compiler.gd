@@ -108,13 +108,16 @@ is not compared: a string is not stored through.
 
 Where the type of the memory comes from:
 
-- **An object of the heap that records its type** (more than 512 bytes,
-  or large): the runtime compares `T` with it
-  (`runtime/checkptr_compat.go`, `checkptrCompat`).
-- **A smaller object** has a bitmap of where its pointers are, and no
-  type: `T` must have its pointers there and nowhere else
-  (`checkptrPointers`). What its pointers point to is not compared: see
-  the gaps.
+- **An object of the heap that has pointers** records what it was
+  allocated for, and the runtime compares `T` with it
+  (`runtime/checkptr_compat.go`, `checkptrCompat`). One of more than 512
+  bytes has the type in its header, or in its span if it is large. A
+  smaller one has no header: its span keeps a number for each object,
+  which stands for the type (below, "The types of small objects").
+- **An object without pointers**, and a small object of a type that the
+  program made as it ran (`reflect.StructOf`), which has no number:
+  `T` must have no pointer, or its pointers where the object's bitmap
+  has them and nowhere else (`checkptrPointers`).
 - **What the compiler knows.** Where `p` is made of a pointer to `S`
   (`&x`, a `p` of static type `*S`, an offset of those: as for views,
   below), `T` is compared with `S` when the package is compiled
@@ -128,7 +131,11 @@ Where the type of the memory comes from:
 - **Generic code** has a type's shape, in which every pointer is a
   `*uint8`. The conversion is given the type itself, from the
   dictionary (`ir.ConvExpr.PtrRType`), and the compiler compares nothing
-  there.
+  there. What generic code allocates, a variable of a type parameter
+  that is moved to the heap, is allocated as the shape, and that is the
+  type that the object records: it is compared for what a shape says,
+  its layout and its kinds, and a pointer of a shape is a pointer to
+  anything (`compatShape`).
 
 Not compared: the conversions of a package that is C translated by
 `cmd/cc`, whose memory has its own rules until the plan's next steps
@@ -155,18 +162,73 @@ and their tests had:
   of bytes that is kept over a pointer. They are `//go:nocheckptr`.
   Nothing else in the standard library, the tools or their tests keeps
   bytes over a pointer, or slices over what is not their element.
+- `time.Ticker` is the runtime's timer, which the runtime allocates
+  with its own type for it, whose channel is an `unsafe.Pointer`:
+  `NewTicker`, `Stop` and `Reset` convert between the two and are
+  `//go:nocheckptr`. (Found once small objects had their types.)
 - What SWIG generates for a function that returns a string reads C's
   struct of a pointer and a length as a Go string. `cmd/cgo/internal/swig`
   compiles its programs with `-d=checkptr=0`: SWIG's output does not
   run with the checks.
 
+### The types of small objects
+
+An object with pointers of 512 bytes or less has no malloc header:
+where its pointers are is in its span's bitmap, and a `struct{ p
+*[1]int }` looked the same there as a `struct{ p *[1000]int }`. The
+user's decision, 2026-11-25, on whether such objects are to have their
+types: "yes if they contain pointers". So a span of them has a `uint32`
+for each object (`runtime/mobjtypes.go`, `mspan.otypes`): the offset of
+the type's descriptor in the program's types, plus one, and 0 for a type
+that is not there. The object holds values of the type from its base
+on, as one with a header does after it.
+
+- **Who pays.** A span of objects without pointers has none. The
+  numbers are 4 bytes an object, outside the heap, in `GCSys`, and go
+  back to a free list with their span: an eighth of a heap of 32-byte
+  objects, a quarter of one of 16-byte objects, half of one of single
+  pointers.
+- **Allocation** writes the object's number before the publication
+  barrier, every time, so a slot never keeps the type of the object
+  that was there. The collector does not touch them.
+- **The checks** find the type as they find a header's, so a
+  conversion back to the type that a small object was allocated as is
+  let through at once, which it was not, and a view of part of a
+  string, a slice or an interface in one is found from the type. (The
+  bitmap of whole values below is still written, and is what the check
+  goes by for an object whose type has no number.)
+
+Measured on amd64 against the commit before, user-mode instructions
+with `perf stat -r 5` and `GOGC=off`:
+
+| Workload | Instructions | Repeat spread |
+| --- | ---: | ---: |
+| allocation of 32 bytes with a pointer | 157.5 to 176.1 per object, +12% | under 0.1% |
+| allocation of 16 bytes with a pointer | 156.0 to 174.9, +12% | under 0.1% |
+| allocation of a pointer (8 bytes) | 108.2 to 123.7, +14% | under 0.1% |
+| allocation of 32 bytes with a string | 231.7 to 248.5, +7% | under 0.1% |
+| `make([]*int, 8)` | 223.2 to 244.8, +10% | under 0.1% |
+| fmt `SprintfStructure` | -0.5% | 0.6% |
+| fmt `ManyArgs` | +0.01% | 0.01% |
+| json encode, decode | -1.1%, +0.4% | 1.1%, 0.2% |
+| http ClientServer | +0.8% | 0.1% |
+
+In time, on one pinned CPU with the collector off, so that every object
+and every number is in memory that is touched for the first time: 20.5
+to 23.9 ns for an object of 32 bytes, 15.4 to 18.8 ns for one of 16,
+9.3 to 12.6 ns for a pointer. 20M objects have 80 MB more in `GCSys`,
+whatever their size: 635 to 715 MB in all for 32-byte objects, 159 to
+239 MB for pointers.
+
 ### What this does not close
 
-- **A small object's pointers are known, their types are not.** A
-  `struct{ p *[1]int }` of 512 bytes or less, reached through a plain
-  `unsafe.Pointer`, converts to `*struct{ p *[1000]int }`. Closing it
-  needs the type of every object with pointers, 8 bytes each or a word
-  of its span: not decided.
+- **What a pointer points to, in an object that generic code allocated
+  for a type parameter**: the object has the type's shape. Closing it
+  needs the allocation to take its type from the dictionary, as the
+  conversion does.
+- **A small object of a type that the program made as it ran**
+  (`reflect.StructOf`) has no number, and is compared by where its
+  pointers are.
 - **A store through an `unsafe.Pointer` that is over a typed pointer**
   is not checked: `*(*unsafe.Pointer)(unsafe.Pointer(&p)) = q` puts any
   pointer where a `*A` is. `sync/atomic.StorePointer` is used this way.
@@ -226,15 +288,18 @@ How it is checked:
 - **The runtime**, for a plain `unsafe.Pointer`: `checkptrAlignment`
   compares the view with the type the object records, if it has one, and
   `checkptrView` does for types of alignment 1, which need no other check.
-  Objects with a malloc header and large objects record their type. Objects
-  of 512 bytes or less have the states of their words in a bitmap of their
-  span (below). The comparison is the same: where the object's word is part
+  Objects with a malloc header and large objects record their type, and
+  so do smaller ones now ("The types of small objects", above). Objects
+  of 512 bytes or less also have the states of their words in a bitmap of
+  their span (below), which is what is looked at for one whose type has
+  no number. The comparison is the same: where the object's word is part
   of a whole value, the view's must have the same state, and the word just
   past the view must not be a continuation. Each value of the view must be
   over one whole value or over plain memory, not partly each, so an
   interface cannot be viewed over a string and the two plain words after it.
-  A view of plain memory may have any type, so
-  `*(*string)(unsafe.Pointer(&hdr))` keeps working.
+  A view of plain memory is not partial, whatever its type: whether a
+  string may be over a pointer and an integer is for the rule of
+  compatible types to say, and it says no where the memory has a type.
 
 A type longer than its object, as in `(*[1<<30]byte)(p)`, is compared up to
 the end of the object, or with a recorded type, of the value `p` is in: an

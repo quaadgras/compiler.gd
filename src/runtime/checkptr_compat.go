@@ -172,14 +172,17 @@ func compatLeaves(mk uint8, mt *_type, min uintptr, vk uint8, vt *_type, vin uin
 	case compatUnsafe, compatString:
 		ok = true
 	case compatPtr:
-		ok = compatWords((*ptrtype)(unsafe.Pointer(mt)).Elem, (*ptrtype)(unsafe.Pointer(vt)).Elem, false, seen)
+		// (The shape of a pointer type says nothing of what it
+		// points to: see compatShape.)
+		ok = compatShape(mt) || compatShape(vt) ||
+			compatWords((*ptrtype)(unsafe.Pointer(mt)).Elem, (*ptrtype)(unsafe.Pointer(vt)).Elem, false, seen)
 	case compatFunc:
 		ok = compatFuncs((*functype)(unsafe.Pointer(mt)), (*functype)(unsafe.Pointer(vt)))
 	case compatMap:
 		m, v := (*abi.MapType)(unsafe.Pointer(mt)), (*abi.MapType)(unsafe.Pointer(vt))
-		ok = m.Key == v.Key && m.Elem == v.Elem
+		ok = compatSameType(m.Key, v.Key) && compatSameType(m.Elem, v.Elem)
 	case compatChan:
-		ok = (*chantype)(unsafe.Pointer(mt)).Elem == (*chantype)(unsafe.Pointer(vt)).Elem
+		ok = compatSameType((*chantype)(unsafe.Pointer(mt)).Elem, (*chantype)(unsafe.Pointer(vt)).Elem)
 	case compatSlice:
 		// The elements are reached through the slice, as the words
 		// of this view are through its pointer.
@@ -188,7 +191,8 @@ func compatLeaves(mk uint8, mt *_type, min uintptr, vk uint8, vt *_type, vin uin
 		// internal/abi's structs are how the library looks at an
 		// interface of any type.
 		ok = mt.Kind() == abi.Struct || vt.Kind() == abi.Struct ||
-			len((*interfacetype)(unsafe.Pointer(mt)).Methods) == 0 && len((*interfacetype)(unsafe.Pointer(vt)).Methods) == 0
+			len((*interfacetype)(unsafe.Pointer(mt)).Methods) == len((*interfacetype)(unsafe.Pointer(vt)).Methods) &&
+				(len((*interfacetype)(unsafe.Pointer(mt)).Methods) == 0 || compatShape(mt) || compatShape(vt))
 	case compatStruct:
 		// reflect.Value, a type defined from it, or its shape.
 		ok = true
@@ -213,17 +217,36 @@ func compatFuncs(a, b *functype) bool {
 	}
 	ai, bi := a.InSlice(), b.InSlice()
 	for i := range ai {
-		if ai[i] != bi[i] {
+		if !compatSameType(ai[i], bi[i]) {
 			return false
 		}
 	}
 	ao, bo := a.OutSlice(), b.OutSlice()
 	for i := range ao {
-		if ao[i] != bo[i] {
+		if !compatSameType(ao[i], bo[i]) {
 			return false
 		}
 	}
 	return true
+}
+
+// compatShape reports whether t is the shape of a type: what generic
+// code has for a type that it is given. A variable of such code that is
+// moved to the heap is allocated as its shape, in which an int32 is
+// whatever has an int32 under it, and every pointer is a *uint8. So a
+// shape is compared for what it does say, its layout and its kinds, and
+// what a pointer of a shape points to is not known.
+func compatShape(t *_type) bool {
+	const prefix = "go.shape."
+	s := toRType(t).string()
+	return len(s) > len(prefix) && s[:len(prefix)] == prefix
+}
+
+// compatSameType reports whether a and b are the same type, as the key
+// of a map, the element of a chan or a parameter of a func is to be, or
+// one is a shape that the other may have.
+func compatSameType(a, b *_type) bool {
+	return a == b || (compatShape(a) || compatShape(b)) && a.Kind() == b.Kind() && a.Size_ == b.Size_ && a.PtrBytes == b.PtrBytes
 }
 
 // compatWords reports whether a value of type v may be over a value of
@@ -358,9 +381,10 @@ func checkptrIncompat(p unsafe.Pointer, why int) {
 }
 
 // checkptrPointers checks that (*[n]elem)(p), which is in one object of
-// the span s that has no type of its own to compare with (a small
-// object, or one without pointers), has pointers where the object has
-// them and nowhere else: all that the object's bitmap says.
+// the span s that has no type to compare with (one without pointers, or
+// a small object of a type that has no number: mobjtypes.go), has
+// pointers where the object has them and nowhere else: all that the
+// object's bitmap says.
 func checkptrPointers(s *mspan, p uintptr, elem *_type, n uintptr, load bool) {
 	if s.spanclass.c() || !elem.Pointers() && load {
 		return
