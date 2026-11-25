@@ -278,8 +278,15 @@ is how code made a slice of a pointer before `unsafe.Slice`.
   pointers are.
 - **An integer that is the address of something and is made a pointer
   with nothing in the expression that it came from** is a pointer if
-  the address is of an object whose address the program took as an
-  integer ("exposed", below), or of nothing that the checks know.
+  the address is of an object of the heap whose address the program
+  took as an integer ("exposed", below): an integer that outlives its
+  object and is then the address of another exposed one is a pointer
+  to that one. It is also a pointer if it is the address of nothing
+  that is Go's, memory that the system gave the program, which nothing
+  bounds. It is not one to a variable, nor to what the runtime keeps
+  for itself outside the objects of the heap (`runtime/rtmem.go`: the
+  heap's address space, the program's code and tables, what the
+  runtime mapped): the program stops.
 
 ## The variables of the stack and of the data
 

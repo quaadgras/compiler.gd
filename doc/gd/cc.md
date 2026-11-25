@@ -374,11 +374,11 @@ memory-safe `unsafe` (`unsafe.md`, "Compatible types", is the first):
 | converts to bytes (`char *`, a type of alignment 1) | unchanged: bytes claim nothing and may be over anything |
 | converts to a `T **` over a word that is a pointer to anything | the pointer that the word holds is converted to `T *`, as the program would have to convert it: it stays if what it points to is a T or can be claimed for one, and is otherwise a pointer that faults. Then the word is a `T *` |
 | converts to a `T *` whose result is only loaded through (`*(long *)p` as a value) | unchanged: what is loaded as an integer may be a pointer |
-| converts to a `T *` that is not compatible | the program stops |
-| `memset` | unchanged. A word that holds a pointer is set whole or the program stops, and by a byte that is not 0 to a pointer that faults |
+| converts to a `T *` that is not compatible | claimed again for T; the pointers that were converted before are taken away (below) |
+| `memset` | unchanged. A word that holds a pointer and is set whole is null, or by a byte that is not 0 a pointer that faults; one that is set in part is bytes from then on, as below |
 | `memcpy`, `memmove` of whole words, to words that nothing claimed | claimed as the words they are copied from: those of C's, and those of an object of Go's by its type |
 | the same, to a word that is claimed for a pointer | unchanged; what is copied there is a pointer of the word's kind, or one that faults: an integer, or a pointer of a type that is not compatible and that points to nothing of the word's type |
-| the same, of bytes that are not whole words, over a word that holds a pointer | the program stops |
+| the same, of bytes that are not whole words, over a word that holds a pointer | the word is bytes from then on: claimed for nothing, and the pointers that were converted before are taken away |
 
 - **A pointer to a byte is a pointer to anything**, to C: a `char *` is
   claimed as a `void *` is, a `char **` may be over a `void *` and the
@@ -394,12 +394,15 @@ memory-safe `unsafe` (`unsafe.md`, "Compatible types", is the first):
   `c23PtrStore`):
   - *a pointer to bytes* (`char *`) is over anything. Bytes stored
     over a word that holds a pointer would make a pointer that the
-    program was not given: `checkptr: bytes stored over a pointer`.
+    program was not given: the word is bytes from then on, in an object
+    of C's (below, "memory that is used again"), and in an object or a
+    variable of Go's the program stops, `checkptr: bytes stored over a
+    pointer`.
   - *a pointer to a pointer to anything* (`void **`, `char **`) may be
     over a pointer of a type. What is stored there is converted to that
     type first, as the program would have to convert it, and is a
-    pointer that faults if what it points to is not what the type
-    says.
+    pointer that nothing is loaded through if what it points to is not
+    what the type says.
 
   The look is at the class of the word, two bits that the compiled code
   loads where it has the header of what the pointer points into, with
@@ -433,20 +436,34 @@ memory-safe `unsafe` (`unsafe.md`, "Compatible types", is the first):
   into one from anything else is an integer; what is copied from one
   to a word that holds a pointer is the pointer that it is, or a
   pointer that faults.
-- **A conversion that is not compatible with the claim stops the
-  program**: `checkptr: converted pointer type is not compatible with
-  what the memory was claimed for`, after a line that says the word,
-  what it was and what it is asked to be. The memory is used for
-  something else than it was, as an allocator of C's does with the
-  blocks it keeps, and the pointers that were converted before are
-  wrong for it: one of them stores an integer where the new type has a
-  pointer. The plan is to stop the world there instead, find those
-  pointers, and make of them pointers that fault, so that such a
-  program runs; until then it does not. `GODEBUG=creclaim=1` claims
-  the word again and counts it, as before, with nothing taken away:
-  for measuring. `GODEBUG=cclaims=1` prints the counts when the program
-  exits, and `cclaims=2` the first 64 conversions that claimed a word
-  again.
+- **Memory that is used again for something else** is what an
+  allocator of C's makes of the blocks it keeps: a conversion that is
+  not compatible with the claims of the words, bytes stored over a word
+  that holds a pointer, a pointer stored through a `void **` over a
+  word that holds none. The words are claimed again, and what they hold
+  is what a word that is claimed for the first time would hold. The
+  pointers that were converted before are wrong for them now, and the
+  code that has them checks nothing: so the world stops
+  (`runtime/crepair.go`), and every word of the program that holds a
+  pointer of a type into the object is asked about again, with the
+  claims as they are now. One that would be refused becomes a pointer
+  that nothing is loaded or stored through (the bit of a pointer to an
+  end, `cEnd`): the program may still compare it, add to it and convert
+  it to what is there now, as it may a pointer to an end. A pointer to
+  anything stays as it is, since it is converted before it is used. The
+  words are found by their types: by the claims in an object of C's, by
+  the type that an object of Go's records, and by the tables of the
+  variables of the data and of every frame (`unsafe.md`). What the
+  compiled code of C keeps as an `unsafe.Pointer`, a pointer whose
+  conversion was not checked, is taken away with them, and so is what a
+  goroutine that was stopped between two instructions had in registers.
+  This is a look at all of the heap for each such use: a program that
+  recycles memory across types runs slowly, and runs
+  (`testdata/programs/malloc.c`: 502 times in 0.4 s). `GODEBUG=creclaim=1`
+  claims again and takes nothing away, for measuring, and `creclaim=2`
+  stops the program instead, with a line that says the word, what it
+  was and what it is asked to be. `GODEBUG=cclaims=1` prints the counts
+  when the program exits.
 - **A string, a slice or an interface of Go's** in C's memory is
   claimed as what it is: each of its words for that word of that type,
   the length as much as the pointer, and nothing else may be over one.
@@ -481,11 +498,9 @@ collector, as words that nothing claimed (below).
 
 What this does not do yet:
 
-- **Memory that is used again for another type stops the program**
-  (above). The plan's answer, the world stopped and the pointers that
-  were converted before taken away, is not built: a program that keeps
-  blocks and hands them out again as other types runs with
-  `GODEBUG=creclaim=1`, unchecked there.
+- **Memory that is used again in an object of Go's**, a variable or
+  what `new` allocated, stops the program: its type is the one it was
+  declared with.
 - **A pointer to a type that is larger than what it points to** is one
   that faults, also where the program only uses what is there: Godot's
   red-black trees share a sentinel that is a small global, converted to
