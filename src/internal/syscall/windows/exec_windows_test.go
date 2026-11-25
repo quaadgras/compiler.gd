@@ -57,6 +57,7 @@ const (
 	sidWilLow = `S-1-16-4096`
 )
 
+//go:nocheckptr
 func getProcessIntegrityLevel() (string, error) {
 	procToken, err := syscall.OpenCurrentProcessToken()
 	if err != nil {

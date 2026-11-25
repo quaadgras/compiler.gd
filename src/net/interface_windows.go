@@ -15,6 +15,12 @@ import (
 // structures. The structure contains an IP adapter and flattened
 // multiple IP addresses including unicast, anycast and multicast
 // addresses.
+// (gd: the system fills the bytes with a structure that has pointers
+// in it, into the same bytes: a conversion that the checks of
+// doc/gd/unsafe.md refuse a program, since bytes that it wrote would be
+// pointers. Here what wrote them is the system.)
+//
+//go:nocheckptr
 func adapterAddresses() ([]*windows.IpAdapterAddresses, error) {
 	var b []byte
 	l := uint32(15000) // recommended initial size

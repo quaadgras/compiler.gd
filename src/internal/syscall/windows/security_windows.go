@@ -204,6 +204,12 @@ func (g *TOKEN_GROUPS) AllGroups() []SID_AND_ATTRIBUTES {
 	return (*[(1 << 28) - 1]SID_AND_ATTRIBUTES)(unsafe.Pointer(&g.Groups[0]))[:g.GroupCount:g.GroupCount]
 }
 
+// (gd: the system fills the bytes with a structure that has pointers
+// in it, into the same bytes: a conversion that the checks of
+// doc/gd/unsafe.md refuse a program, since bytes that it wrote would be
+// pointers. Here what wrote them is the system.)
+//
+//go:nocheckptr
 func GetTokenGroups(t syscall.Token) (*TOKEN_GROUPS, error) {
 	i, e := getTokenInfo(t, syscall.TokenGroups, 50)
 	if e != nil {

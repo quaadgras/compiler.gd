@@ -339,6 +339,12 @@ func (t Token) getInfo(class uint32, initSize int) (unsafe.Pointer, error) {
 }
 
 // GetTokenUser retrieves access token t user account information.
+// (gd: the system fills the bytes with a structure that has pointers
+// in it, into the same bytes: a conversion that the checks of
+// doc/gd/unsafe.md refuse a program, since bytes that it wrote would be
+// pointers. Here what wrote them is the system.)
+//
+//go:nocheckptr
 func (t Token) GetTokenUser() (*Tokenuser, error) {
 	i, e := t.getInfo(TokenUser, 50)
 	if e != nil {
@@ -350,6 +356,12 @@ func (t Token) GetTokenUser() (*Tokenuser, error) {
 // GetTokenPrimaryGroup retrieves access token t primary group information.
 // A pointer to a SID structure representing a group that will become
 // the primary group of any objects created by a process using this access token.
+// (gd: the system fills the bytes with a structure that has pointers
+// in it, into the same bytes: a conversion that the checks of
+// doc/gd/unsafe.md refuse a program, since bytes that it wrote would be
+// pointers. Here what wrote them is the system.)
+//
+//go:nocheckptr
 func (t Token) GetTokenPrimaryGroup() (*Tokenprimarygroup, error) {
 	i, e := t.getInfo(TokenPrimaryGroup, 50)
 	if e != nil {

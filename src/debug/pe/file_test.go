@@ -525,6 +525,7 @@ const testprog = `
 package main
 
 import "fmt"
+import "reflect"
 import "syscall"
 import "unsafe"
 {{if .}}import "C"
@@ -542,8 +543,9 @@ func add(p unsafe.Pointer, x uintptr) unsafe.Pointer {
 }
 
 func funcPC(f interface{}) uintptr {
-	var a uintptr
-	return **(**uintptr)(add(unsafe.Pointer(&f), unsafe.Sizeof(a)))
+	// (gd: not by the second word of the interface, which is not
+	// looked at by itself: doc/gd/unsafe.md.)
+	return reflect.ValueOf(f).Pointer()
 }
 
 func main() {
