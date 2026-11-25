@@ -35,7 +35,11 @@ memory (`runtime/checkptr.go`). A check that fails is a fatal error.
   result is in a heap object, one of the pointers the expression was
   computed from is in the same object, or the object is *exposed*. If
   it is in the stack or in the program's data, one of them is in the
-  same variable, and the result is in the variable or at its end.
+  same variable, and the result is in the variable or at its end, or
+  the variable is one of the data that is exposed. This is so of every
+  such conversion: Go's own check leaves out the result of a call and
+  the `Data` of a `reflect.SliceHeader` or `StringHeader`, and here
+  those are integers that were kept, as any other is.
 
   An object is exposed when the program makes an integer of its address
   and keeps it: compiled code calls `runtime.exposeptr` where it converts
@@ -43,12 +47,17 @@ memory (`runtime/checkptr.go`). A check that fails is a fatal error.
   expression that makes a pointer of it again, or in a comparison, or
   in a subtraction of one such integer from another, or the pointer is
   plainly to a variable of the stack. The mark is a bit for the object, kept as
-  the shared bit is. So `h := uintptr(unsafe.Pointer(p))` kept in a field
+  the shared bit is, or a bit for the variable of the data
+  (`runtime/datavar.go`); a variable of the stack is never exposed. So `h := uintptr(unsafe.Pointer(p))` kept in a field
   and `(*T)(unsafe.Pointer(h))` later work, and `(*T)(unsafe.Pointer(h +
   64))` does if it is still in `p`'s object, and not if it is in the
   next one, which never gave its address away. This is what C calls an
   exposed address (PNVI-ae). The integer does not keep the object alive:
   once it is freed the integer is the address of nothing exposed.
+  Where the integer is made a pointer the object's span is swept first,
+  so that an object the collector found dead is free, and while the
+  collector marks the object is marked, as it is when a weak pointer is
+  made a strong one: the pointer may be the only one to it.
   A result that is in nothing the runtime knows, not in the heap, the
   stack or the data, is refused if every pointer it was computed from
   is in an object of the heap: it is in none of their objects, and
@@ -281,9 +290,11 @@ is how code made a slice of a pointer before `unsafe.Slice`.
   the address is of an object of the heap whose address the program
   took as an integer ("exposed", below): an integer that outlives its
   object and is then the address of another exposed one is a pointer
-  to that one. It is also a pointer if it is the address of nothing
+  to that one. So is the address of a variable of the data that is
+  exposed. It is also a pointer if it is the address of nothing
   that is Go's, memory that the system gave the program, which nothing
-  bounds. It is not one to a variable, nor to what the runtime keeps
+  bounds. It is not one to a variable of the stack, to anything that
+  never gave its address away, nor to what the runtime keeps
   for itself outside the objects of the heap (`runtime/rtmem.go`: the
   heap's address space, the program's code and tables, what the
   runtime mapped): the program stops.

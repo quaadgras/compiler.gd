@@ -862,6 +862,13 @@ func checkptrArithmetic(p unsafe.Pointer, originals []unsafe.Pointer) {
 					return
 				}
 			}
+			// An integer that was kept is a pointer again if it
+			// is in a variable of the data whose address the
+			// program took as an integer, as for an object of
+			// the heap below.
+			if len(originals) == 0 && dataVarExposed(uintptr(p)) {
+				return
+			}
 		case varUnknown:
 			// An address of the stack or of the data that is in
 			// no variable that is known, as the end of a
@@ -965,7 +972,16 @@ func exposeptr(p unsafe.Pointer) {
 		return
 	}
 	s := spanOfHeap(uintptr(p))
-	if s == nil || s.isUserArenaChunk {
+	if s == nil {
+		// A variable of the data is exposed as an object is
+		// (datavar.go). One of the stack is not: an integer is not
+		// made a pointer to it again but where it was made of one.
+		if gp := getg(); uintptr(p) < gp.stack.lo || uintptr(p) >= gp.stack.hi {
+			dataVarExpose(uintptr(p))
+		}
+		return
+	}
+	if s.isUserArenaChunk {
 		return
 	}
 	i := s.objIndex(uintptr(p))
@@ -1000,18 +1016,35 @@ func exposeobj(s *mspan, i uintptr) {
 	releasem(mp)
 }
 
-// checkptrExposed reports whether p is in an exposed object of the heap.
+// checkptrExposed reports whether p is in an exposed object of the heap,
+// which the caller makes a pointer to.
+//
+// The integer kept nothing alive, so the collector may have found the
+// object dead and not have swept it yet: its span is swept first, which
+// frees it, and takes away that it was exposed. And while the collector
+// marks, the pointer may be the only one to the object, in a stack that
+// was looked at already: the object is marked, as it is when a weak
+// pointer to it is made a strong one (internal_weak_runtime_makeStrongFromWeak).
 func checkptrExposed(p uintptr) bool {
 	s := spanOfHeap(p)
 	if s == nil || s.isUserArenaChunk {
 		return false
 	}
-	bits := (*gcBits)(atomic.Loadp(unsafe.Pointer(&s.exposedBits)))
-	if bits == nil {
+	if atomic.Loadp(unsafe.Pointer(&s.exposedBits)) == nil {
 		return false
 	}
-	i := s.objIndex(p)
-	return !s.isFree(i) && atomic.Load8(bits.bytep(i/8))&(1<<(i%8)) != 0
+	mp := acquirem()
+	s.ensureSwept()
+	ok := false
+	if bits := (*gcBits)(atomic.Loadp(unsafe.Pointer(&s.exposedBits))); bits != nil {
+		i := s.objIndex(p)
+		ok = !s.isFree(i) && atomic.Load8(bits.bytep(i/8))&(1<<(i%8)) != 0
+	}
+	if ok && gcphase != _GCoff {
+		shade(p)
+	}
+	releasem(mp)
+	return ok
 }
 
 // checkptrBase returns the base address for the allocation containing

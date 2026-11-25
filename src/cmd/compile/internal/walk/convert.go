@@ -601,17 +601,14 @@ func walkCheckPtrArithmetic(gd *base.Invocation, n *ir.ConvExpr, init *ir.Nodes)
 	n.SetCheckPtr(true)
 	defer n.SetCheckPtr(false)
 
-	// TODO(mdempsky): Make stricter. We only need to exempt
-	// reflect.Value.Pointer and reflect.Value.UnsafeAddr.
-	switch n.X.Op() {
-	case ir.OCALLMETH:
+	// gd: Go exempts the result of a call, for reflect.Value.Pointer
+	// and reflect.Value.UnsafeAddr, and the Data of a reflect header.
+	// Here an integer that such a thing gives is as any that was kept:
+	// the address of something that is exposed, which those methods
+	// make of what they return, and a store to a Data does of what is
+	// stored (runtime.checkptrArithmetic, with no originals).
+	if n.X.Op() == ir.OCALLMETH {
 		gd.FatalfAt(n.X.Pos(), "OCALLMETH missed by typecheck")
-	case ir.OCALLFUNC, ir.OCALLINTER:
-		return n
-	}
-
-	if n.X.Op() == ir.ODOTPTR && ir.IsReflectHeaderDataField(n.X) {
-		return n
 	}
 
 	// gd: a function with go:uintptrescapes or go:uintptrkeepalive is

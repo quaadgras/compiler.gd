@@ -5,6 +5,7 @@
 package runtime
 
 import (
+	"internal/runtime/atomic"
 	"unsafe"
 )
 
@@ -64,12 +65,23 @@ func dataVarOf(addr uintptr) (base, size uintptr, typ *_type, ok bool) {
 //
 //go:nosplit
 func dataVarAt(addr uintptr) (base, size uintptr, typ *_type, typed bool, state int) {
+	base, size, typ, typed, state, _, _ = dataVarLookup(addr)
+	return
+}
+
+// dataVarLookup is dataVarAt, and says which variable it found: the
+// idx'th of the table of the mod'th module.
+//
+//go:nosplit
+func dataVarLookup(addr uintptr) (base, size uintptr, typ *_type, typed bool, state int, mod int, idx uintptr) {
 	if addr == uintptr(unsafe.Pointer(&zerobase)) {
 		// What has no size is allocated there: it is a pointer to
 		// nothing, of any type, and not to that variable.
-		return 0, 0, nil, false, varNone
+		return 0, 0, nil, false, varNone, 0, 0
 	}
+	mod = -1
 	for datap := &firstmoduledata; datap != nil; datap = datap.next {
+		mod++
 		if datap.datavars == 0 || datap.bad {
 			continue
 		}
@@ -124,13 +136,67 @@ func dataVarAt(addr uintptr) (base, size uintptr, typ *_type, typed bool, state 
 				}
 			}
 			if off-uintptr(e.off) < n {
-				return start + uintptr(e.off), n, t, known, varFound
+				return start + uintptr(e.off), n, t, known, varFound, mod, lo
 			}
 			// Between two symbols of the section.
-			return 0, 0, nil, false, varUnknown
+			return 0, 0, nil, false, varUnknown, 0, 0
 		}
 	}
-	return 0, 0, nil, false, varNone
+	return 0, 0, nil, false, varNone, 0, 0
+}
+
+// Exposed variables.
+//
+// A variable of the data whose address the program made an integer of,
+// and kept, is exposed as an object of the heap is (checkptr.go): an
+// integer that is an address in it may be made a pointer again, and one
+// that is an address in a variable that never gave its address away may
+// not. dataExposed has a bit for each variable of the tables of the
+// first modules; the variables of any others are taken to be exposed.
+const dataExposedMods = 8
+
+var dataExposed [dataExposedMods]unsafe.Pointer // of the bits of a module, or nil
+
+// dataVarExpose marks the variable of the data that addr is in, if it
+// is in one, as exposed.
+//
+//go:nosplit
+func dataVarExpose(addr uintptr) {
+	_, _, _, _, state, mod, idx := dataVarLookup(addr)
+	if state != varFound || mod >= dataExposedMods {
+		return
+	}
+	bits := (*gcBits)(atomic.Loadp(unsafe.Pointer(&dataExposed[mod])))
+	if bits == nil {
+		systemstack(func() {
+			datap := &firstmoduledata
+			for i := 0; i < mod; i++ {
+				datap = datap.next
+			}
+			n := uintptr((*[dataVarSects + 1]uint32)(unsafe.Pointer(datap.datavars))[dataVarSects])
+			b := persistentalloc(n/8+1, 1, &memstats.other_sys)
+			// (If another was first, these are not used.)
+			atomic.Casp1(&dataExposed[mod], nil, b)
+		})
+		bits = (*gcBits)(atomic.Loadp(unsafe.Pointer(&dataExposed[mod])))
+	}
+	if mask := uint8(1) << (idx % 8); atomic.Load8(bits.bytep(idx/8))&mask == 0 {
+		atomic.Or8(bits.bytep(idx/8), mask)
+	}
+}
+
+// dataVarExposed reports whether addr is in a variable of the data that
+// is exposed.
+func dataVarExposed(addr uintptr) bool {
+	_, _, _, _, state, mod, idx := dataVarLookup(addr)
+	if state != varFound {
+		return false
+	}
+	if mod >= dataExposedMods {
+		return true
+	}
+	bits := (*gcBits)(atomic.Loadp(unsafe.Pointer(&dataExposed[mod])))
+	return bits != nil && atomic.Load8(bits.bytep(idx/8))&(uint8(1)<<(idx%8)) != 0
 }
 
 // dataVarEntryAt returns the i'th entry of the table whose entries are
