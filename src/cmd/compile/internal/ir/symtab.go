@@ -45,6 +45,7 @@ type SymsStruct struct {
 	C23ByteStore              *obj.LSym
 	C23PtrStore               *obj.LSym
 	C23PtrStores              *obj.LSym
+	CheckPtrStore             *obj.LSym
 	CheckPtrAlignmentLoad     *obj.LSym
 	C23Header                 *obj.LSym
 	CheckPtrView              *obj.LSym

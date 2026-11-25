@@ -220,6 +220,36 @@ to 23.9 ns for an object of 32 bytes, 15.4 to 18.8 ns for one of 16,
 whatever their size: 635 to 715 MB in all for 32-byte objects, 159 to
 239 MB for pointers.
 
+### A store through an unsafe.Pointer
+
+An `unsafe.Pointer` may be over a typed pointer: `(*unsafe.Pointer)(p)`
+where `p` points to a `*A`. A load through it gives the pointer, with no
+type. A store through it would put any pointer where a `*A` is, so it is
+looked at where it is made (`runtime.checkptrStore`): what is stored in
+a word that the memory's type has a `*A` in is a pointer to an `A`, or
+to what is compatible with one, or the program stops. That is for
+
+    *(*unsafe.Pointer)(p) = q
+
+and for `sync/atomic`'s `StorePointer`, `SwapPointer` and
+`CompareAndSwapPointer`, which are how such a pointer is mostly used.
+A word that the memory's type has an `unsafe.Pointer` in takes any
+pointer, as before; `atomic.Pointer[T]` has one.
+
+Only a pointer to an `unsafe.Pointer` itself, or to an array of them, is
+over a typed pointer this way. A struct that has an `unsafe.Pointer`
+where the memory has a `*A` is not compatible with it, unless the
+conversion is only loaded through: a store to that field would be a
+plain store, with nothing looking.
+
+### A pointer to bytes that go past the object
+
+`(*[1 << 30]byte)(p)` was let be, as it is in Go: the bytes were looked
+at as far as the object went, and an index went anywhere. The type is to
+fit in what `p` points into now, as any other does. What is sliced at
+once, `(*[1 << 30]byte)(p)[:n:n]`, is asked about as its `n` bytes, which
+is how code made a slice of a pointer before `unsafe.Slice`.
+
 ### What this does not close
 
 - **What a pointer points to, in an object that generic code allocated
@@ -229,11 +259,10 @@ whatever their size: 635 to 715 MB in all for 32-byte objects, 159 to
 - **A small object of a type that the program made as it ran**
   (`reflect.StructOf`) has no number, and is compared by where its
   pointers are.
-- **A store through an `unsafe.Pointer` that is over a typed pointer**
-  is not checked: `*(*unsafe.Pointer)(unsafe.Pointer(&p)) = q` puts any
-  pointer where a `*A` is. `sync/atomic.StorePointer` is used this way.
-- **Bytes over a pointer in C's packages** can be written, until their
-  stores of bytes are checked (step 3).
+- **An integer that is the address of something and is made a pointer
+  with nothing in the expression that it came from** is a pointer if
+  the address is of an object whose address the program took as an
+  integer ("exposed", below), or of nothing that the checks know.
 - **The stack and globals through a plain `unsafe.Pointer`** have no
   type at run time: only what the compiler knows is compared.
 

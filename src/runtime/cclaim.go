@@ -249,9 +249,9 @@ func cClaim(s *mspan, i, p uintptr, elem *_type, n uintptr, load, c bool) {
 		mask = getGCMask(elem)
 	}
 	// direct: what is stored through the pointer is looked at where
-	// it is stored (c23PtrStore), so it may be over a pointer of a type.
-	// (Go's conversions are not held to that yet.)
-	direct := !c || cDirect(elem)
+	// it is stored (c23PtrStore), or nothing is, so it may be over a
+	// pointer of a type.
+	direct := load || cDirect(elem, c)
 	for a := lo; a < hi; a += word {
 		w := (a - sbase) / word
 		want, id := uint32(cScalar), uint32(0)
@@ -845,6 +845,23 @@ func c23PtrStore(p unsafe.Pointer, v unsafe.Pointer) unsafe.Pointer {
 	}
 	throw("checkptr: pointer stored over part of something else")
 	return nil
+}
+
+// checkptrStore is c23PtrStore for a package of Go's, and for
+// sync/atomic's stores of pointers: what is stored through a
+// *unsafe.Pointer that is over a pointer of a type is one of that type,
+// or the program stops.
+func checkptrStore(p unsafe.Pointer, v unsafe.Pointer) unsafe.Pointer {
+	if v == nil || uintptr(v) < minLegalPointer {
+		return v
+	}
+	if s := spanOfHeap(uintptr(p)); s == nil || s.isUserArenaChunk {
+		return v // (the stack, the data: to come)
+	}
+	if c23PtrStore(p, v) != v {
+		throw("checkptr: pointer stored through an unsafe.Pointer is not one that the memory's pointer may be")
+	}
+	return v
 }
 
 // c23PtrStores is c23PtrStore for n bytes of pointers to anything that

@@ -11,6 +11,9 @@ import (
 )
 
 func init() {
+	register("CheckPtrBytesLonger", CheckPtrBytesLonger)
+	register("CheckPtrBytesSliced", CheckPtrBytesSliced)
+	register("CheckPtrBytesSlicedLonger", CheckPtrBytesSlicedLonger)
 	register("CheckPtrAlignmentNoPtr", CheckPtrAlignmentNoPtr)
 	register("CheckPtrAlignmentPtr", CheckPtrAlignmentPtr)
 	register("CheckPtrAlignmentNilPtr", CheckPtrAlignmentNilPtr)
@@ -115,6 +118,31 @@ func CheckPtrStringFail() {
 	p := new(byte)
 	sink2 = p
 	sink2 = unsafe.String(p, 100)
+}
+
+// CheckPtrBytesLonger converts to a pointer to bytes that go on past
+// the object: an index would go anywhere with it.
+func CheckPtrBytesLonger() {
+	p := new([8]byte)
+	checkptrSink = p
+	sink2 = (*[1 << 20]byte)(unsafe.Pointer(checkptrSink.(*[8]byte)))
+}
+
+// CheckPtrBytesSliced slices such a pointer at once to the bytes that
+// are there, as code did before unsafe.Slice: that is those bytes.
+func CheckPtrBytesSliced() {
+	p := new([8]byte)
+	checkptrSink = p
+	n := 8
+	sink2 = (*[1 << 20]byte)(unsafe.Pointer(checkptrSink.(*[8]byte)))[:n:n]
+}
+
+// CheckPtrBytesSlicedLonger slices it to more.
+func CheckPtrBytesSlicedLonger() {
+	p := new([8]byte)
+	checkptrSink = p
+	n := 4096
+	sink2 = (*[1 << 20]byte)(unsafe.Pointer(checkptrSink.(*[8]byte)))[:n:n]
 }
 
 func CheckPtrAlignmentNested() {

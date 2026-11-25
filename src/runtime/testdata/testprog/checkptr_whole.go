@@ -287,22 +287,6 @@ func viewLong() {
 		sink2 = q.Load()
 		viewShapeStatic[abi.EmptyInterface]()
 	})
-	viewCase("CheckPtrWholePastObject", func() {
-		// A view whose type is longer than the object is of the
-		// object up to its end.
-		x := new(struct {
-			s   string
-			pad [1000]byte
-		})
-		sink2 = x
-		viewAs[[1 << 20]byte](viewPlain(&x.pad[990]))
-		y := new(struct {
-			s   string
-			pad [64]byte
-		})
-		sink2 = y
-		viewAs[[1 << 20]byte](viewPlain(&y.pad[60]))
-	})
 }
 
 //go:noinline

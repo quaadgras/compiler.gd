@@ -1,0 +1,5 @@
+add_past_global
+add_past_local
+int_to_ptr
+int_to_ptr_heap
+runtime_mem

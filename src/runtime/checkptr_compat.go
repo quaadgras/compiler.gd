@@ -135,17 +135,19 @@ type compatSeen struct {
 	pairs [32][2]*_type
 	c     bool // the conversion is C's: see compatLeaves
 	// direct: the type converted to is itself a pointer to anything
-	// (void **, char **), or an array of them.
+	// (*unsafe.Pointer, C's void ** and char **), or an array of
+	// them; or the conversion is one that is only loaded through.
 	direct bool
 	// cmem: the memory is an object that C allocated.
 	cmem bool
 }
 
-// cDirect reports whether t is a pointer to anything, to C, or an array
-// of them: what a pointer to it is stored through is looked at where it
-// is stored (cclaim.go's c23PtrStore), so such a pointer may be over a
-// pointer of a type.
-func cDirect(t *_type) bool {
+// cDirect reports whether t is a pointer to anything, or an array of
+// them: what a pointer to it is stored through is looked at where it is
+// stored (cclaim.go's c23PtrStore, checkptrStore), so such a pointer may
+// be over a pointer of a type. To C, if c is set, a pointer to a byte
+// is a pointer to anything too.
+func cDirect(t *_type, c bool) bool {
 	for t.Kind() == abi.Array {
 		t = (*arraytype)(unsafe.Pointer(t)).Elem
 	}
@@ -154,7 +156,7 @@ func cDirect(t *_type) bool {
 		return true
 	case abi.Pointer:
 		e := (*ptrtype)(unsafe.Pointer(t)).Elem
-		return e.Size_ == 0 || e.Size_ == 1 && !e.Pointers()
+		return e.Size_ == 0 || c && e.Size_ == 1 && !e.Pointers()
 	}
 	return false
 }
@@ -190,9 +192,12 @@ func compatBytePtr(t *_type) bool {
 // through either is checked where it stores (doc/gd/cc.md). The memory's
 // own word is what its type says, unless C allocated the object
 // (seen.cmem): a *byte of Go's is a pointer to a byte that is no part of
-// a pointer. And only a pointer to a pointer to anything (seen.direct)
-// is over a pointer of a type: a struct of C's that has a void * where
-// the memory has a typed pointer would store through it unlooked at.
+// a pointer.
+//
+// Only a pointer to a pointer to anything (seen.direct) is over a
+// pointer of a type, in a conversion of Go's as in one of C's: a struct
+// that has an unsafe.Pointer where the memory has a typed pointer would
+// store any pointer there, with nothing looking.
 func compatLeaves(mk uint8, mt *_type, min uintptr, vk uint8, vt *_type, vin uintptr, view bool, seen *compatSeen) int {
 	if seen.c {
 		if vk == compatPtr && compatBytePtr(vt) {
@@ -216,7 +221,7 @@ func compatLeaves(mk uint8, mt *_type, min uintptr, vk uint8, vt *_type, vin uin
 		case compatUnsafe:
 			return compatOK
 		case compatPtr, compatFunc, compatMap, compatChan:
-			if !seen.c || seen.direct {
+			if seen.direct {
 				return compatOK
 			}
 		}
@@ -382,7 +387,7 @@ func checkptrCompat(typ *_type, tbase, limit, p uintptr, elem *_type, size uintp
 	aligned := lo&(word-1) == 0
 	var seen compatSeen
 	seen.c = c
-	seen.direct = c && cDirect(elem)
+	seen.direct = load || cDirect(elem, c)
 	seen.cmem = c && cObjectIsC(typ)
 	for w := lo &^ (word - 1); w < lo+size; w += word {
 		mo := w % typ.Size_

@@ -164,6 +164,8 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).
 		C23PtrStores = typecheck.LookupRuntimeFunc(gd, "c23PtrStores")
 	ir.Syms(gd).
+		CheckPtrStore = typecheck.LookupRuntimeFunc(gd, "checkptrStore")
+	ir.Syms(gd).
 		CheckPtrAlignmentLoad = typecheck.LookupRuntimeFunc(gd, "checkptrAlignmentLoad")
 	ir.Syms(gd).
 		C23Header = typecheck.LookupRuntimeFunc(gd, "c23Header")
@@ -1230,7 +1232,9 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 	// unless the compiler knows what it points into (walk's markWholeViews).
 	fn := ir.Syms(s.gd).CheckPtrAlignment
 	if elem.Alignment() == 1 && (size == 0 || size == 1 || count == nil) {
-		if size == 0 || n.View != ir.ViewUnknown {
+		if size == 0 || n.View != ir.ViewUnknown && count == nil {
+			// (What is sliced to count elements is as long as
+			// the program says when it runs: the runtime's.)
 			return v
 		}
 		fn = ir.Syms(s.gd).CheckPtrView
@@ -1338,14 +1342,17 @@ const (
 	cStorePtr   // it is through a pointer to a pointer to anything
 )
 
-// cUntypedPtr reports whether t is a pointer to anything, to C: an
-// unsafe.Pointer, a pointer to what has no size, or a pointer to a byte.
-func cUntypedPtr(t *types.Type) bool {
-	return t.IsUnsafePtr() || t.IsPtr() && (t.Elem().Size() == 0 || t.Elem().Size() == 1 && !t.Elem().HasPointers())
+// cUntypedPtr reports whether t is a pointer to anything: an
+// unsafe.Pointer, a pointer to what has no size, or to C, if c is set, a
+// pointer to a byte.
+func cUntypedPtr(t *types.Type, c bool) bool {
+	return t.IsUnsafePtr() || t.IsPtr() && (t.Elem().Size() == 0 || c && t.Elem().Size() == 1 && !t.Elem().HasPointers())
 }
 
-// cStoreKind returns what the store to left, in a package of C's, is to
-// be checked for (runtime/cclaim.go's c23ByteStore). A store to a
+// cStoreKind returns what the store to left is to be checked for
+// (runtime/cclaim.go's c23ByteStore): the first of these in a package of
+// C's only, since Go has no pointer to bytes that is over a pointer. A
+// store to a
 // variable, or through a pointer to a type whose words the pointer's
 // conversion claimed, is not checked. The two that are: through a
 // pointer to bytes, which may be over anything; and through a pointer to
@@ -1380,11 +1387,12 @@ func (s *state) cStoreKind(left ir.Node) int {
 		default:
 			return cStoreNone
 		}
+		c := s.gd.CObjects
 		switch {
 		case t.Size() == 0:
-		case !t.HasPointers() && t.Alignment() == 1:
+		case c && !t.HasPointers() && t.Alignment() == 1:
 			return cStoreBytes
-		case cUntypedPtr(t), t.IsArray() && cUntypedPtr(t.Elem()):
+		case cUntypedPtr(t, c), t.IsArray() && cUntypedPtr(t.Elem(), c):
 			return cStorePtr
 		}
 		return cStoreNone
@@ -1403,7 +1411,13 @@ func (s *state) cStoreCheck(check int, addr, v *ssa.Value, size int64) *ssa.Valu
 			s.rtcall(ir.Syms(s.gd).C23ByteStore, true, nil, addr, s.constInt(types.Types[types.TUINTPTR], size))
 			return
 		}
-		s.vars[convVar] = s.rtcall(ir.Syms(s.gd).C23PtrStore, true, []*types.Type{v.Type}, addr, v)[0]
+		fn := ir.Syms(s.gd).C23PtrStore
+		if !s.gd.CObjects {
+			// (A package of Go's is stopped for what C gets a
+			// pointer that cannot be used for.)
+			fn = ir.Syms(s.gd).CheckPtrStore
+		}
+		s.vars[convVar] = s.rtcall(fn, true, []*types.Type{v.Type}, addr, v)[0]
 	}
 	if !s.cHeaders() || size > ssa.CStoreWords*int64(s.config.PtrSize) {
 		call()
@@ -6245,9 +6259,9 @@ func (s *state) assignWhichMayOverlap(left ir.Node, right *ssa.Value, deref bool
 
 	// Left is not ssa-able. Compute its address.
 	addr := s.addr(left)
-	if s.gd.CObjects && s.checkPtrEnabled && t.Size() != 0 {
-		// A store through a pointer to bytes, or through a pointer
-		// to a pointer to anything, of C's: the word may be one that
+	if s.checkPtrEnabled && t.Size() != 0 && s.config.PtrSize == 8 {
+		// A store through a pointer to bytes, of C's, or through a
+		// pointer to a pointer to anything: the word may be one that
 		// holds something else (cStoreCheck).
 		switch s.cStoreKind(left) {
 		case cStoreBytes:
@@ -6256,7 +6270,7 @@ func (s *state) assignWhichMayOverlap(left ir.Node, right *ssa.Value, deref bool
 			switch {
 			case deref && right == nil:
 				// Null pointers.
-			case deref || !cUntypedPtr(t):
+			case deref || !cUntypedPtr(t, s.gd.CObjects):
 				s.rtcall(ir.Syms(s.gd).C23PtrStores, true, nil, addr, s.constInt(types.Types[types.TUINTPTR], t.Size()))
 			default:
 				right = s.cStoreCheck(ssa.CSlowStorePtr, addr, right, t.Size())

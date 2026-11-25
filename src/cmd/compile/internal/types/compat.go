@@ -261,6 +261,18 @@ func CompatView(gd *base.Invocation, src *Type, off int64, view *Type, size int6
 	ptr := int64(PtrSize)
 	lo, hi := max(off, 0), min64(src.Size(), off+size)
 	aligned := off&(ptr-1) == 0
+	// direct: only a pointer to an unsafe.Pointer (or to an array of
+	// them) is over a pointer of a type, or what is only loaded
+	// through: what is stored through the first is looked at where
+	// it is stored (runtime.checkptrStore), and a struct that has an
+	// unsafe.Pointer there would store any pointer unlooked at.
+	direct := load
+	for t := view; !direct; t = t.Elem() {
+		if !t.IsArray() {
+			direct = t.IsUnsafePtr() || t.IsPtr() && t.Elem().Size() == 0
+			break
+		}
+	}
 	var seen compatSeen
 	for w := lo &^ (ptr - 1); w < hi; {
 		mk, mt, min, mrest := compatLeaf(src, w)
@@ -280,6 +292,8 @@ func CompatView(gd *base.Invocation, src *Type, off int64, view *Type, size int6
 			// PartialView's to say.
 		case load && vk == compatScalar:
 			// A pointer that is loaded as an integer.
+		case vk == compatUnsafe && !direct && (mk == compatPtr || mk == compatFunc || mk == compatMap || mk == compatChan):
+			return ViewPointee
 		default:
 			if why := compatLeaves(gd, mk, mt, min, vk, vt, vin, true, &seen); why != ViewOK {
 				return why

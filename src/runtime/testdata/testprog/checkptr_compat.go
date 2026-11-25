@@ -119,7 +119,6 @@ func init() {
 	compatCase(C+"Shape", func() { compatAs[compatNode2](compatHide(node())) })
 	compatCase(C+"BytesOverIntegers", func() { compatAs[[40]byte](compatHide(&node().pad[3])) })
 	compatCase(C+"BytesLoaded", func() { sink2 = (*[32]byte)(compatHide(node()))[3] })
-	compatCase(C+"BytesLonger", func() { compatAs[[1 << 20]byte](compatHide(&node().pad[3])) })
 	compatCase(C+"StringOfBytes", func() { sink2 = unsafe.String((*byte)(compatHide(&node().val)), 24) })
 	compatCase(C+"SliceOfBytes", func() { sink2 = unsafe.Slice((*byte)(compatHide(&node().pad[3])), 40) })
 	compatCase(C+"SliceOfElements", func() {
@@ -146,11 +145,6 @@ func init() {
 	compatCase(I+"Bytes", func() { compatAs[[32]byte](compatHide(node())) })
 	compatCase(I+"ByteSlice", func() { sink2 = (*[32]byte)(compatHide(node()))[:] })
 	compatCase(I+"ByteStore", func() { (*[32]byte)(compatHide(node()))[3] = 1 })
-	compatCase(I+"BytesLonger", func() {
-		a := new([40]compatSmall)
-		checkptrSink = a
-		compatAs[[1 << 20]byte](compatHide(&a[7].n))
-	})
 	compatCase(I+"SliceOfBytes", func() { sink2 = unsafe.Slice((*byte)(compatHide(&node().val)), 24) })
 	compatCase(I+"SliceOfWords", func() {
 		a := new([40]compatSmall)

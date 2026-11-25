@@ -32,6 +32,11 @@ func TestCSpanSizes(t *testing.T) {
 					t.Errorf("CUsable(MallocC(%d)+%d) = %d, %v, want %d", n, i, got, ok, n-i)
 				}
 			}
+			if n == 0 {
+				// Nothing to look at: Go has no pointer to a
+				// byte that is not there.
+				continue
+			}
 			b := unsafe.Slice((*byte)(p), n)
 			for i, c := range b {
 				if c != 0 {

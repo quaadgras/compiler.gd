@@ -147,6 +147,12 @@ func markWholeView(gd *base.Invocation, fn *ir.Func, ro *ir.ReassignOracle, n *i
 		return
 	}
 	types.CalcSize(gd, src)
+	if off < 0 || size > src.Size()-off {
+		// The view goes past what the pointer is known to point
+		// to, which may be one element of many: whether it fits
+		// in what is there is for the runtime to say.
+		return
+	}
 	k := types.PartialView(src, off, n.Type().Elem(), size)
 	if k == types.NotWhole {
 		n.View = ir.ViewWhole

@@ -351,10 +351,25 @@ func checkptrView(p unsafe.Pointer, elem *_type, n uintptr) {
 		return
 	}
 	base := s.base() + s.objIndex(uintptr(p))*s.elemsize
+	checkptrFits(s, base, uintptr(p), n*elem.Size_)
 	if typ, tbase := checkptrObjectType(s, base); typ != nil {
 		checkptrWhole(typ, tbase, base+s.elemsize, uintptr(p), elem, n*elem.Size_)
 	} else if wholeBitsEnabled {
 		checkptrWholeSmall(s, base, uintptr(p), elem, n*elem.Size_)
+	}
+}
+
+// checkptrFits stops the program if the size bytes at p, in the object
+// at base of s, are not all in it: (*[1 << 30]byte)(p) is a pointer that
+// an index goes anywhere with. (What is sliced at once,
+// (*[1 << 30]byte)(p)[:n:n], is asked about as its n bytes.)
+func checkptrFits(s *mspan, base, p, size uintptr) {
+	limit := base + s.elemsize
+	if s.spanclass.c() {
+		limit = base + s.cSizeOf(s.objIndex(p))
+	}
+	if p > limit || size > limit-p {
+		checkptrStop("checkptr: converted pointer straddles multiple allocations")
 	}
 }
 
@@ -369,7 +384,13 @@ func checkptrViewKept(p unsafe.Pointer, elem *_type, n uintptr) {
 		return
 	}
 	s := spanOfHeap(uintptr(p))
-	if s == nil || s.isUserArenaChunk || s.spanclass.c() {
+	if s == nil || s.isUserArenaChunk {
+		return
+	}
+	base := s.base() + s.objIndex(uintptr(p))*s.elemsize
+	size := n * elem.Size_
+	checkptrFits(s, base, uintptr(p), size)
+	if s.spanclass.c() {
 		// (The words of an object of C's are what they are
 		// claimed for, and bytes claim nothing: cclaim.go.)
 		return
@@ -377,8 +398,6 @@ func checkptrViewKept(p unsafe.Pointer, elem *_type, n uintptr) {
 	if s.spanclass.noscan() && !elem.Pointers() {
 		return
 	}
-	base := s.base() + s.objIndex(uintptr(p))*s.elemsize
-	size := n * elem.Size_
 	typ, tbase := checkptrObjectType(s, base)
 	if typ != nil {
 		if typ == elem && uintptr(p) >= tbase && (uintptr(p)-tbase)%elem.Size_ == 0 {
