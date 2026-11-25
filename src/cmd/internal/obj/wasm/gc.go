@@ -235,7 +235,14 @@ const (
 	GCPtrAddr  = 0
 	GCPtrSlots = 1
 	GCPtrOff   = 2
-	GCSlots    = "wasm.slots"
+	// GCPtrLim is the size in bytes of what the pointer points into,
+	// from where element 0 of the array is: the block, the variable of
+	// a frame, the data. A load or a store through the pointer is of
+	// bytes from GCPtrOff on that end at GCPtrLim or before it (see
+	// GCSplitCheck). It is 0 for a pointer that was made of an integer:
+	// nothing is loaded or stored through that one.
+	GCPtrLim = 3
+	GCSlots  = "wasm.slots"
 
 	// The functions the linker generates for split. See
 	// cmd/link/internal/wasm/gcsplit.go.
@@ -246,7 +253,7 @@ const (
 	GCSplitIntToPtr = "wasm.inttoptr" // (i64) ptr: the pointer of an address
 	GCSplitMove     = "wasm.smove"    // (dst, drel i32, src, srel i32, n i32): copy n bytes and their pointers
 	GCSplitZero     = "wasm.szero"    // (p, rel i32, n i32): zero n bytes and their pointers
-	GCSplitNew      = "wasm.snew"     // (addr i32, nslots i32) ptr: a pointer to a new block
+	GCSplitNew      = "wasm.snew"     // (addr i32, nslots i32, size i32) ptr: a pointer to a new block of size bytes
 	GCSplitStrLen   = "wasm.strlen"   // (a, b i64) i64: the length of the string of wasm32 whose A and B these are (with 4-byte words only)
 
 	// GCGlobalSlots is the global (with split) that holds the array of

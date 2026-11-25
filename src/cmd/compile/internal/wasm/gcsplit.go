@@ -520,6 +520,7 @@ func (g *gcGen) splitFrame() {
 	g.local(wasm.ALocalGet, g.fp)
 	g.prog(wasm.ARefNull)
 	i32Const(g.s, 0)
+	i32Const(g.s, int32(g.frameSize))
 	g.typed(wasm.AStructNew, g.ptrSym(), 0)
 	g.local(wasm.ALocalSet, g.fptr)
 	names := make([]*ir.Name, 0, len(g.frame))
@@ -541,6 +542,7 @@ func (g *gcGen) splitFrame() {
 		i32Const(g.s, int32(spSlots(n.Type().Size())))
 		g.typed(wasm.AArrayNewDefault, wasm.GCTypeSym(g.ctxt, wasm.GCSlots), 0)
 		i32Const(g.s, 0)
+		i32Const(g.s, int32(n.Type().Size()))
 		g.typed(wasm.AStructNew, g.ptrSym(), 0)
 		g.local(wasm.ALocalSet, l)
 	}
@@ -552,9 +554,17 @@ func (g *gcGen) splitFrameVar(n *ir.Name) {
 		g.local(wasm.ALocalGet, l)
 		return
 	}
-	g.local(wasm.ALocalGet, g.fptr)
-	i32Const(g.s, int32(g.frame[n]))
-	g.helper(wasm.GCSplitAddPtr)
+	// A variable without pointers: a pointer to it alone, with no
+	// array.
+	g.local(wasm.ALocalGet, g.fp)
+	if off := g.frame[n]; off != 0 {
+		i32Const(g.s, int32(off))
+		g.prog(wasm.AI32Add)
+	}
+	g.prog(wasm.ARefNull)
+	i32Const(g.s, 0)
+	i32Const(g.s, int32(n.Type().Size()))
+	g.typed(wasm.AStructNew, g.ptrSym(), 0)
 }
 
 // splitCall emits the call v, if it is one that split compiles in its
@@ -578,7 +588,12 @@ func (g *gcGen) splitCall(v *ssa.Value, name string, args []*ssa.Value) bool {
 	case "runtime.newblockptr":
 		g.get(args[0], true)
 		g.get(args[1], true)
+		g.get(args[2], true)
 		g.helper(wasm.GCSplitNew)
+	case "runtime.ptrlim":
+		g.get(args[0], false)
+		g.typed(wasm.AStructGet, g.ptrSym(), wasm.GCPtrLim)
+		g.prog(wasm.AI64ExtendI32U)
 	case "runtime.ptroff":
 		g.get(args[0], false)
 		g.typed(wasm.AStructGet, g.ptrSym(), wasm.GCPtrOff)

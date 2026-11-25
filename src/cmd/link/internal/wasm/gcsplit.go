@@ -179,11 +179,12 @@ func (l *gcLinker) writeSplitTypes(w *bytes.Buffer) {
 	// have is read again after a call, and the host frees a block
 	// only from a call: the pointer, and its array, stay live as long
 	// as the address is used.)
-	// (addr and off are addresses: wasm.GCTypeAddr.)
-	w.Write([]byte{0x5F, 0x03, wasm.GCTypeAddr, 0x01})
+	// (addr and off are addresses: wasm.GCTypeAddr. So is the size of
+	// what is pointed into, which is not written either: GCPtrLim.)
+	w.Write([]byte{0x5F, 0x04, wasm.GCTypeAddr, 0x01})
 	w.WriteByte(wasm.GCRefNull)
 	writeSleb128(w, int64(slots))
-	w.Write([]byte{0x00, wasm.GCTypeAddr, 0x01})
+	w.Write([]byte{0x00, wasm.GCTypeAddr, 0x01, wasm.GCTypeAddr, 0x00})
 	// GCSlots: an array of mutable nullable GCPtrs.
 	w.WriteByte(0x5E)
 	w.WriteByte(wasm.GCRefNull)
@@ -236,7 +237,7 @@ func (l *gcLinker) splitDataSlots(sects []wasmDataSect, end uint64) []uint32 {
 // splitInit returns the body of the start function: it sets the
 // elements of the array of data for the words listed at addr in linear
 // memory (n of them).
-func (l *gcLinker) splitInit(addr, n int64) []byte {
+func (l *gcLinker) splitInit(addr, n, dataEnd int64) []byte {
 	ptr, slots := l.typeIndex(wasm.GCPtr), l.typeIndex(wasm.GCSlots)
 	a := &gcAsm{l: l}
 	// local 0: where in the list; 1: the word; 2: its address
@@ -262,6 +263,7 @@ func (l *gcLinker) splitInit(addr, n int64) []byte {
 	a.get(2)
 	gcGlobalGet(&a.Buffer, wasm.GCGlobalSlots)
 	a.get(2)
+	a.i32(dataEnd)
 	a.gc(0x00, ptr) // struct.new
 	a.gc(0x0E, slots)
 	a.end()
@@ -299,9 +301,9 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 		wasm.GCSplitIntToPtr: "l.r",
 		wasm.GCSplitMove:     "ririi.",
 		wasm.GCSplitZero:     "rii.",
-		wasm.GCSplitNew:      "ii.r",
+		wasm.GCSplitNew:      "iii.r",
 		gcSplitSlotsOf:       "r.a",
-		gcSplitMkPtr:         "iai.r",
+		gcSplitMkPtr:         "iaii.r",
 		gcSplitSetPtr:        "rii.",
 		wasm.GCSplitStrLen:   "ll.l",
 	}
@@ -457,6 +459,8 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			get(a, wasm.GCPtrOff)
 			a.get(1)
 			a.op(0x6A)
+			a.get(0)
+			get(a, wasm.GCPtrLim)
 			a.gc(0x00, ptr)
 			// (Kept where others could see it, so that an engine that
 			// inlines this does not take the new pointer apart: see
@@ -478,8 +482,12 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.end()
 			a.end()
 		case wasm.GCSplitIntToPtr:
-			// x 0; addr 1
-			a.splitLocals("i")
+			// An address of the data is a pointer into it. Any other
+			// is a pointer with no array and no size: one that the
+			// code of the runtime may load and store through, and no
+			// other.
+			// x 0; addr 1, lim 2
+			a.splitLocals("ii")
 			a.get(0)
 			a.op(0x50) // i64.eqz
 			a.if_()
@@ -494,6 +502,8 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.op(0x49) // i32.lt_u
 			a.op(0x04) // if (result (ref null slots))
 			l.splitValType(&a.Buffer, 'a')
+			a.i32(staticEnd)
+			a.set(2)
 			gcGlobalGet(&a.Buffer, wasm.GCGlobalSlots)
 			a.else_()
 			if os.Getenv("GOWASMGC_SPLITCHECK") != "" {
@@ -512,6 +522,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			refNull(a)
 			a.end()
 			a.get(1)
+			a.get(2)
 			a.gc(0x00, ptr)
 			a.end()
 		case wasm.GCSplitMove:
@@ -663,6 +674,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.get(1)
 			a.gc(0x07, slots) // array.new_default
 			a.i32(0)
+			a.get(2)
 			a.gc(0x00, ptr)
 			a.end()
 		case gcSplitSlotsOf:
@@ -675,6 +687,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.get(0)
 			a.get(1)
 			a.get(2)
+			a.get(3)
 			a.gc(0x00, ptr)
 			a.end()
 		case wasm.GCSplitStrLen:
@@ -733,6 +746,7 @@ func (l *gcLinker) splitGlobals(w *bytes.Buffer, stackTop, dataEnd uint64) {
 			writeI32Const(w, 0)
 			gcGlobalGet(w, wasm.GCGlobalSlots)
 			writeI32Const(w, 0)
+			writeI32Const(w, int32(dataEnd))
 			gcOp(w, 0x00, ptr) // struct.new
 		default:
 			w.Write([]byte{wasm.GCTypeI32, 0x01})
@@ -753,12 +767,15 @@ func (l *gcLinker) splitGlobals(w *bytes.Buffer, stackTop, dataEnd uint64) {
 		writeSleb128(w, int64(ptr))
 		w.WriteByte(0x00)
 		writeI32Const(w, int32(addr))
+		lim := int32(0)
 		if !l.ldr.SymType(s).IsText() && addr >= 0 && uint64(addr) < dataEnd {
 			gcGlobalGet(w, wasm.GCGlobalSlots)
+			lim = int32(dataEnd)
 		} else {
 			w.Write([]byte{0xD0, 0x71})
 		}
 		writeI32Const(w, int32(addr))
+		writeI32Const(w, lim)
 		gcOp(w, 0x00, ptr)
 		w.WriteByte(0x0b)
 	}

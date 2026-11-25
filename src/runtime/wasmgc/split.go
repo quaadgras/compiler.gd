@@ -38,8 +38,12 @@ func splitslots(n uintptr) uintptr {
 // The compiler replaces calls to these by instructions.
 
 // newblockptr returns a pointer to the block of linear memory at addr,
-// with a new array of nslots nil pointers.
-func newblockptr(addr, nslots uintptr) unsafe.Pointer
+// of size bytes, with a new array of nslots nil pointers.
+func newblockptr(addr, nslots, size uintptr) unsafe.Pointer
+
+// ptrlim returns the size of what p points into, from where element 0
+// of its array is: 0 for a pointer that was made of an integer.
+func ptrlim(p unsafe.Pointer) uintptr
 
 // ptroff returns how far the address of p is from where element 0 of
 // its array is.
@@ -60,7 +64,7 @@ func splitalloc(n, nslots uintptr) unsafe.Pointer {
 		return unsafe.Pointer(&zerobase)
 	}
 	addr := linalloc(n)
-	p := newblockptr(addr, nslots)
+	p := newblockptr(addr, nslots, n)
 	linregister(p, addr)
 	return p
 }

@@ -229,9 +229,9 @@ func (l *gcLinker) writeType(w *bytes.Buffer, name string) {
 			// writeSplitTypes), with the value after its fields.
 			w.Write([]byte{0x4F, 0x01}) // final, with one supertype
 			writeUleb128(w, uint64(l.typeIndex(wasm.GCPtr)))
-			w.Write([]byte{0x5F, 0x04, wasm.GCTypeI32, 0x01, wasm.GCRefNull})
+			w.Write([]byte{0x5F, 0x05, wasm.GCTypeI32, 0x01, wasm.GCRefNull})
 			writeSleb128(w, int64(l.typeIndex(wasm.GCSlots)))
-			w.Write([]byte{0x00, wasm.GCTypeI32, 0x01, ExternRef, 0x00})
+			w.Write([]byte{0x00, wasm.GCTypeI32, 0x01, wasm.GCTypeI32, 0x00, ExternRef, 0x00})
 			break
 		}
 		w.Write([]byte{0x5F, 0x01, ExternRef, 0x00})
@@ -1094,7 +1094,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		splitEnd = int64(gcDataEnd(ldr, sects))
 		splitWords = l.splitDataSlots(sects, uint64(splitEnd))
 		splitWordsAddr = (splitEnd + 7) &^ 7
-		init = &wasmFunc{Name: "go.initdata", Type: l.typeIndex(wasm.GCFuncPrefix + "."), Code: l.splitInit(splitWordsAddr, int64(len(splitWords)))}
+		init = &wasmFunc{Name: "go.initdata", Type: l.typeIndex(wasm.GCFuncPrefix + "."), Code: l.splitInit(splitWordsAddr, int64(len(splitWords)), splitEnd)}
 	} else {
 		init = &wasmFunc{Name: "go.initglobals", Type: l.typeIndex(wasm.GCFuncPrefix + "."), Code: l.initGlobals()}
 		ctors = l.constructors()
