@@ -195,6 +195,68 @@ int main(void) {
 	}
 	printf("structs and bytes: %ld\n", sum);
 
+	// What has no type yet is made something of by what is stored in
+	// it first: records of integers and pointers, then integers over
+	// some of the pointers, and pointers again over those.
+	typedef struct rec {
+		long id;
+		char *name;
+		int lo, hi;
+		double w;
+		struct rec *other;
+	} rec;
+	enum { nrec = 500, wrec = sizeof(rec) / sizeof(long) };
+	void *block = malloc(nrec * sizeof(rec));
+	rec *recs = block;
+	for (long i = 0; i < nrec; i++) {
+		recs[i].id = i;
+		recs[i].name = name_of(i);
+		recs[i].lo = (int)i;
+		recs[i].hi = (int)-i;
+		recs[i].w = i * 0.5;
+		recs[i].other = &recs[nrec - 1 - i];
+	}
+	churn(20000);
+	double wsum = 0;
+	sum = 0;
+	for (long i = 0; i < nrec; i++) {
+		rec *r = recs[i].other;
+		long v;
+		sscanf(r->name, "node-%ld", &v);
+		sum += v + r->id + r->lo + r->hi;
+		wsum += r->w;
+	}
+	printf("first stores: %ld %.1f\n", sum, wsum);
+	long *words = block;
+	sum = 0;
+	for (long i = 0; i < nrec; i += 2) {
+		char *name = recs[i].name;
+		words[i * wrec + 1] = i * 3;
+		if (i % 20 == 0)
+			churn(300);
+		long v;
+		sscanf(name, "node-%ld", &v);
+		sum += v;
+	}
+	churn(20000);
+	for (long i = 0; i < nrec; i++) {
+		long v = words[i * wrec + 1] / 3;
+		if (i % 2)
+			sscanf(recs[i].name, "node-%ld", &v);
+		sum += v;
+	}
+	printf("integers over pointers: %ld\n", sum);
+	for (long i = 0; i < nrec; i += 2)
+		recs[i].name = name_of(i + 1000);
+	churn(20000);
+	sum = 0;
+	for (long i = 0; i < nrec; i++) {
+		long v;
+		sscanf(recs[i].name, "node-%ld", &v);
+		sum += v;
+	}
+	printf("pointers over integers: %ld\n", sum);
+
 	// The end of an object is a pointer of its own.
 	int *a = malloc(1000 * sizeof *a);
 	int *end = a + 1000;

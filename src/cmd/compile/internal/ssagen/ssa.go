@@ -154,6 +154,8 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).
 		C23StorePtr = typecheck.LookupRuntimeFunc(gd, "c23StorePtr")
 	ir.Syms(gd).
+		C23Scalars = typecheck.LookupRuntimeFunc(gd, "c23Scalars")
+	ir.Syms(gd).
 		CheckPtrView = typecheck.LookupRuntimeFunc(gd, "checkptrView")
 	ir.Syms(gd).
 		Deferproc = typecheck.LookupRuntimeFunc(gd, "deferproc")
@@ -10012,6 +10014,8 @@ func (e *ssafn) Syslook(name string) *obj.LSym {
 		return ir.Syms(e.gd).SliceHdr
 	case "slicehdrnotinheap":
 		return ir.Syms(e.gd).SliceHdrNotInHeap
+	case "c23Scalars":
+		return ir.Syms(e.gd).C23Scalars
 	}
 	e.Fatalf(src.NoXPos, "unknown Syslook func %v", name)
 	return nil

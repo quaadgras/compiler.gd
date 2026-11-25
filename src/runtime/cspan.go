@@ -514,9 +514,11 @@ func bulkBarrierC(s *mspan, dst, src, size uintptr, old bool) {
 //     all of its words become what the type says, at once (cTyped);
 //   - a bit is set by what stores no pointers and knows it: memset, a
 //     copy of words that hold none, an allocation that says what its
-//     words are. The bit is set before the words are written, and what
-//     the words held is the collector's to see first, as for any pointer
-//     that is written over while it marks.
+//     words are, and a store of integers that the compiler makes in a
+//     package of C's through a pointer that it knows to be into what
+//     malloc gave with no type (c23Scalars). The bit is set before the
+//     words are written, and what the words held is the collector's to
+//     see first, as for any pointer that is written over while it marks.
 //
 // A bit that changes does so under the span's sequence (cseq), which is
 // odd meanwhile, as a seqlock's is. Stores do not read it. What reads
@@ -771,6 +773,49 @@ func (s *mspan) cScalars(b *cBits, w, n uintptr) (locked bool) {
 		n -= k
 	}
 	return locked
+}
+
+// c23Scalars is for a store of n bytes at p that holds no pointer, before
+// it: one that the compiler makes in a package of C's through a pointer
+// that it knows to be into what malloc gave with no type
+// (cmd/compile/internal/ssa/cscalars.go), which is the memory whose
+// words nothing has said anything of yet. The words that the store
+// writes in, whole or in part, hold no pointer from here on, and what
+// they held is the collector's to see first. It does nothing for a
+// word of anything else.
+//
+// The bits are set without the span's sequence, which memset has
+// until it has written: the store comes after this returns, so the
+// sequence would not be for it. A copy of these words meanwhile is one
+// that C does not define, and it takes what it finds there for an
+// integer.
+//
+//go:nosplit
+func c23Scalars(p unsafe.Pointer, n uintptr) {
+	s := cSpanOf(uintptr(p))
+	if s == nil {
+		return
+	}
+	b := s.cBitsOf()
+	if b == nil {
+		return
+	}
+	base := s.base()
+	w := (uintptr(p) - base) / goarch.PtrSize
+	if (uintptr(p)+n-1-base)/goarch.PtrSize == w {
+		// One word, as most stores are.
+		bits, bit := b.word(w/cBitsWord), uint32(1)<<(w%cBitsWord)
+		if atomic.Load(bits)&bit == 0 {
+			cShade(b, w, base+w*goarch.PtrSize, 0, 1)
+			atomic.Or(bits, bit)
+		}
+		return
+	}
+	// (No further than the object's slot, whatever is stored.)
+	end := min(uintptr(p)+n, base+(s.objIndex(uintptr(p))+1)*s.elemsize)
+	k := (alignUp(end, goarch.PtrSize)-base)/goarch.PtrSize - w
+	cShade(b, w, base+w*goarch.PtrSize, 0, k)
+	cBitsSet(b, w, k, true)
 }
 
 // c23Malloc is malloc for C translated by cmd/cc (internal/c23): size

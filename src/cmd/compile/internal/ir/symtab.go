@@ -40,6 +40,7 @@ type SymsStruct struct {
 	CheckPtrAlignment         *obj.LSym
 	CheckPtrAlignmentC        *obj.LSym
 	C23StorePtr               *obj.LSym
+	C23Scalars                *obj.LSym
 	CheckPtrView              *obj.LSym
 	Deferproc                 *obj.LSym
 	Deferprocat               *obj.LSym

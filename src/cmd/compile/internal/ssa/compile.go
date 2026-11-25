@@ -480,6 +480,7 @@ var passes = [...]pass{
 	{name: "middle opt", fn: opt, required: true},
 	{name: "known bits", fn: knownBits},
 	{name: "early fuse", fn: fuseEarly},
+	{name: "c scalars", fn: cscalars, required: true}, // the stores of C's that are the first in malloc's memory
 	{name: "expand calls", fn: expandCalls, required: true},
 	{name: "decompose builtin", fn: postExpandCallsDecompose, required: true},
 	{name: "softfloat", fn: softfloat, required: true},

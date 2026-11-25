@@ -198,7 +198,8 @@ How a word comes to be one or the other:
 | `memset` | the whole words it writes hold none |
 | `memcpy`, `memmove` | as the words they are copied from |
 | assigns a struct that has pointers | all of its words, as its type says |
-| stores an integer | unchanged (see below) |
+| stores an integer, a float or a struct of them through a pointer that the compiler knows is into `malloc(n)` with no type | the words it writes in hold none |
+| stores an integer anywhere else, or a byte | unchanged (see below) |
 
 - **A store of a pointer** that the compiler makes in a package of C's,
   and in internal/c23, where it is not to a variable, is a call to
@@ -212,12 +213,33 @@ How a word comes to be one or the other:
   time: its integers are known to be integers from then on, which a
   store for each of its pointers would not say. The runtime's copies
   of slices and reflect's stores do the same.
+- **A store of what has no pointer, in memory that has no type yet,**
+  is the first to make something of it, and has a call to
+  `runtime.c23Scalars` before it: the words that it writes in, whole
+  or in part, hold no pointer from then on. The compiler puts the call
+  only where it knows the pointer
+  (`cmd/compile/internal/ssa/cscalars.go`): it is the result of
+  `malloc`, `calloc` or `realloc` that was given no type
+  (`void *p = malloc(n)`) in the same function, after inlining, or is
+  made of one by an offset, an index or a conversion. So
+  `void *mem = malloc(sizeof(node)); node *n = mem; n->val = i;` has
+  the call. A store through a parameter, through a pointer that was
+  loaded from memory, or into `(T *)malloc(n)`, whose words are T's
+  already, is the plain store it was. Whether something was stored
+  there since is not followed, so every such store in the function has
+  the call, which returns when it finds the bit set. Stores that
+  follow one another to the fields of one struct, with no word between
+  them, share one call. A store of a byte has none: C copies anything
+  a byte at a time, a pointer too.
 - **A bit is set** before the words are written, and what they held is
   the collector's to see first, as for any pointer that is written
   over while it marks.
 - **The sequence of a span** (`cseq`) is odd while a bit of it changes,
   as a seqlock's is. Stores do not read it: the order above is enough
-  for them. A copy from one span of C's to another does, since it reads
+  for them. (The call before a store of integers sets its bits without
+  it: the store comes after the call, so a copy of those words
+  meanwhile, which C does not define, may take a pointer that is about
+  to be written over for an integer.) A copy from one span of C's to another does, since it reads
   bits and the words they are for together. If the sequence moved while
   it copied, it takes every word it wrote for a possible pointer.
 - **Go that is not C's** stores pointers with no call. Where such a
@@ -229,18 +251,29 @@ with malloc as Go objects: the vector 0.9 times, the strings 1.1, the
 tree 1.2, the hash map 1.6. A store of a pointer through a pointer is
 a call that finds the span of the word (3 to 5% of the time); an
 object of C's is scanned by itself, not with its span; and each check
-of a pointer finds the span once, as before.
+of a pointer finds the span once, as before. The call before a store
+of an integer in memory with no type is about 5 ns: a loop that only
+stores longs through such a pointer takes 1.3 times what it takes
+through a `long *` that malloc was converted to (which is 16 ns a
+store, with the checks of the pointer), and allocating a struct and
+filling in seven fields, three calls, 1.35 times.
 
 What this does not do:
 
-- **A store of an integer says nothing.** The bit stays as it was, so
-  a word that held a pointer and now holds an integer is looked at
-  still, which costs time and nothing else. But the collector is not
-  shown the pointer that an integer is written over while it marks.
-  If that was the last pointer to an object but for one that C has
-  just loaded, the object is freed while C still uses it. The same is
-  true of a union in a Go variable. The cure is a barrier on C's stores
-  of integers through pointers, which would also set the bits.
+- **A store of an integer elsewhere says nothing.** Where the compiler
+  does not know that the memory is malloc's without a type, the bit
+  stays as it was, so a word that held a pointer and now holds an
+  integer is looked at still, which costs time and nothing else. But
+  the collector is not shown the pointer that an integer is written
+  over while it marks. If that was the last pointer to an object but
+  for one that C has just loaded, the object is freed while C still
+  uses it. That takes memory with a type in which a pointer and an
+  integer have the same word: a union, or a block that C uses again
+  for something else without malloc. The same is true of a union in a
+  Go variable.
+- **A function that only passes on what malloc gave** (`xmalloc`, an
+  allocator of C++'s) hides it, unless it is inlined: its callers'
+  stores are plain stores, and the words they write in are looked at.
 - **An integer read as a pointer** is the integer: a word of C's is
   what was last stored in it, and a conversion cannot know what will
   be loaded. What Go's rule refuses for a Go object (`unsafe.md`: a

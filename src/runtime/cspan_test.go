@@ -235,6 +235,39 @@ func TestCSpanIntegers(t *testing.T) {
 	runtime.KeepAlive(raw)
 }
 
+// TestCSpanScalars stores integers over the pointers of C's objects as
+// the collector marks: what was pointed to is not lost to a goroutine
+// that has just loaded it, and the words hold no pointers after.
+func TestCSpanScalars(t *testing.T) {
+	const n = 2000
+	raw := runtime.MallocC(n * 8)
+	for round := range 20 {
+		for i := range n {
+			runtime.CStorePtr((*unsafe.Pointer)(unsafe.Add(raw, i*8)), unsafe.Pointer(newLeaf(i)))
+		}
+		done := make(chan bool)
+		go func() {
+			cChurn()
+			done <- true
+		}()
+		for i := range n {
+			slot := unsafe.Add(raw, i*8)
+			leaf := *(**cLeaf)(slot)
+			runtime.CScalars(slot, 8)
+			*(*uintptr)(slot) = uintptr(i)
+			if i%64 == 0 {
+				runtime.Gosched()
+			}
+			leaf.check(t, i)
+		}
+		<-done
+		if got := cKinds(raw, 4); got != "...." {
+			t.Fatalf("round %d: words are %s after integers were stored", round, got)
+		}
+	}
+	runtime.KeepAlive(raw)
+}
+
 type cPair struct {
 	n    int
 	leaf *cLeaf
@@ -305,6 +338,25 @@ func TestCSpanBits(t *testing.T) {
 	cSink = make([]byte, 64)
 	runtime.CMemmove(dst, unsafe.Pointer(&cSink[0]), 60)
 	check("a copy of Go's bytes", dst, ".......p")
+
+	// What C stores first in what malloc gave with no type, where the
+	// compiler knows it: whole words and parts of them, of one object.
+	first := runtime.MallocC(64)
+	runtime.CScalars(unsafe.Add(first, 8), 8)
+	check("an integer stored", first, "p.pppppp")
+	runtime.CScalars(unsafe.Add(first, 28), 4)
+	check("half a word stored", first, "p.p.pppp")
+	runtime.CScalars(unsafe.Add(first, 36), 16)
+	check("two words and a half stored", first, "p.p....p")
+	runtime.CStorePtr((*unsafe.Pointer)(unsafe.Add(first, 40)), unsafe.Pointer(leaf))
+	runtime.CScalars(unsafe.Add(first, 32), 8)
+	check("a pointer stored after", first, "p.p..p.p")
+	last := runtime.MallocC(24)
+	runtime.CScalars(unsafe.Add(last, 16), 1<<20)
+	check("more than the object", last, "pp.")
+	var onStack2 [2]uintptr
+	runtime.CScalars(unsafe.Pointer(&onStack2), 16)
+	runtime.CScalars(unsafe.Pointer(leaf), 8)
 
 	// Go's own stores of what has pointers: the runtime's, and those
 	// of a package that converted the pointer.
