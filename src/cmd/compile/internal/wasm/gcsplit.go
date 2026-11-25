@@ -383,6 +383,7 @@ func (g *gcGen) spCheck(n int64) {
 	g.prog(wasm.AI64ExtendI32U)
 	g.prog(wasm.AI64GtU)
 	g.prog(wasm.AIf)
+	g.runtime("runtime.splitfault")
 	g.prog(obj.AUNDEF)
 	g.prog(wasm.AEnd)
 	g.local(wasm.ALocalGet, g.chkR)

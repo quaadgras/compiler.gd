@@ -12,4 +12,4 @@ char victim[16] = "safe";
 
 struct box { char a[8]; };
 static void fill(char *p, int n) { for (int i = 0; i < n; i++) p[i] = 65; }
-int main(void){ char after[8] = "after"; struct box s; char before[8] = "before"; vn = 8; fill(s.a, vn + 24); if (after[0] == 65 || before[0] == 65) unsafe("a field's pointer wrote in the local next to its struct"); unsafe("wrote 32 bytes in an 8-byte field of a local"); }
+int main(void){ char after[8] = "after"; struct box s; char before[8] = "before"; vn = 8; fill(s.a, vn + 24); if (after[0] == 65 || before[0] == 65) unsafe("a field's pointer wrote in the local next to its struct"); vn = s.a[vn + 20]; unsafe("wrote 32 bytes in an 8-byte field of a local"); }

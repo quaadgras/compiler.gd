@@ -167,3 +167,11 @@ type typeWord = unsafe.Pointer
 
 func typeWordOf(p unsafe.Pointer) typeWord  { return p }
 func typeWordPtr(w typeWord) unsafe.Pointer { return w }
+
+// splitfault is what code that is not the runtime's calls where it
+// would load or store through a pointer something that is not in what
+// the pointer points into (cmd/compile/internal/wasm/gcsplit.go): the
+// program stops, and cannot recover.
+func splitfault() {
+	fatal("load or store through a pointer that is not in what it points into, or through one that the program made of an integer")
+}

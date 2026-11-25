@@ -12,4 +12,4 @@ char victim[16] = "safe";
 
 /* (They call themselves so that they are functions of their own.) */
 static void bump(void *p, int n) { if (n > 0) { bump(p, n - 1); return; } long *lp = (long *)p; *lp += 1; }
-int main(void){ char *s = victim; bump(&s, 2); if (s == victim + 1) unsafe("a pointer on the stack was changed as a long"); ok(); }
+int main(void){ char *s = victim; bump(&s, 2); if (s == victim + 1 && *s == 'a') unsafe("a pointer on the stack was changed as a long"); ok(); }

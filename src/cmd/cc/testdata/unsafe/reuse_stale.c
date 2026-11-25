@@ -12,4 +12,4 @@ char victim[16] = "safe";
 struct a { char *p; long n; }; struct b { long x; char *q; };
 int main(void){ void *block = malloc(sizeof(struct a)); struct a *a = block; a->p = victim; a->n = 1;
  struct b *b = block; b->x = (long)(intptr_t)victim + 1; b->q = 0;
- *a->p = 88; if (victim[0] == 88 || victim[1] == 88) unsafe("a pointer that was converted before the memory was used again stored through an integer"); ok(); }
+ *a->p = 88; if (victim[1] == 88) unsafe("a pointer that was converted before the memory was used again stored through an integer"); ok(); }

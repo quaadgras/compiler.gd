@@ -417,6 +417,15 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.op(0xAD)
 			a.op(0x56) // i64.gt_u
 			a.if_()
+			var fault loader.Sym
+			for v := 0; v < 2 && fault == 0; v++ {
+				fault = l.ldr.Lookup("runtime.splitfault", v)
+			}
+			if fault != 0 && l.funcIndex != nil && l.ldr.AttrReachable(fault) {
+				// (The runtime says what it is, and the program
+				// stops.)
+				a.call(int(l.funcIndex(fault)))
+			}
 			a.unreachable()
 			a.end()
 			a.get(0)

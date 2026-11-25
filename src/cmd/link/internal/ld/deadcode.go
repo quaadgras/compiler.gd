@@ -92,6 +92,11 @@ func (d *deadcodePass) init() {
 	if buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.GC {
 		// What the host calls (see cmd/link/internal/wasm/gc.go).
 		names = append(names, "runtime.linfree", "runtime.sched", "runtime.gorun", "runtime.unstart", "runtime.deadlock", "runtime.timerwait")
+		if buildcfg.GOWASM.Split {
+			// What the functions that the linker generates call
+			// (cmd/link/internal/wasm/gcsplit.go).
+			names = append(names, "runtime.splitfault")
+		}
 		if buildcfg.GOOS == "js" {
 			// syscall/js: a call from JavaScript.
 			names = append(names, "runtime.jscallback", "runtime.jscallbackdone")
