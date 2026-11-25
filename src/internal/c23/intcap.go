@@ -4,7 +4,10 @@
 
 package c23
 
-import "unsafe"
+import (
+	"internal/abi"
+	"unsafe"
+)
 
 // intptr_t and uintptr_t (doc/gd/cc.md, "Integers that are pointers").
 //
@@ -31,6 +34,11 @@ import "unsafe"
 type Intcap struct {
 	w unsafe.Pointer
 }
+
+//go:linkname setIntcap runtime.c23SetIntcap
+func setIntcap(t *abi.Type)
+
+func init() { setIntcap(abi.TypeFor[Intcap]()) }
 
 // intTag is the bit of an intptr_t or a uintptr_t that is a pointer.
 const intTag = uintptr(1) << (8*unsafe.Sizeof(uintptr(0)) - 1)

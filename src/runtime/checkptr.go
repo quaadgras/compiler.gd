@@ -334,10 +334,18 @@ func checkptrConvCLoad(p unsafe.Pointer, elem *_type, n uintptr) unsafe.Pointer 
 
 func checkptrConvC1(p unsafe.Pointer, elem *_type, load bool) unsafe.Pointer {
 	a := uintptr(p)
-	if a < minLegalPointer || a&(cPoison|cEnd) != 0 {
+	if a < minLegalPointer || a&cPoison != 0 {
 		// Null, an integer that C keeps in a pointer, or a pointer
-		// that nothing is loaded through.
+		// that the program was not given.
 		return p
+	}
+	if a&cEnd != 0 {
+		// A pointer that nothing is loaded through: to the end of
+		// its object, which it stays, or to what was not what its
+		// type said, which may be what elem says.
+		if base, size, kind := cObjectOf(cEndAddr(a)); kind == cObjNone || a&^cPtrBits-base >= size {
+			return p
+		}
 	}
 	a &^= cPtrBits
 	p = unsafe.Pointer(a)

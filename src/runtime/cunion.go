@@ -140,6 +140,17 @@ func c23UnionBox(slot *unsafe.Pointer, typ *_type) unsafe.Pointer {
 			}
 		}
 	}
+	// The word that points to the value is one that the collector
+	// looks at from here on, if nothing said so yet: the library
+	// gives a union of malloc's memory its value before C converts a
+	// pointer to it.
+	if s := cSpanOf(uintptr(unsafe.Pointer(slot))); s != nil {
+		if b := s.cBitsOf(); b != nil {
+			if w := (uintptr(unsafe.Pointer(slot)) - s.base()) / goarch.PtrSize; cClass(b, w) == cUnclaimed {
+				cClassSet(b, w, 1, cUntyped)
+			}
+		}
+	}
 	*slot = x
 	return v
 }
@@ -194,6 +205,22 @@ var cUnionRefType *_type
 //
 //go:linkname c23SetUnionRef
 func c23SetUnionRef(t *_type) { cUnionRefType = t }
+
+// cIntcapType is internal/c23's Intcap, an intptr_t or a uintptr_t of
+// C's in memory: nil in a program that has no C. cCapID is the id of a
+// word that is claimed for one.
+var (
+	cIntcapType *_type
+	cCapID      uint32
+)
+
+// c23SetIntcap tells the runtime the type of an intptr_t in memory.
+//
+//go:linkname c23SetIntcap
+func c23SetIntcap(t *_type) {
+	cIntcapType = t
+	_, cCapID = cWant(compatCap, t, 0, true)
+}
 
 // The ids of the claims of a union's first word, which is claimed for
 // no pointer, and of its UnionRef, which is claimed for a pointer of a

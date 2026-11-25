@@ -152,7 +152,7 @@ func cClassSet(b *cBits, w, n uintptr, c uint32) {
 //go:nosplit
 func (s *mspan) cScalar(a uintptr) bool {
 	b := s.cBitsOf()
-	return b != nil && cClass(b, (a-s.base())/goarch.PtrSize) == cScalar
+	return b == nil || cClass(b, (a-s.base())/goarch.PtrSize) < cUntyped
 }
 
 // cSizeOf returns the number of bytes that the i'th object of s, a span
@@ -504,21 +504,23 @@ func scanObjectC(b uintptr, s *mspan, gcw *gcWork) {
 	}
 	bits := s.cBitsOf()
 	w := (b - s.base()) / goarch.PtrSize
-	for i := uintptr(0); i < n; i, w = i+goarch.PtrSize, w+1 {
-		if bits != nil {
-			classes := atomic.Load(bits.word(w / cClassPer))
-			if classes == 0x55555555*cScalar && w%cClassPer == 0 {
-				// Skip the words of this uint32 (the loop
-				// increment will do the last).
-				i += (cClassPer - 1) * goarch.PtrSize
-				w += cClassPer - 1
-				continue
-			}
-			if classes>>(w%cClassPer*2)&3 == cScalar {
-				continue
-			}
+	for i := uintptr(0); bits != nil && i < n; i, w = i+goarch.PtrSize, w+1 {
+		// Only a word that is claimed for a pointer holds one: what
+		// nothing claimed is bytes, and a pointer that was written
+		// there as bytes is one that cannot be used when the word
+		// is claimed for it (cClaimWord).
+		classes := atomic.Load(bits.word(w / cClassPer))
+		if classes&(0x55555555*cUntyped) == 0 && w%cClassPer == 0 {
+			// Skip the words of this uint32 (the loop
+			// increment will do the last).
+			i += (cClassPer - 1) * goarch.PtrSize
+			w += cClassPer - 1
+			continue
 		}
-		val := *(*uintptr)(unsafe.Pointer(b + i))
+		if classes>>(w%cClassPer*2)&3 < cUntyped {
+			continue
+		}
+		val := *(*uintptr)(unsafe.Pointer(b + i)) &^ cPtrBits
 		// Quickly filter out nil and pointers back to the object.
 		if val >= minLegalPointer && val-b >= n {
 			greyConservative(val, b, i, gcw)
@@ -541,7 +543,7 @@ func bulkBarrierC(s *mspan, dst, src, size uintptr, old bool) {
 	buf := &getg().m.p.ptr().wbBuf
 	w := (dst - s.base()) / goarch.PtrSize
 	for i := uintptr(0); i < size; i, w = i+goarch.PtrSize, w+1 {
-		if bits != nil && cClass(bits, w) == cScalar {
+		if bits == nil || cClass(bits, w) < cUntyped {
 			continue
 		}
 		if old {

@@ -50,6 +50,7 @@ const (
 	compatSlice
 	compatIface
 	compatStruct // a struct that goes whole (isWholeStruct)
+	compatCap    // an intptr_t or a uintptr_t of C's (internal/c23's Intcap)
 )
 
 // compatLeaf returns what is at offset off of a value of type t: its
@@ -90,6 +91,12 @@ func compatLeaf(t *_type, off uintptr) (kind uint8, leaf *_type, in uintptr) {
 		case abi.Struct:
 			if isWholeStruct(t) {
 				return compatStruct, t, off
+			}
+			if t == cIntcapType {
+				// A word that holds an integer or a pointer,
+				// and says which (cclaim.go): nothing else
+				// is over it, a void * no more than a long.
+				return compatCap, t, off
 			}
 			if isABIInterface(t) {
 				return compatIface, t, off

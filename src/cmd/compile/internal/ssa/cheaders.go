@@ -377,7 +377,11 @@ func cheaders(f *Func) {
 					bits := int64(uint64(1)<<(2*words) - 1)
 					want := 0x5555555555555555 * CClassScalar & bits
 					if check == CSlowConvUntyped {
-						bits, want = 2, 2
+						// (A word that is a pointer of a type
+						// may be one that a pointer to anything
+						// is over, or part of something else:
+						// the runtime's to say.)
+						bits, want = 3, 2
 					}
 					class = b.NewValue2(pos, OpXor64, u64T, b.NewValue2(pos, OpAnd64, u64T, class, f.ConstInt64(u64T, bits)), f.ConstInt64(u64T, want))
 					class = b.NewValue2(pos, OpAnd64, u64T, class, c)

@@ -422,10 +422,13 @@ func TestCSpanClaims(t *testing.T) {
 	var onStack [4]unsafe.Pointer
 	dst = runtime.MallocC(64)
 	runtime.CMemmove(unsafe.Add(dst, 8), unsafe.Pointer(&onStack), 32)
-	check("a copy of a variable", dst, "--------")
+	// (A variable's words are what its type has there; bytes claim
+	// nothing, and what they are copied over stays what it was.)
+	check("a copy of a variable", dst, "-uuuu---")
+	dst = runtime.MallocC(64)
 	cSink = make([]byte, 64)
 	runtime.CMemmove(dst, unsafe.Pointer(&cSink[0]), 60)
-	check("a copy of Go's bytes", dst, ".......-")
+	check("a copy of Go's bytes", dst, "--------")
 
 	// Go's own stores of what has pointers: the runtime's, and those
 	// of a package that converted the pointer.

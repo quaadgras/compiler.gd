@@ -652,24 +652,24 @@ func AtomicLoadP(p *Void) *Void {
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
-	return PeekPtr(p)
+	return peekWord(p)
 }
 
 func AtomicStoreP(p, v *Void) {
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
-	PokePtr(p, v)
+	pokeWord(p, v)
 }
 
 func AtomicCASP(p, old, new *Void) bool {
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
-	if Addr(PeekPtr(p)) != Addr(old) {
+	if Addr(peekWord(p)) != Addr(old) {
 		return false
 	}
-	PokePtr(p, new)
+	pokeWord(p, new)
 	return true
 }
 
@@ -677,12 +677,12 @@ func AtomicCmpXchgP(p, expected, desired *Void) int32 {
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
-	cur := PeekPtr(p)
-	if Addr(cur) == Addr(PeekPtr(expected)) {
-		PokePtr(p, desired)
+	cur := peekWord(p)
+	if Addr(cur) == Addr(peekWord(expected)) {
+		pokeWord(p, desired)
 		return 1
 	}
-	PokePtr(expected, cur)
+	pokeWord(expected, cur)
 	return 0
 }
 
@@ -691,11 +691,11 @@ func AtomicFetchP(p *Void, op byte, n int, v *Void) *Void {
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
-	old := PeekPtr(p)
+	old := peekWord(p)
 	if op == '=' {
-		PokePtr(p, v)
+		pokeWord(p, v)
 	} else {
-		PokePtr(p, Add(old, n))
+		pokeWord(p, Add(old, n))
 	}
 	return old
 }
@@ -750,3 +750,13 @@ func AtomicCmpXchgAgg(p, exp, des *Void, n uintptr) bool {
 	Move(exp, p, n)
 	return false
 }
+
+// peekWord and pokeWord load and store the word at p, which holds a
+// pointer or an intptr_t of C's that is _Atomic: an lvalue of C's, which
+// the functions above are given the address of and check nothing of.
+//
+//go:nocheckptr
+func peekWord(p *Void) *Void { return *(**Void)(unsafe.Pointer(p)) }
+
+//go:nocheckptr
+func pokeWord(p, v *Void) { *(**Void)(unsafe.Pointer(p)) = v }

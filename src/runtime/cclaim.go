@@ -95,7 +95,8 @@ func cClaimReport() {
 	st := &cClaimStats
 	print("c claims: ", st.claims.Load(), " words claimed, ", st.reclaims.Load(), " claimed again, ",
 		st.narrowed.Load(), " untyped pointers typed, ", st.forged.Load(), " pointers of what was none, ",
-		st.bytes.Load(), " pointers written over with bytes, ", cIntPtrs.Load(), " integers that were addresses made pointers\n")
+		st.bytes.Load(), " pointers written over with bytes, ", cIntPtrs.Load(), " integers that were addresses made pointers, ",
+		cRepairs.Load(), " times the world was stopped for it\n")
 }
 
 // cTypeID returns the number that stands for the type t in the ids of a
@@ -147,7 +148,7 @@ func cWant(kind uint8, leaf *_type, in uintptr, c bool) (uint32, uint32) {
 		if id := cTypeID(leaf); id != 0 && id < cGoID {
 			return cTyped, id
 		}
-	case compatString, compatSlice, compatIface, compatStruct:
+	case compatString, compatSlice, compatIface, compatStruct, compatCap:
 		if id := cTypeID(leaf); id != 0 && id < 1<<cGoIDShift && in/goarch.PtrSize < 4 {
 			return cTyped, cGoID | uint32(in/goarch.PtrSize)<<cGoIDShift | id
 		}
@@ -192,7 +193,7 @@ func cShade(b *cBits, w, dst, src, n uintptr) {
 	}
 	buf := &getg().m.p.ptr().wbBuf
 	for i := uintptr(0); i < n; i++ {
-		if cClass(b, w+i) == cScalar {
+		if cClass(b, w+i) < cUntyped {
 			continue
 		}
 		p := buf.get1()
@@ -252,6 +253,7 @@ func cClaim(s *mspan, i, p uintptr, elem *_type, n uintptr, load, c bool) {
 	// it is stored (c23PtrStore), or nothing is, so it may be over a
 	// pointer of a type.
 	direct := load || cDirect(elem, c)
+	repair := false // words were claimed again: see cReclaim
 	for a := lo; a < hi; a += word {
 		w := (a - sbase) / word
 		want, id := uint32(cScalar), uint32(0)
@@ -321,8 +323,10 @@ func cClaim(s *mspan, i, p uintptr, elem *_type, n uintptr, load, c bool) {
 				cClaimWord(s, b, w, a, have, want, id)
 				continue
 			}
-			if id >= cUnionStartID {
-				// A union's pointer to its value, in a word that
+			if id >= cUnionStartID || id == cCapID {
+				// An intptr_t over a pointer to anything, which
+				// is an integer to it (cClaimWord). Or a
+				// union's pointer to its value, in a word that
 				// was copied or looked at as a pointer to
 				// anything before the union was: what it holds is
 				// looked at each time the union is (c23UnionBox).
@@ -330,7 +334,12 @@ func cClaim(s *mspan, i, p uintptr, elem *_type, n uintptr, load, c bool) {
 				continue
 			}
 		}
-		cReclaim(s, b, w, a, have, want, old, id, elem)
+		if cReclaim(s, b, w, a, have, want, old, id, elem) {
+			repair = true
+		}
+	}
+	if repair {
+		cRepair(sbase+i*s.elemsize, s.cSizeOf(i))
 	}
 }
 
@@ -356,9 +365,9 @@ const cProbeMax = 256
 
 // cConvProbe returns what the pointer v, which a word of C's holds, is
 // as a pointer of the type that id stands for: v, or v with cEnd, as
-// checkptrConvC gives it; or v with cPoison if that conversion would
-// stop the program. It claims what the conversion would claim for the
-// first time, and nothing again.
+// checkptrConvC gives it, also where that conversion would stop the
+// program: a pointer that nothing is loaded through. It claims what the
+// conversion would claim for the first time, and nothing again.
 func cConvProbe(v uintptr, id uint32) uintptr {
 	// (A word is only claimed for a pointer to a byte by Go, to
 	// which it is to a byte that is no part of a pointer.)
@@ -378,15 +387,19 @@ func cConvProbeType(v uintptr, t *_type, c bool) uintptr {
 		// anything: nothing says that it is one.
 		return v | cPoison
 	}
-	elem := (*ptrtype)(unsafe.Pointer(t)).Elem
-	if elem.Size_ == 0 {
+	return cConvProbeElem(v, (*ptrtype)(unsafe.Pointer(t)).Elem, c)
+}
+
+// cConvProbeElem is cConvProbeType for a pointer to elem.
+func cConvProbeElem(v uintptr, elem *_type, c bool) uintptr {
+	if v < minLegalPointer || v&(cPoison|cEnd) != 0 || elem.Size_ == 0 {
 		return v
 	}
 	mp := acquirem()
 	was, wasFail := mp.cprobe, mp.cprobeFail
 	if mp.cprobeDepth >= cProbeMax {
 		releasem(mp)
-		return v | cPoison
+		return v&^cPtrBits | cEnd
 	}
 	mp.cprobeDepth++
 	mp.cprobe, mp.cprobeFail = true, false
@@ -406,7 +419,11 @@ func cConvProbeType(v uintptr, t *_type, c bool) uintptr {
 	mp.cprobeDepth--
 	releasem(mp)
 	if fail {
-		return v&^cPtrBits | cPoison
+		// A pointer that the program was given, to what is not
+		// what the type says: nothing is loaded through it, and it
+		// is a pointer still, which may be converted to what is
+		// there (cEnd).
+		return v&^cPtrBits | cEnd
 	}
 	return r
 }
@@ -415,22 +432,20 @@ func cConvProbeType(v uintptr, t *_type, c bool) uintptr {
 // anything, holds what a pointer of the type that id stands for may be.
 func cNarrowOK(a uintptr, id uint32) bool {
 	v := atomic.Loaduintptr((*uintptr)(unsafe.Pointer(a)))
-	return cConvProbe(v, id)&cPoison == 0 || v&cPoison != 0
+	return cConvProbe(v, id)&(cPoison|cEnd) == 0 || v&(cPoison|cEnd) != 0
 }
 
 // cNarrow makes of the pointer to anything that the word at a holds the
 // pointer of the type that id stands for, which the word is claimed for
 // next: the same pointer, if what it points to is what the type says or
-// can be claimed for it, and otherwise one that cannot be used.
+// can be claimed for it, and otherwise one that nothing is loaded
+// through.
 func cNarrow(a uintptr, id uint32) {
 	p := (*uintptr)(unsafe.Pointer(a))
 	for {
 		v := atomic.Loaduintptr(p)
 		nv := cConvProbe(v, id)
 		if nv == v || atomic.Casuintptr(p, v, nv) {
-			if nv != v && nv&cPoison != 0 {
-				cClaimStats.forged.Add(1)
-			}
 			return
 		}
 	}
@@ -449,14 +464,26 @@ func cClaimWord(s *mspan, b *cBits, w, a uintptr, have, want, id uint32) {
 			}
 			atomic.Store(ids.word(w), id)
 		}
-		if have < cUntyped && v != 0 {
+		if id == cCapID && id != 0 {
+			// An intptr_t: what was there is an integer, which
+			// does not say that it is a pointer.
+			if v&cIntTag != 0 {
+				atomic.Casuintptr((*uintptr)(unsafe.Pointer(a)), v, v&^cIntTag)
+			}
+			v = 0
+		} else if have < cUntyped && v != 0 && v&cPoison == 0 {
 			// What was written there as bytes, or as an integer,
-			// is not a pointer that the program was given. (To be
-			// cPoison: see the top of this file.)
+			// is not a pointer that the program was given, and
+			// the collector did not look at it: it is one that
+			// cannot be used.
 			if have == cUnclaimed {
 				cClaimStats.bytes.Add(1)
 			} else {
 				cClaimStats.forged.Add(1)
+			}
+			if v >= minLegalPointer {
+				atomic.Casuintptr((*uintptr)(unsafe.Pointer(a)), v, v&^cPtrBits|cPoison)
+				v = 0
 			}
 		}
 	}
@@ -470,19 +497,28 @@ func cClaimWord(s *mspan, b *cBits, w, a uintptr, have, want, id uint32) {
 
 // cReclaim is for a conversion to elem over the w'th word of s, which
 // was claimed for something that elem is not compatible with there. The
-// memory is used for something else than it was: the pointers that were
-// converted before are wrong for it, and the code that has them is not
-// checked again. So the program stops, unless GODEBUG=creclaim=1, with
-// which the word is claimed again and counted. (The plan is that the
-// world stops instead, and those pointers are taken away:
-// doc/gd/cc.md.)
-func cReclaim(s *mspan, b *cBits, w, a uintptr, have, want, old, id uint32, elem *_type) {
+// memory is used for something else than it was, as an allocator of C's
+// does with the blocks that it keeps. The word is claimed again, and
+// what it holds is what a word that is claimed for the first time would:
+// a pointer of the new type, or one that cannot be used.
+//
+// The pointers that were converted before are wrong for the word now,
+// and the code that has them is not checked again: they are taken away
+// (crepair.go), once for all the words of a conversion, which cClaim
+// sees to if cReclaim reports true. GODEBUG=creclaim=1 only counts, and
+// creclaim=2 stops the program, as it is stopped where the world cannot
+// be: in the runtime's own code.
+func cReclaim(s *mspan, b *cBits, w, a uintptr, have, want, old, id uint32, elem *_type) (repair bool) {
 	if mp := getg().m; mp.cprobe {
 		mp.cprobeFail = true
-		return
+		return false
 	}
 	n := cClaimStats.reclaims.Add(1)
-	if debug.creclaim == 0 || debug.cclaims > 1 && n <= 64 {
+	mode := debug.creclaim
+	if mode == 0 && !cCanRepair() {
+		mode = 2
+	}
+	if mode == 2 || debug.cclaims > 1 && n <= 64 {
 		print("c claim: word ", w, " at ", hex(a), " of class ", have)
 		if have == cTyped && old != 0 && old < cUnionStartID {
 			_, t, _ := cLeafOf(old)
@@ -495,10 +531,16 @@ func cReclaim(s *mspan, b *cBits, w, a uintptr, have, want, old, id uint32, elem
 		}
 		print(" by a conversion to *", toRType(elem).string(), "\n")
 	}
-	if debug.creclaim == 0 {
+	if mode == 2 {
 		throw("checkptr: converted pointer type is not compatible with what the memory was claimed for")
 	}
+	if want == cTyped && have >= cUntyped && id < cGoID {
+		// A pointer of another type, or to anything: what it is
+		// as one of this type.
+		cNarrow(a, id)
+	}
 	cClaimWord(s, b, w, a, have, want, id)
+	return mode == 0
 }
 
 // cConvMax is the size of the largest type that compiled code converts
@@ -783,8 +825,28 @@ func c23IntPtr(v uintptr) unsafe.Pointer {
 // that holds a pointer, of an object of the heap.
 func cByteOver(a, n uintptr) bool {
 	const word = goarch.PtrSize
+	if n == 0 {
+		return false
+	}
 	s := spanOfHeap(a)
-	if s == nil || s.isUserArenaChunk || n == 0 {
+	if gp := getg(); s == nil || gp.stack.lo <= a && a < gp.stack.hi {
+		// A variable of the stack or of the data.
+		base, size, typ, typed, state := checkptrVar(a)
+		if state != varFound || !typed || typ == nil || !typ.Pointers() {
+			return false
+		}
+		mask := getGCMask(typ)
+		for off := alignDown(a-base, word); off < min(a-base+n, size); off += word {
+			if compatMaskBit(typ, mask, off) {
+				return true
+			}
+			if k, _, _ := compatLeaf(typ, off); k >= compatString {
+				return true
+			}
+		}
+		return false
+	}
+	if s.isUserArenaChunk {
 		return false
 	}
 	lo, hi := alignDown(a, word), alignUp(a+n, word)
@@ -841,7 +903,21 @@ func c23PtrStore(p unsafe.Pointer, v unsafe.Pointer) unsafe.Pointer {
 	}
 	a &^= cPtrBits
 	s := spanOfHeap(a)
-	if s == nil || s.isUserArenaChunk || a&(word-1) != 0 {
+	if gp := getg(); s == nil || gp.stack.lo <= a && a < gp.stack.hi {
+		// A variable of the stack or of the data: what its type
+		// has there.
+		if _, _, _, typed, state := checkptrVar(a); state != varFound || !typed || a&(word-1) != 0 {
+			return v
+		}
+		switch c, id := cWordOf(a); {
+		case c == cUntyped || c == cUnknown:
+			return v
+		case c == cTyped && id != 0 && id < cGoID:
+			return unsafe.Pointer(cConvProbe(uintptr(v), id))
+		}
+		throw("checkptr: pointer stored over a word that holds none, or part of something else")
+	}
+	if s.isUserArenaChunk || a&(word-1) != 0 {
 		return v
 	}
 	if s.spanclass.c() {
@@ -862,6 +938,14 @@ func c23PtrStore(p unsafe.Pointer, v unsafe.Pointer) unsafe.Pointer {
 				if id := atomic.Load(ids.word(w)); id != 0 && id < cGoID {
 					return unsafe.Pointer(cConvProbe(uintptr(v), id))
 				}
+			}
+		case cScalar:
+			if debug.creclaim != 0 {
+				// (Counted, and the word claimed again, as a
+				// conversion that is not compatible is.)
+				cClaimStats.reclaims.Add(1)
+				cClaimWord(s, b, w, a, cScalar, cUntyped, 0)
+				return v
 			}
 		}
 		throw("checkptr: pointer stored over a word that holds none, or part of something else")
@@ -1041,8 +1125,24 @@ func cWordOf(a uintptr) (uint32, uint32) {
 	const word = goarch.PtrSize
 	a = alignDown(a, word)
 	s := spanOfHeap(a)
-	if s == nil || s.isUserArenaChunk {
-		return cUnknown, 0
+	if gp := getg(); s == nil || s.isUserArenaChunk || gp.stack.lo <= a && a < gp.stack.hi {
+		// A variable of the stack or of the data has its type
+		// (stackvar.go). A pointer to a byte in one is taken for
+		// C's, a pointer to anything: the variable is C's where
+		// C copies to it or from it.
+		base, _, typ, typed, state := checkptrVar(a)
+		if state != varFound || !typed {
+			return cUnknown, 0
+		}
+		if typ == nil || !typ.Pointers() {
+			return cScalar, 0
+		}
+		off := a - base
+		k, leaf, in := compatLeaf(typ, off)
+		if k == compatScalar || k < compatString && !compatMaskBit(typ, getGCMask(typ), off) {
+			return cScalar, 0
+		}
+		return cWant(k, leaf, in, true)
 	}
 	if s.spanclass.c() {
 		b := s.cBitsOf()
@@ -1155,7 +1255,10 @@ func cMoveCheck(d, sr, n uintptr, apply bool) (fix bool) {
 		return false
 	}
 	ds := spanOfHeap(d)
-	if ds == nil || ds.isUserArenaChunk || !ds.spanclass.c() && ds.spanclass.noscan() {
+	if gp := getg(); gp.stack.lo <= d && d < gp.stack.hi {
+		ds = nil
+	}
+	if ds != nil && (ds.isUserArenaChunk || !ds.spanclass.c() && ds.spanclass.noscan()) {
 		return false
 	}
 	wlo, whi := alignUp(d, word), alignDown(d+n, word)
@@ -1168,7 +1271,7 @@ func cMoveCheck(d, sr, n uintptr, apply bool) (fix bool) {
 	if !apply && (d < wlo && cByteOver(d, wlo-d) || whi < d+n && cByteOver(whi, d+n-whi)) {
 		throw("checkptr: bytes copied over a pointer")
 	}
-	if !ds.spanclass.c() {
+	if ds != nil && !ds.spanclass.c() {
 		// From an object of Go's of the same type, at the same
 		// place in a value: as an assignment.
 		if ss := spanOfHeap(sr); ss != nil && !ss.spanclass.c() && !ss.spanclass.noscan() && !ss.isUserArenaChunk {
@@ -1200,14 +1303,30 @@ func cMoveCheck(d, sr, n uintptr, apply bool) (fix bool) {
 		switch {
 		case sc == cUnknown:
 			// (The stack, the data: to come.)
+		case dc == cTyped && did == cCapID:
+			// To an intptr_t: what is not copied from one is
+			// an integer.
+			if sid != did && v&cIntTag != 0 {
+				nv = v &^ cIntTag
+			}
+		case sc == cTyped && sid == cCapID:
+			// From an intptr_t, to a word that holds a pointer:
+			// the pointer that it is, or an integer, which is
+			// none that the program was given.
+			switch {
+			case v&cIntTag == 0:
+				if v >= minLegalPointer {
+					nv = v&^cPtrBits | cPoison
+				}
+			case dc == cUntyped:
+				nv = v &^ cIntTag
+			default:
+				nv = cConvProbe(v&^cIntTag, did)
+			}
 		case dc == cTyped && did >= cGoID && did < cUnionStartID:
 			if sid != did {
 				throw("checkptr: memory copied over a string, a slice or an interface of Go's")
 			}
-		case sc == cUnclaimed:
-			// (What was copied there from the stack or the
-			// data, whose words have no claims to copy: until
-			// they have types here, it is let through.)
 		case sc < cUntyped:
 			nv = v&^cPtrBits | cPoison
 		case dc == cUntyped:
@@ -1246,9 +1365,10 @@ func c23Memmove(dst, src unsafe.Pointer, n uintptr) {
 	// (Nothing to ask where no word that is copied to holds a
 	// pointer: bytes, and words that take the claims of what is
 	// copied.)
-	fix := ds != nil && cMovePtrs(ds, uintptr(dst), n) && cMoveCheck(uintptr(dst), uintptr(src), n, false)
+	fix := (ds != nil && cMovePtrs(ds, uintptr(dst), n) || ds == nil && cByteOver(uintptr(dst)&^cPtrBits, n)) && cMoveCheck(uintptr(dst), uintptr(src), n, false)
 	if ds != nil && ss != nil && ds.spanclass.c() && ds.cBitsOf() != nil && ds.cIDsOf() == nil &&
-		(ss.spanclass.c() && ss.cIDsOf() != nil || !ss.spanclass.c() && !ss.spanclass.noscan()) {
+		(ss.spanclass.c() && ss.cIDsOf() != nil || !ss.spanclass.c() && !ss.spanclass.noscan()) ||
+		ds != nil && ss == nil && ds.spanclass.c() && ds.cBitsOf() != nil && ds.cIDsOf() == nil {
 		// For the types of the pointers that are copied.
 		ds.newCIDs()
 	}
@@ -1317,6 +1437,16 @@ func c23Memmove1(dst, src unsafe.Pointer, n uintptr, ds, ss *mspan) {
 	// In one span the claims are copied as the words are, from the end
 	// that leaves what is still to be read as it was.
 	back := ss == ds && sw < wlo
+	// typedSrc: what is copied from has pointers where its type says:
+	// an object of Go's, or a variable of the stack or of the data.
+	// (What has none claims nothing where it is copied to: bytes.)
+	typedSrc := false
+	if ss == nil {
+		_, _, typ, typed, state := checkptrVar(sw)
+		typedSrc = state == varFound && typed && typ != nil && typ.Pointers()
+	} else {
+		typedSrc = !ss.spanclass.c() && !ss.spanclass.noscan() && !ss.isUserArenaChunk
+	}
 	var ids *cBits
 	for done := uintptr(0); done < words; {
 		// The words of one uint32 of the destination's classes.
@@ -1338,9 +1468,8 @@ func c23Memmove1(dst, src unsafe.Pointer, n uintptr, ds, ss *mspan) {
 			var from uint32      // the classes of the words copied from
 			var goids [16]uint32 // their ids, if they are of an object of Go's
 			switch {
-			case ss != nil && !ss.spanclass.c() && !ss.spanclass.noscan() && !ss.isUserArenaChunk:
-				// An object of Go's with pointers: what its
-				// type has there.
+			case typedSrc:
+				// What its type has there.
 				for j := uintptr(0); j < k; j++ {
 					if c, id := cWordOf(sw + (i+j)*word); c != cUnknown {
 						from |= c << (2 * j)
@@ -1353,8 +1482,6 @@ func c23Memmove1(dst, src unsafe.Pointer, n uintptr, ds, ss *mspan) {
 					v |= uint64(atomic.Load(sb.word((sw0+i)/cClassPer+1))) << 32
 				}
 				from = uint32(v>>((sw0+i)%cClassPer*2)) & all
-			case ss != nil && ss.spanclass.noscan():
-				from = 0x55555555 * cScalar & all
 			}
 			if take := from & free; take != 0 {
 				// The types of the pointers first, and what

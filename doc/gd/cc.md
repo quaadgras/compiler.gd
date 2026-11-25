@@ -411,12 +411,28 @@ memory-safe `unsafe` (`unsafe.md`, "Compatible types", is the first):
   given**, both of them for a copy, or the program stops (`checkptr:
   memory copied or set past the end of its object`), and what they
   write is what a store would be let write, word by word (the table).
-- **The collector** skips a word that is claimed for no pointer, and
-  looks at any other as it looks at a word of a stack frame that it has
-  no map for: what is there is a pointer if it is the address of an
-  object that is allocated, and is nothing otherwise. C keeps `(void
-  *)1` and the address past an array in its pointers, so a word claimed
-  for a pointer is looked at in the same way.
+- **The collector looks at the words that are claimed for a pointer**,
+  and at no other: one that is claimed for no pointer, and one that
+  nothing claimed, which is bytes. It looks at such a word as at a word
+  of a stack frame that it has no map for: what is there is a pointer if
+  it is the address of an object that is allocated, and is nothing
+  otherwise. C keeps `(void *)1` and the address past an array in its
+  pointers.
+- **A word that is claimed for a pointer for the first time, and holds
+  something**, holds what was written there as bytes: a pointer that
+  the program copied byte by byte, or one that it made up. The
+  collector did not look at it, so it is a pointer that faults from
+  then on (`runtime.cPoison`). A pointer gets into memory that nothing
+  claimed by `memcpy`, which claims the words for what they were where
+  they were copied from: an object of C's by its claims, an object of
+  Go's and a variable of the stack or of the data by its type.
+- **An `intptr_t` or a `uintptr_t`** is a word of a kind of its own
+  (internal/c23's `Intcap`): it holds an integer or a pointer, and says
+  which (bit 63). Nothing else is over it, a `void *` no more than a
+  `long`, so an integer cannot be read as the pointer. What is copied
+  into one from anything else is an integer; what is copied from one
+  to a word that holds a pointer is the pointer that it is, or a
+  pointer that faults.
 - **A conversion that is not compatible with the claim stops the
   program**: `checkptr: converted pointer type is not compatible with
   what the memory was claimed for`, after a line that says the word,
@@ -465,31 +481,29 @@ collector, as words that nothing claimed (below).
 
 What this does not do yet:
 
+- **Memory that is used again for another type stops the program**
+  (above). The plan's answer, the world stopped and the pointers that
+  were converted before taken away, is not built: a program that keeps
+  blocks and hands them out again as other types runs with
+  `GODEBUG=creclaim=1`, unchecked there.
+- **A pointer to a type that is larger than what it points to** is one
+  that faults, also where the program only uses what is there: Godot's
+  red-black trees share a sentinel that is a small global, converted to
+  a pointer to a node (it has `GLOBALNIL_DISABLED` for a sentinel of
+  its own in each tree, which is what its core is built with here).
 - **A conversion to a typed pointer, or to a struct that has one,** in
-  an object of C's is a call to `checkptrAlignmentC`, which compares
-  each word's claim. What would make it a comparison in the compiled
-  code: the type of the run of values that an object was allocated
-  for, kept for the object and given by the header.
-- **A word that nothing claimed is still looked at by the collector**,
-  as before, so that a pointer that got there with no conversion is not
-  lost: `unsafe.Slice` over C's memory claims one element, a copy from
-  a variable of the stack or from a Go object with pointers claims
-  nothing since where their pointers are is not looked up, and
-  internal/c23's own stores are not checked. Once those claim, such a
-  word is bytes and is skipped.
-- **A word that is claimed for a pointer for the first time** keeps
-  what bytes were written in it: it is to hold a pointer that faults.
-  (A copy from a variable of the stack or of the data claims nothing,
-  since their words have no types here yet, and what such a copy
-  brought is let through for the same reason.)
-- **The stack and the program's data** are each one object to these
-  checks: a pointer to a variable reaches the next one, and a store of
-  bytes or a copy there is not looked at.
-- **The library** (internal/c23) is compiled without the checks, so
-  what it stores for C is not looked at: `strcpy` goes past an object
-  as it always has.
+  an object of C's is a call to the runtime, which compares each word's
+  claim. What would make it a comparison in the compiled code: the type
+  of the run of values that an object was allocated for, kept for the
+  object and given by the header.
+- **A variable is taken to be C's where C converts a pointer into it or
+  copies to it**: a `*byte` of a variable of a package of Go's is then
+  a pointer to anything, as a `char *` is. The table of a frame does
+  not say what kind of package its function is of.
 - **A store and its check are two steps**: another thread that claims
   the word between them is not seen.
+- **C's own atomics** (`_Atomic`) store what they are given with no
+  look at the word.
 - **`new`** and the variables that the compiler moves to the heap are
   Go objects still, with the byte after them.
 - **wasm.**

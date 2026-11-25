@@ -413,35 +413,29 @@ func Peek32(p *Void) uint32 { return *(*uint32)(unsafe.Pointer(p)) }
 //go:nocheckptr
 func Peek64(p *Void) uint64 { return *(*uint64)(unsafe.Pointer(p)) }
 
-//go:nocheckptr
 func PeekPtr(p *Void) *Void { return *(**Void)(unsafe.Pointer(p)) }
 
 func PeekF32(p *Void) float32 { return math.Float32frombits(Peek32(p)) }
 func PeekF64(p *Void) float64 { return math.Float64frombits(Peek64(p)) }
 
-//go:nocheckptr
 func Poke8(p *Void, v uint8) { *(*uint8)(unsafe.Pointer(p)) = v }
 
-//go:nocheckptr
 func Poke16(p *Void, v uint16) { *(*uint16)(unsafe.Pointer(p)) = v }
 
-//go:nocheckptr
 func Poke32(p *Void, v uint32) { *(*uint32)(unsafe.Pointer(p)) = v }
 
-//go:nocheckptr
 func Poke64(p *Void, v uint64) { *(*uint64)(unsafe.Pointer(p)) = v }
 
-//go:nocheckptr
 func PokePtr(p, v *Void) { *(**Void)(unsafe.Pointer(p)) = v }
+
+// PeekCap and PokeCap load and store the intptr_t or uintptr_t at p: a
+// word that says whether it is a pointer (intcap.go), which the
+// conversion claims for that.
+func PeekCap(p *Void) *Void { return (*Void)((*Intcap)(unsafe.Pointer(p)).w) }
+func PokeCap(p, v *Void)    { (*Intcap)(unsafe.Pointer(p)).w = unsafe.Pointer(v) }
 
 func PokeF32(p *Void, v float32) { Poke32(p, math.Float32bits(v)) }
 func PokeF64(p *Void, v float64) { Poke64(p, math.Float64bits(v)) }
-
-// MoveWord copies one word, which may be a pointer, from src to dst:
-// a struct of one word that translated C assigns, as Peek and Poke.
-//
-//go:nocheckptr
-func MoveWord(dst, src *Void) { *(**Void)(unsafe.Pointer(dst)) = *(**Void)(unsafe.Pointer(src)) }
 
 // Move copies the n bytes of a struct or an array that translated C
 // assigns, from src to dst: the size is the type's and the addresses

@@ -167,7 +167,9 @@ func loadCode(addr string, t *ctype) string {
 		return fmt.Sprintf("c23.PeekF32(%s)", addr)
 	case kDouble, kLDouble:
 		return fmt.Sprintf("c23.PeekF64(%s)", addr)
-	case kPtr, kNullptr, kVaList, kIntCap, kUIntCap:
+	case kIntCap, kUIntCap:
+		return fmt.Sprintf("c23.PeekCap(%s)", addr)
+	case kPtr, kNullptr, kVaList:
 		return fmt.Sprintf("c23.PeekPtr(%s)", addr)
 	case kStruct, kArray:
 		return addr
@@ -211,7 +213,9 @@ func (g *gen) store(addr string, t *ctype, v string, c expr) {
 		g.p("c23.PokeF32(%s, %s)", addr, v)
 	case kDouble, kLDouble:
 		g.p("c23.PokeF64(%s, %s)", addr, v)
-	case kPtr, kNullptr, kVaList, kIntCap, kUIntCap:
+	case kIntCap, kUIntCap:
+		g.p("c23.PokeCap(%s, %s)", addr, v)
+	case kPtr, kNullptr, kVaList:
 		g.p("c23.PokePtr(%s, %s)", addr, v)
 	case kStruct, kArray:
 		g.p("%s", moveCode(addr, v, t))
@@ -871,13 +875,8 @@ func (g *gen) assign(e *assign, value bool) string {
 	return tv
 }
 
-// moveCode copies a struct (or array) of type t from src to dst: one word
-// with c23.MoveWord (a union of C's, Lua's TValue's value), whose fast path
-// cmd/compile inlines.
+// moveCode copies a struct (or array) of type t from src to dst.
 func moveCode(dst, src string, t *ctype) string {
-	if t.sizeof() == target.ptrSize {
-		return fmt.Sprintf("c23.MoveWord(%s, %s)", dst, src)
-	}
 	return fmt.Sprintf("c23.Move(%s, %s, %d)", dst, src, t.sizeof())
 }
 

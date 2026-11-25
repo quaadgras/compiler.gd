@@ -317,7 +317,7 @@ var debug struct {
 	gctrace                  int32
 	invalidptr               int32
 	cclaims                  int32 // gd: print what the claims of C's memory found (cclaim.go)
-	creclaim                 int32 // gd: memory of C's that is claimed again for something that is not compatible is only counted (cclaim.go); the default is that the program stops
+	creclaim                 int32 // gd: memory of C's that is claimed again for something that is not compatible: 0, the default, takes away the pointers that were converted before (crepair.go); 1 only counts it; 2 stops the program
 	cintptr                  int32 // gd: an integer that is an address and that C converts to a pointer is one that cannot be used (the default; 0: it is only counted)
 	madvdontneed             int32 // for Linux; issue 28466
 	scavtrace                int32
