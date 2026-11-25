@@ -820,28 +820,110 @@ and Go's stack values point to into the heap.
 
 ## On wasm
 
-The same package runs on wasm (`go test cmd/cc` runs the interop test on
-each, with node):
+The same package runs on wasm, in one of three ways.
 
-- **GOWASM=linear** (Go's own port; what wasip1 means): Go's runtime, so
-  the same hooks. Addresses are 32 bits, and a load keeps only those, so
-  a tagged word would reach memory: the compiler's explicit nil checks on
-  wasm also stop a pointer of 1<<32 or more
-  (`OpWasmLoweredNilCheck`), so Go's use of a tagged word is a nil
-  dereference panic, which it can recover from (better than native,
-  where it is a fault).
-- **GOWASM=gc,split** (what js means): every value has an address in
-  linear memory and every pointer its block's array of pointers, so
-  `runtime.c23Object` is the block's base, with no lookup
-  (runtime/wasmgc/c23.go), and stacks never move, so no table needs
-  re-keying. `internal/c23` never makes a pointer of an integer there (a
-  pointer made of an integer has no array of pointers): a capability's
-  type is an index (`tinfoTab`), not a pointer, and `noescape` is the
-  pointer itself. Addresses are under 1<<31, so the tag is bit 31: a
-  tagged word is past the end of memory, and Go's use of it traps (the
-  program stops; it cannot recover).
+- **GOWASM=gc,split** (what `GOOS=js` means; wasm32): memory safe, by
+  other means than the ones above, which the next section is about.
+- **GOWASM=linear** (Go's own port; what `GOOS=wasip1` means): Go's
+  runtime, so the same hooks, and none of the checks: the compiler does
+  not make them for `GOARCH=wasm` yet, and the tables of the variables
+  of the stack and of the data are not made there. A program of C's is
+  as safe there as WebAssembly makes any program, and no more.
 - **GOWASM=gc** without split has no addresses: cmd/go does not build a
   package with cc there, as if it could not.
+
+### GOWASM=gc,split: what a pointer points into
+
+With split (`wasm-gc.md`, stages 15 and 20) every value's bytes are in
+linear memory, and every pointer is an object of the engine's: the
+address, the array of pointers of what it points into, how far the
+address is from where that begins, and its size. A program cannot make
+such an object, change one, or see into one: it has the pointers that
+it was given, and those that arithmetic makes of them, which point into
+the same thing. That is all the safety needs, and it is what Fil-C's is
+made of:
+
+- **Every load and store through a pointer is of bytes in what it
+  points into**, in code that is not the runtime's: C, Go, and Go that
+  uses package unsafe alike. The compiler asks before each (a call of
+  `wasm.chk`, or the same as instructions in a loop), once for the
+  loads and stores of a block that are through one pointer. So there are
+  no checks of arithmetic or of conversions, and none are needed: `p +
+  n` is a pointer to wherever, the end of its object or past it, and
+  nothing is loaded through it there. What a pointer points into is the
+  block that malloc or Go's allocator gave, of the size that was asked
+  for; a variable of a frame, by itself; a variable of the data, by
+  itself; and for the data that nothing changes (a string's bytes, a
+  descriptor), all of it, to read.
+- **An integer is never a pointer.** A pointer made of an integer has
+  no size, so nothing is loaded or stored through it: `(char *)n`,
+  `unsafe.Pointer(u)`. An `intptr_t` is the pointer that it was made
+  of, as it is, or such an integer (internal/c23's `intcap_split.go`):
+  no bit says which, and arithmetic on one that is a pointer moves the
+  pointer.
+- **A pointer in memory is not its bytes.** The word holds the address,
+  and the element of the block's array holds the pointer. A program that
+  writes bytes over the word has changed an integer: what is loaded from
+  there as a pointer is the pointer that was stored, if the bytes are
+  still its address, and otherwise a pointer with no size. So memory
+  needs no claims of what its words are, and a union is laid out as C
+  lays it out (`unionPtr` is for 8-byte words). A store that the memory
+  is not for goes through, as it does in Fil-C: what stops is the use of
+  what was made of it.
+- **Nothing is freed while a pointer to it is kept**: a block is freed
+  when its array is collected, and every pointer to it has the array.
+  `free` does nothing.
+- **What the library keeps for itself is sealed.** A `FILE *`, a pointer
+  to a function and a `va_list` are pointers to objects of Go's, which C
+  is given with no size (`runtime.c23Seal`): it keeps them, compares
+  them and gives them back, and the runtime makes the pointer to the
+  object of one again only if it is the pointer to the start of a block
+  that was allocated as one.
+- **The data that nothing changes is not stored in**: a store through a
+  pointer is at an address where the variables begin or after it
+  (`wasm.chkw`).
+
+What this costs, measured with node 24 (`GOWASMGC_NOBOUNDS=1` at build
+time leaves the checks out, for comparing): an `fmt` hello world is
+416 KB where it was 407; a program of loops over lists, slices, maps
+and strings runs between as fast and a fifth slower. A check is a call
+of five bytes where there was a `struct.get` of four, so the size is
+mostly the checks of loops, which are instructions: the engine does not
+always expand the call, and a loop that updates an array of structs was
+twenty times slower with calls.
+
+`go test cmd/cc -run TestUnsafe` is of native code. The same programs
+with `GOOS=js`: of 187, 165 stop and 22 end with nothing done that was
+not theirs to do (`free` of a pointer into the stack, which does
+nothing; an integer that C made a pointer of and never used). And of
+the 31 programs of Go's (`runtime/testdata/testunsafe`), 29 stop and 2
+do nothing.
+
+What it does not do:
+
+- **The runtime is not checked**, and believes what types say: a
+  program that makes an interface of a type and of a pointer to less
+  memory than the type has, by copying the two words from two others,
+  has a value that the runtime copies by the type's size. (Code that is
+  not the runtime's stops at the first load past the end.) The runtime's
+  copies for the program are checked (`runtime.c23Memmove`); its maps,
+  channels and reflection are not yet.
+- **A pointer with no size compares equal to the one that has the same
+  address**, as C wants of `(void *)n == p`. So a type assertion on an
+  interface whose type word a program overwrote with the address of
+  another type succeeds; the value is then used as that type, inside
+  what its own pointer points into.
+- **Nothing is typed**: a pointer to a struct that is larger than what
+  it points into is refused nothing until a field past the end is
+  loaded, and the fields before it are loaded and stored.
+- **The compiler takes a pointer to an integer and a pointer to a
+  pointer for pointers to different memory**, as Go's is entitled to.
+  C that stores an integer over a pointer and loads the pointer may get
+  the pointer that was there, from before the store: a pointer that it
+  had, not one that it made.
+- The host's functions are given addresses, and are trusted with them.
+  `//go:nocheckptr`, `//go:linkname` and assembly are outside, as they
+  are elsewhere.
 
 ## C on wasm32
 
