@@ -202,3 +202,14 @@ func splitfault() {
 //go:nocheckptr
 //go:noinline
 func staticptr(addr uintptr) unsafe.Pointer { return unsafe.Pointer(addr) }
+
+// syscall_hostBytes stops the program unless the n bytes at p are in
+// what p points into: package syscall gives the host their address
+// (GOOS=wasip1; syscall/js has its own, in jscall.go).
+//
+//go:linkname syscall_hostBytes syscall.hostBytes
+func syscall_hostBytes(p unsafe.Pointer, n int) {
+	if n > 0 {
+		splitcheck(p, uintptr(n))
+	}
+}
