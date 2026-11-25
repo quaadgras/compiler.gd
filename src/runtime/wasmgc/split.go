@@ -57,6 +57,16 @@ func ptrnslots(p unsafe.Pointer) uintptr
 func splitmove(dst, src unsafe.Pointer, n uintptr)
 func splitzero(p unsafe.Pointer, n uintptr)
 
+// splitmovec and splitzeroc are splitmove and splitzero for pointers of
+// the program's: the n bytes are in what each points into, or the
+// program stops.
+func splitmovec(dst, src unsafe.Pointer, n uintptr)
+func splitzeroc(p unsafe.Pointer, n uintptr)
+
+// splitintptr returns the integer v as a pointer of the program's: one
+// with no size, which nothing is loaded or stored through (nil for 0).
+func splitintptr(v uintptr) unsafe.Pointer
+
 // splitalloc returns a pointer to n zeroed bytes in a new block, which
 // has an array for the pointers of its first nslots words.
 func splitalloc(n, nslots uintptr) unsafe.Pointer {

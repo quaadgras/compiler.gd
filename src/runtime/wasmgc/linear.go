@@ -193,6 +193,9 @@ func linalloc(n uintptr) uintptr {
 //
 //go:nosplit
 func linfree(addr uintptr) {
+	if splitMode {
+		c23ObjectFreed(addr)
+	}
 	b := addr - linheader
 	h := linload64(b) // (64 bits, whatever the size of a uintptr)
 	c := uintptr(uint32(h))

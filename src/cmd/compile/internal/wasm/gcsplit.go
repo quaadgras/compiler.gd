@@ -969,6 +969,9 @@ func (g *gcGen) splitCall(v *ssa.Value, name string, args []*ssa.Value) bool {
 		i32Const(g.s, 0)
 		g.get(args[2], true)
 		g.helper(wasm.GCSplitChecked(wasm.GCSplitMove))
+	case "runtime.splitintptr":
+		g.get(args[0], false)
+		g.helper(wasm.GCSplitChecked(wasm.GCSplitIntToPtr))
 	case "runtime.splitzeroc":
 		g.get(args[0], false)
 		i32Const(g.s, 0)

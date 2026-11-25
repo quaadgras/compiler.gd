@@ -368,7 +368,7 @@ func (g *gen) trv(e expr) (string, bool) {
 			if e.v == 0 {
 				return g.nilOf(e.t), true
 			}
-			return g.retype(fmt.Sprintf("c23.FromInt(%d)", uint64(e.v)), voidPtr, g.gt(e.t)), true
+			return g.retype(fmt.Sprintf("c23.FromInt(%d)", uint64(e.v)&(1<<(8*target.ptrSize)-1)), voidPtr, g.gt(e.t)), true
 		}
 	case *strLit:
 		return taddr(g.tlv(e, true).x), true
@@ -1477,7 +1477,9 @@ func (g *gen) tcall(c *call) string {
 			if at := a.ty(); at.isPtr() || at.kind == kNullptr {
 				v = g.vptr(v, at)
 			} else if i < len(callee.params) {
-				v = g.tconv(v, a.ty(), callee.params[i])
+				// (The library's size_t has 64 bits everywhere:
+				// libcConv.)
+				v = libcConv(g.tconv(v, a.ty(), callee.params[i]), callee.params[i], true)
 			}
 			args = append(args, v)
 		}
@@ -1485,7 +1487,7 @@ func (g *gen) tcall(c *call) string {
 		if c.ft.ret.isPtr() {
 			return g.retype(code, voidPtr, g.gt(c.ft.ret))
 		}
-		return code
+		return libcConv(code, c.ft.ret, false)
 	}
 	if !direct || fn == "" {
 		return g.tcallPtr(c)

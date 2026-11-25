@@ -62,14 +62,6 @@ func RaiseFault(msg string, addr uintptr) { panic(&Fault{msg, addr}) }
 //go:nocheckptr
 func Addr(p *Void) uintptr { return uintptr(unsafe.Pointer(p)) }
 
-// FromInt returns the pointer whose address is u, unchecked: for the
-// library's own constants (MAP_FAILED, SIG_IGN) and for the bits that
-// intcap.go keeps in a pointer. An integer of the program's is converted
-// by IntPtr.
-//
-//go:nocheckptr
-func FromInt(u uintptr) *Void { return (*Void)(unsafe.Pointer(u)) }
-
 // Add returns p moved by n bytes: to somewhere in what p points into,
 // or to its end, which the compiler checks.
 func Add(p *Void, n int) *Void { return (*Void)(unsafe.Add(unsafe.Pointer(p), n)) }
