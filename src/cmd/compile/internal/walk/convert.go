@@ -40,6 +40,20 @@ func walkConv(gd *base.Invocation, n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 		// (below).
 		markArithmeticOriginals(n.X)
 	}
+	if checked && gd.CObjects && n.Type().IsUnsafePtr() {
+		// gd: a pointer of C's that is made only to be converted
+		// again, as the (T *)p + 1 of a header that is followed by
+		// bytes is, points to nothing as a T: it is not checked as
+		// one, since no T need fit where it is (the variables of
+		// the stack and of the data end where they do:
+		// runtime/stackvar.go). The conversion that it is converted
+		// by is checked. (A conversion to a type with pointers may
+		// give another pointer, runtime.checkptrConvC, and is
+		// made.)
+		if x, ok := n.X.(*ir.ConvExpr); ok && x.Op() == ir.OCONVNOP && x.Type().IsPtr() && x.X.Type().IsUnsafePtr() && !x.Type().Elem().HasPointers() {
+			x.SetCheckPtr(true)
+		}
+	}
 	n.X = walkExpr(gd, n.X, init)
 	if n.Op() == ir.OCONVNOP && n.Type() == n.X.Type() {
 		return n.X

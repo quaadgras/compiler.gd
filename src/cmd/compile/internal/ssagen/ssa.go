@@ -1274,6 +1274,16 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 			s.vars[convVar] = s.rtcall(ir.Syms(s.gd).CheckPtrConvC, true, []*types.Type{v.Type}, v, rtype, count)[0]
 			return
 		}
+		fn := fn
+		if s.gd.CObjects && fn == ir.Syms(s.gd).CheckPtrView && size > 1 {
+			// More than a byte of C's, a char[64] or a struct
+			// of chars, is in a variable of the stack or of the
+			// data whole, which the check of any other
+			// conversion says (runtime.checkptrAlignVarC): bytes
+			// are over anything, and end where what they are
+			// over does.
+			fn = ir.Syms(s.gd).CheckPtrAlignmentC
+		}
 		s.rtcall(fn, true, nil, v, rtype, count)
 	}
 	if c := fn == ir.Syms(s.gd).CheckPtrAlignmentC || fn == ir.Syms(s.gd).CheckPtrView && s.gd.CObjects; c && count == nil && size <= ssa.CConvMax && s.cHeaders() {

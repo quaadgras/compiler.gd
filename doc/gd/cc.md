@@ -144,16 +144,21 @@ made of that one by an offset or an index
   is first checked, if more checks follow. A root that is checked once
   is not looked up: its check is the runtime's call, as before. A root
   that is the address of a variable of the frame needs no lookup: its
-  size is known.
+  size is known, and whether it has pointers.
 - **The checks.** A pointer made by arithmetic is in its root's object,
   or at its end. A conversion to `*T` is to a pointer in an object of
-  C's, or `T` is in the stack, the data or the bss whole (for types of
-  4096 bytes or less), and the pointer is aligned; and in an object of
-  C's the words are claimed for what `T` has there (below, "The memory
-  that malloc gives"): bytes need no look, a type of 16 words or less
-  with no pointer and a `void *` are a look at the classes of the
-  words, which the header gives, and any other type, a pointer of a
-  type or a struct that has one, is the runtime's.
+  C's, or in a variable of the stack or of the data, or at its end, and
+  the pointer is aligned; and in an object of C's the words are claimed
+  for what `T` has there (below, "The memory that malloc gives"): bytes
+  need no look, a type of 16 words or less with no pointer and a `void
+  *` are a look at the classes of the words, which the header gives,
+  and any other type, a pointer of a type or a struct that has one, is
+  the runtime's. A variable has a type and no claims. For one without
+  pointers the header gives classes that say so
+  (`runtime.c23HeaderVar`), placed so that a type of 16 words or less
+  with no pointer is let through where it is in the variable's whole
+  words, and for one with pointers classes that let nothing through
+  but bytes: the runtime compares the type with the variable's.
 - **What fails a comparison** is the runtime's call, which makes the
   whole check and says what it finds; the comparison only lets through
   what the call would have.
@@ -177,8 +182,28 @@ Where C and Go's rules for pointers disagree:
   and in a package that imports internal/c23 the compiler allocates a
   variable that it moves to the heap as `struct { v T; _ byte }`
   (cmd/compile's `ir.CObjType`), as Go itself does for a struct that
-  ends in a field of no size. The stack, and the program's data, are
-  each one allocation to both. The escape bits (`escape-bits.md`) are
+  ends in a field of no size. A variable of the stack, and one of the
+  program's data, is an allocation of its own to both, with its type
+  (`unsafe.md`, "The variables of the stack and of the data"): the
+  compiler writes where the variables of each frame are, and the
+  linker where the symbols of the data are, and each has a byte after
+  it too, so that the pointer to its end is the address of nothing
+  else. Arithmetic on a pointer to a variable gives a pointer into it
+  or to its end, and the program stops for any other. A conversion in
+  a variable is to a type that is in it whole and is compatible with
+  the variable's type, with C's two rules for what malloc gives: bytes
+  are over anything, and a pointer of a type may be over a `void *`.
+  (And an integer may be over an `unsafe.Pointer`, which is what cmd/cc
+  has for a word of a union of the library's that holds a pointer or an
+  integer, as a `sigval` does.) A pointer to the end of a variable is
+  converted to anything. More than one byte, a `char[64]` or a struct
+  of chars, is in a variable whole as any other type is. What is made
+  only to be converted again, the `(T *)p + 1` of a header that bytes
+  follow, is not checked as a `T`, if `T` has no pointers.
+  `testdata/programs/bench.c` runs as it did but for the hash map,
+  which is 12% slower: its keys are in arrays of the stack, and each
+  function that is given one looks its variable up. The escape bits
+  (`escape-bits.md`) are
   on in such a package as in any other: what they put on the heap as
   the program runs, a variable moved there at a call whose callee
   keeps its address and an object that a caller gave no buffer for,

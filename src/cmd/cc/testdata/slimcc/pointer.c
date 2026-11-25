@@ -4,7 +4,9 @@ int main() {
   ASSERT(3, ({ int x=3; *&x; }));
   ASSERT(3, ({ int x=3; int *y=&x; int **z=&y; **z; }));
   ASSERT(5, ({ int x=3; int *y=&x; *y=5; x; }));
-  ASSERT(5, ({ int x=3; (&x+2)-&x+3; }));
+  // (gd: this was of an int x, whose pointer C lets go no further than
+  // its end: the checks of pointer arithmetic stop it there.)
+  ASSERT(5, ({ int x[2]={3}; (&x[0]+2)-&x[0]+3; }));
   ASSERT(8, ({ int x, y; x=3; y=5; x+y; }));
   ASSERT(8, ({ int x=3, y=5; x+y; }));
 
