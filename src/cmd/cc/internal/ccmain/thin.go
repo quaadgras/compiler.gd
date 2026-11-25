@@ -216,6 +216,11 @@ func (g *gen) tlv1(e expr, forAddr bool) lval {
 				}
 			}
 		}
+		if xt.rec.uptr && (e.t.kind == kPtr || e.t.kind == kNullptr) {
+			// A union's member that is a pointer: in the union's
+			// interface value.
+			return lval{x: g.unionPtr(base, e.t), t: e.t}
+		}
 		// A union's member, or one of a record Go sees as bytes: at its
 		// offset.
 		return lval{x: fmt.Sprintf("(*(*%s)(unsafe.Add(unsafe.Pointer(%s), %d)))", g.mirror(e.t), taddr(base), e.f.off), t: e.t}
@@ -784,6 +789,13 @@ func (g *gen) tcompound(e *compoundLit) string {
 	return n
 }
 
+// unionPtr is the member of type t, a pointer, of the union u, whose
+// pointers are in a Go interface value (types.go's unionPtr): the
+// pointer that the value holds, as one of t.
+func (g *gen) unionPtr(u string, t *ctype) string {
+	return fmt.Sprintf("(*c23.UnionPtr[%s](&%s.p))", g.mirror(t), u)
+}
+
 // tat is the object of type ft at the offset off of x, an object of type
 // t: a path of fields and elements where Go has one, so that nothing is
 // unsafe.
@@ -804,6 +816,9 @@ func (g *gen) tat(x string, t *ctype, off int64, ft *ctype) string {
 			continue
 		case t.kind == kStruct && t.rec.complete:
 			g.mirror(t)
+			if t.rec.uptr && off == 0 && (ft.kind == kPtr || ft.kind == kNullptr) {
+				return g.unionPtr(x, ft)
+			}
 			if t.rec.bytes || t.rec.union {
 				break
 			}

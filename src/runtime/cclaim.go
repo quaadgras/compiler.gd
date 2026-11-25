@@ -380,6 +380,16 @@ func c23Header(p unsafe.Pointer) (d, n, nc, b8, sh, bits uintptr) {
 // it knows.
 func c23slow(q, p unsafe.Pointer) bool { return true }
 
+// c23Convert is the check of the conversion of p to a pointer to n
+// values of elem that a package of C's makes, for the conversions that
+// internal/c23 makes for one: of the pointer that a union's members
+// share.
+//
+//go:linkname c23Convert
+func c23Convert(p unsafe.Pointer, elem *_type, n uintptr) {
+	checkptrAlignmentC(p, elem, n)
+}
+
 // c23Malloc is malloc for C translated by cmd/cc (internal/c23): size
 // bytes, zeroed. If typ is not nil the object is for values of typ: the
 // words of the values that fit in it are claimed for what typ has

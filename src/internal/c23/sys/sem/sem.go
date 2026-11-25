@@ -251,6 +251,9 @@ func semArg(va []any, wantPtr bool) (int32, *c23.Void) {
 		if !wantPtr {
 			return int32(c23.Load32(u.P)), (*c23.Void)(nil)
 		}
+		if p, ok := c23.UnionValuePtr(u.P); ok {
+			return 0, p
+		}
 		return 0, c23.LoadPtr(u.P)
 	}
 	if p, ok := va[0].(*c23.Void); ok {

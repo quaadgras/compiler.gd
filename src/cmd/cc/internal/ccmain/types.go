@@ -103,6 +103,14 @@ type record struct {
 
 	bytes bool // its mirror is bytes (gen.go's record)
 
+	// A union whose members with pointers are all pointers themselves
+	// (uptr) is its bytes, ubytes of them, in which the members without
+	// pointers are, and after them a Go interface value, in which the
+	// pointer members are: see unionPtr.
+	uptr   bool
+	ubytes int64
+	sys    bool // declared in one of cc's own headers
+
 	sc   *scope     // C++: the scope it is declared in
 	cls  *classInfo // C++: a class's members that are not fields (cxxclass.go)
 	mtag string     // C++: its name as mangled, if it is a template's instance
@@ -852,7 +860,49 @@ func (r *record) layout() {
 			size++
 		}
 	}
+	if r.unionPtr() {
+		// The bytes, in words, and the interface value after them.
+		r.uptr = true
+		r.ubytes = (max(size, 1) + 7) / 8 * 8
+		size, align = r.ubytes+unionIfaceSize, 8
+	}
 	r.align = align
 	r.size = (size + align - 1) / align * align
 	r.complete = true
+}
+
+// unionIfaceSize is the size of a Go interface value with 8-byte words.
+const unionIfaceSize = 32
+
+// unionPtr reports whether r is a union that is laid out as its bytes
+// and one Go interface value for its pointers (doc/gd/cc.md, "Unions"):
+// one that has a pointer for a member, and whose other members have no
+// pointer in them. A member that is a pointer is then never the same
+// memory as one that is an integer, so neither can be made of the
+// other, and the interface value says of what type the pointer that it
+// holds is. A union that has a struct or an array with pointers for a
+// member is not so: the address of such a member is the address of all
+// of it.
+func (r *record) unionPtr() bool {
+	if !r.union || r.packed > 0 || target.ptrSize != 8 {
+		return false
+	}
+	if r.sys {
+		// A union of the library's (sigval, epoll_data_t): what
+		// internal/c23 has for it is its bytes, at the offsets
+		// that the system's own headers give them.
+		return false
+	}
+	ptr := false
+	for _, f := range r.fields {
+		switch t := f.t; {
+		case f.bits >= 0 || f.packed || t.q&qAtomic != 0 || t.align > 8:
+			return false
+		case t.kind == kPtr || t.kind == kNullptr:
+			ptr = true
+		case hasPointers(t):
+			return false
+		}
+	}
+	return ptr
 }

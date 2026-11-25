@@ -517,7 +517,7 @@ func (g *gen) record(t *ctype) string {
 	} else if keyTag == "" {
 		keyTag = r.tdName // div_t and ldiv_t are not one mirror
 	}
-	fmt.Fprintf(&key, "%s|%d|%d|%v|", keyTag, r.size, r.align, bytes)
+	fmt.Fprintf(&key, "%s|%d|%d|%v|%v|", keyTag, r.size, r.align, bytes, r.uptr)
 	if !bytes || unnamedMember(t) {
 		for _, f := range r.fields {
 			fmt.Fprintf(&key, "%s:%d:%s;", f.name, f.off, typeKey(f.t))
@@ -551,7 +551,14 @@ func (g *gen) record(t *ctype) string {
 		}
 	}
 	var b strings.Builder
-	if bytes {
+	if r.uptr {
+		// The members without pointers are in the bytes, and the
+		// pointer that a member is, in the interface value: no
+		// word is an integer to one member and a pointer to
+		// another (types.go's unionPtr).
+		fmt.Fprintf(&b, "// %s is C's %s, as Go sees it: the bytes of its members that are not\n// pointers, and the pointer that the others are.\ntype %s struct {\n\t_ [0]uint64\n\tb [%d]byte\n\tp any\n}\n\n",
+			name, what, name, r.ubytes)
+	} else if bytes {
 		// As cgo does for unions, Go sees the bytes. The tag tells
 		// internal/c23 that they may hold pointers C stores, whose
 		// capabilities it keeps aside.

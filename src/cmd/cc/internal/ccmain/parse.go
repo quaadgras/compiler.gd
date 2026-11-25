@@ -1079,6 +1079,7 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 	if a.packed {
 		r.packed = 1
 	}
+	r.sys = strings.HasPrefix(kw.file, "<")
 	r.layout()
 	if a.aligned > 0 {
 		r.align = max(r.align, a.aligned)
