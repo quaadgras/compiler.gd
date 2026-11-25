@@ -27,6 +27,9 @@ func mix(h, v uint64) uint64 {
 // memhash hashes the n bytes at p.
 func memhash(p unsafe.Pointer, seed, n uintptr) uintptr {
 	h := uint64(seed) ^ uint64(n)*hashMul
+	if splitMode && n != 0 {
+		splitcheck(p, n)
+	}
 	if a := trylinaddr(p); a != 0 {
 		i := uintptr(0)
 		for ; i+8 <= n; i += 8 {

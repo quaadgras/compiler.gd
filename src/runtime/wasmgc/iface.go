@@ -57,7 +57,7 @@ func itabsinit() {
 	p := md.types + md.itaboffset
 	end := p + md.itabsize
 	for p < end {
-		m := (*itab)(unsafe.Pointer(p))
+		m := (*itab)(staticptr(p))
 		itabs = append(itabs, m)
 		p += uintptr(m.Size())
 	}

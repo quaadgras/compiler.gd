@@ -513,7 +513,7 @@ func reflect_compiledTypelinks() ([]*_type, [][]*_type) {
 		end := md.types + md.typedesclen
 		for td < end {
 			td = (td + goarch.PtrSize - 1) &^ (goarch.PtrSize - 1)
-			t := (*_type)(unsafe.Pointer(td))
+			t := (*_type)(staticptr(td))
 			typelinks = append(typelinks, t)
 			td += uintptr(t.DescriptorSize())
 		}

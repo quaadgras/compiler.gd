@@ -59,17 +59,18 @@ func gcSplit() bool { return buildcfg.GOWASM.Split }
 //
 // What is not checked: an address that the compiler made itself, of a
 // variable of the frame or of the data, at a constant offset or at an
-// index that Go checked; and the runtime, which makes pointers of
-// addresses.
+// index that Go checked; and a function that is marked go:nocheckptr.
 
 // splitChecked reports whether the code of f is checked.
 func splitChecked(s *ssagen.State, f *ssa.Func) bool {
 	if !gcSplit() || os.Getenv("GOWASMGC_NOBOUNDS") != "" {
 		return false
 	}
-	if s.GD().Flag.CompilingRuntime {
-		return false
-	}
+	// (The runtime too: it is given pointers by the program, and sizes
+	// by the types that the program says its values have. What it does
+	// with addresses of its own, the blocks of the allocator and the
+	// stacks, it does with integers, and the pointers that it makes of
+	// integers are those of runtime.staticptr.)
 	if fn := f.Frontend().Func(); fn != nil && fn.Pragma&ir.NoCheckPtr != 0 {
 		return false
 	}
@@ -359,7 +360,7 @@ func (g *gcGen) spCheck(n int64, store bool) {
 	g.prog(wasm.AI64ExtendI32U)
 	g.prog(wasm.AI64GtU)
 	g.prog(wasm.AIf)
-	g.runtime("runtime.splitfault")
+	g.splitFault()
 	g.prog(obj.AUNDEF)
 	g.prog(wasm.AEnd)
 	g.local(wasm.ALocalGet, g.chkR)
@@ -372,10 +373,19 @@ func (g *gcGen) spCheck(n int64, store bool) {
 		g.global(wasm.AGlobalGet, wasm.GCGlobalROEnd)
 		g.prog(wasm.AI32LtU)
 		g.prog(wasm.AIf)
-		g.runtime("runtime.splitfault")
+		g.splitFault()
 		g.prog(obj.AUNDEF)
 		g.prog(wasm.AEnd)
 		g.local(wasm.ALocalGet, g.chkI)
+	}
+}
+
+// splitFault stops the program: a load or a store that is not in what
+// its pointer points into. (With GOWASMGC_TRAP set when compiling, the
+// engine says where, and not the runtime what.)
+func (g *gcGen) splitFault() {
+	if os.Getenv("GOWASMGC_TRAP") == "" {
+		g.runtime("runtime.splitfault")
 	}
 }
 
@@ -1067,7 +1077,21 @@ func (g *gcGen) splitCall(v *ssa.Value, name string, args []*ssa.Value) bool {
 		g.get(args[1], false)
 		i32Const(g.s, 0)
 		g.get(args[2], true)
-		g.helper(wasm.GCSplitMove)
+		g.helper(g.splitHelper(wasm.GCSplitMove))
+	case "runtime.splitcheck", "runtime.splitcheckw":
+		// The n bytes at p are in what it points into (and for a
+		// store are not of the data that nothing changes), or the
+		// program stops: before the runtime loads or stores them
+		// by their address.
+		g.get(args[0], false)
+		i32Const(g.s, 0)
+		g.get(args[1], true)
+		if name == "runtime.splitcheckw" {
+			g.helper(wasm.GCSplitCheckW)
+		} else {
+			g.helper(wasm.GCSplitCheck)
+		}
+		g.prog(wasm.ADrop)
 	case "runtime.splitmovec":
 		// The runtime's copy for the program: of what the two
 		// pointers point into.
@@ -1101,7 +1125,7 @@ func (g *gcGen) splitCall(v *ssa.Value, name string, args []*ssa.Value) bool {
 		g.get(args[0], false)
 		i32Const(g.s, 0)
 		g.get(args[1], true)
-		g.helper(wasm.GCSplitZero)
+		g.helper(g.splitHelper(wasm.GCSplitZero))
 	case "runtime.makechan", "runtime.makechan64", "runtime.mapaccess1", "runtime.mapaccess2", "runtime.mapassign":
 		// (The runtime declares one more parameter, the zero value of
 		// an element that is an object in the other model: nil.)

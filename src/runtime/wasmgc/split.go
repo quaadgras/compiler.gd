@@ -63,6 +63,13 @@ func splitzero(p unsafe.Pointer, n uintptr)
 func splitmovec(dst, src unsafe.Pointer, n uintptr)
 func splitzeroc(p unsafe.Pointer, n uintptr)
 
+// splitcheck stops the program unless the n bytes at p are in what p
+// points into, and splitcheckw unless they are also bytes that may be
+// stored in: for what the runtime loads and stores by its address
+// (linaddr), where no load through the pointer asks.
+func splitcheck(p unsafe.Pointer, n uintptr)
+func splitcheckw(p unsafe.Pointer, n uintptr)
+
 // splitsetlim returns p as a pointer to something of lim bytes: for
 // what the runtime gives the program a pointer to that it must not look
 // into (lim 0), and for making that the pointer to it again.
@@ -180,3 +187,18 @@ func typeWordPtr(w typeWord) unsafe.Pointer { return w }
 func splitfault() {
 	fatal("load or store through a pointer that is not in what it points into, or through one that the program made of an integer")
 }
+
+// staticptr returns the pointer to the address addr of the program's
+// data: for the runtime's walks of what the linker laid out (the itabs,
+// the descriptors of types by their offsets), which it has as integers.
+// The pointer is one into all of the data. An integer that is no
+// address of the data gives a pointer that nothing is loaded through.
+//
+// It is the one conversion of an integer to a pointer that the runtime
+// makes for itself: the code of the runtime is checked as any other
+// (cmd/compile/internal/wasm/gcsplit.go), and a conversion elsewhere is
+// to a pointer with no size.
+//
+//go:nocheckptr
+//go:noinline
+func staticptr(addr uintptr) unsafe.Pointer { return unsafe.Pointer(addr) }

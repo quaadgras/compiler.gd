@@ -93,6 +93,9 @@ func newStringBuf(l int, buf unsafe.Pointer, n int) stringBuilder {
 	b := stringBuilder{l: l}
 	if l > stringInline && buf != nil && l <= n {
 		if a := trylinaddr(buf); a != 0 {
+			if splitMode {
+				splitcheckw(buf, uintptr(l))
+			}
 			b.p, b.addr = buf, a
 			return b
 		}
@@ -124,6 +127,9 @@ func (b *stringBuilder) string(s string) {
 			p = stringData(&s)
 		}
 		if src := trylinaddr(p); src != 0 {
+			if splitMode {
+				splitcheck(p, uintptr(len(s)))
+			}
 			lincopy(b.addr+uintptr(b.n), src, uintptr(len(s)))
 			b.n += len(s)
 			return
@@ -225,6 +231,10 @@ func stringtoslicebyte(buf *tmpBuf, s string) []byte {
 		p = stringData(&s)
 	}
 	if src := trylinaddr(p); src != 0 && len(s) > 0 {
+		if splitMode {
+			splitcheck(p, uintptr(len(s)))
+			splitcheckw(unsafe.Pointer(unsafe.SliceData(b)), uintptr(len(s)))
+		}
 		lincopy(linaddr(unsafe.Pointer(unsafe.SliceData(b))), src, uintptr(len(s)))
 		return b
 	}

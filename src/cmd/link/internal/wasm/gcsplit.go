@@ -434,8 +434,9 @@ func (l *gcLinker) splitHelpers(first int, staticEnd, roEnd int64) []*wasmFunc {
 		for v := 0; v < 2 && f == 0; v++ {
 			f = l.ldr.Lookup("runtime.splitfault", v)
 		}
-		if f != 0 && l.funcIndex != nil && l.ldr.AttrReachable(f) {
-			// (The runtime says what it is.)
+		if f != 0 && l.funcIndex != nil && l.ldr.AttrReachable(f) && os.Getenv("GOWASMGC_TRAP") == "" {
+			// (The runtime says what it is. With GOWASMGC_TRAP
+			// set when linking, the engine does, with where.)
 			a.call(int(l.funcIndex(f)))
 		}
 		a.unreachable()

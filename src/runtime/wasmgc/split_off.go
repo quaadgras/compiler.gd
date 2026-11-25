@@ -18,6 +18,8 @@ func splitalloc(n, nslots uintptr) unsafe.Pointer  { panic("split") }
 func ptroff(p unsafe.Pointer) uintptr              { panic("split") }
 func ptrlim(p unsafe.Pointer) uintptr              { panic("split") }
 func c23ObjectFreed(addr uintptr)                  {}
+func splitcheck(p unsafe.Pointer, n uintptr)       {}
+func splitcheckw(p unsafe.Pointer, n uintptr)      {}
 func splitbase(p unsafe.Pointer) uintptr           { panic("split") }
 func newarray(t *_type, n int) unsafe.Pointer      { panic("split") }
 func splitmove(dst, src unsafe.Pointer, n uintptr) { panic("split") }
@@ -30,3 +32,5 @@ type typeWord = uintptr
 
 func typeWordOf(p unsafe.Pointer) typeWord  { return uintptr(p) }
 func typeWordPtr(w typeWord) unsafe.Pointer { return unsafe.Pointer(w) }
+
+func staticptr(addr uintptr) unsafe.Pointer { return unsafe.Pointer(addr) }
