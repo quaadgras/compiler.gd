@@ -83,10 +83,10 @@ type gen struct {
 	// The member that each union of the object being initialized is
 	// initialized as, by offset (initializer.unions): for tat.
 	initUnion map[int64]*field
-	u     *unit
-	unitN int
-	out   *strings.Builder
-	ind   int
+	u         *unit
+	unitN     int
+	out       *strings.Builder
+	ind       int
 
 	fn      *funcDecl
 	locals  strings.Builder // the function's hoisted declarations
