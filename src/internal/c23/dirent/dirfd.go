@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"unsafe"
 )
 
 // Dirfd is dirfd: a descriptor of the directory, made when first asked
@@ -37,16 +36,13 @@ func Fdopendir(fd int32) *c23.Void {
 		c23.SetErrno(e)
 		return (*c23.Void)(nil)
 	}
-	p := c23.New[Dir]()
-	d := (*Dir)(unsafe.Pointer(p))
-	d.path = name
-	d.fd = fd
+	d := &Dir{path: name, fd: fd}
 	if err := d.read(); err != nil {
 		c23.SetErrnoOf(err)
 		return (*c23.Void)(nil)
 	}
 	d.ent = c23.Malloc(280)
-	return p
+	return c23.NewHandle(d)
 }
 
 // Telldir is telldir: the position of the next entry (its index).
