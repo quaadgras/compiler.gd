@@ -28,9 +28,10 @@ import (
 //   - an object of Go's of the heap, its slot, if it holds no string,
 //     slice or interface: those are not bytes to C, and what the
 //     library keeps for itself (internal/c23's Handle) is made of them;
-//   - the goroutine's stack from the caller's frame up, the section of
-//     the program's data that p is in, or what the program has that is
-//     read-only, each whole.
+//   - the goroutine's stack from the caller's frame up, as far as the
+//     frame that p is in goes (cFrameEnd);
+//   - the section of the program's data that p is in, or what the
+//     program has that is read-only, each whole.
 //
 // For the stack and the data that is what the checks of pointer
 // arithmetic go by too (c23Header): where those come to know the
@@ -48,7 +49,7 @@ func c23Extent(p unsafe.Pointer) (before, after uintptr, ok bool) {
 		if a < sp {
 			return 0, 0, false
 		}
-		return a - sp, gp.stack.hi - a, true
+		return a - sp, cFrameEnd(gp, a) - a, true
 	}
 	if s := spanOfHeap(a); s != nil {
 		if s.isUserArenaChunk {
@@ -92,6 +93,39 @@ func c23Extent(p unsafe.Pointer) (before, after uintptr, ok bool) {
 		return a - lo, hi - a, true
 	}
 	return 0, 0, false
+}
+
+// cFrameEnd returns where what C may write from a, an address in gp's
+// stack that is in or above the frame of the caller's caller, ends: the
+// first place above a where a function that is running keeps its
+// caller's frame pointer. The address that the function returns to is
+// kept next to it, and neither is the variable's that a is in: without
+// this a string that is copied to a variable of a function, and is
+// longer than it, is where that function returns to.
+//
+// The frame pointers are a list, each the address of the one before it,
+// from the function that is running up to the goroutine's first. Where
+// there are none, or the list is not as it should be, the end is the
+// stack's.
+func cFrameEnd(gp *g, a uintptr) uintptr {
+	if !framepointer_enabled {
+		return gp.stack.hi
+	}
+	fp := getfp()
+	for n := 0; n < 1<<12; n++ {
+		if fp < gp.stack.lo || fp >= gp.stack.hi || fp&(goarch.PtrSize-1) != 0 {
+			break
+		}
+		if fp > a {
+			return fp
+		}
+		next := *(*uintptr)(unsafe.Pointer(fp))
+		if next <= fp {
+			break
+		}
+		fp = next
+	}
+	return gp.stack.hi
 }
 
 // c23BytesStored is called before code that the compiler does not see
