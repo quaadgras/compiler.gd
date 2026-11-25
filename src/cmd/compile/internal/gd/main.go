@@ -272,11 +272,15 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 	noder.LoadPackage(gd, gd.Flagset.Args())
 
 	// C translated by cmd/cc: its objects on the heap are allocated
-	// with a byte after them (ir.CObjType).
+	// with a byte after them (ir.CObjType). C's library is checked as
+	// the C that calls it (ir.NoCheckPtrPkg).
 	for _, p := range typecheck.Target(gd).Imports {
 		if p.Path == "internal/c23" {
 			gd.CObjects = true
 		}
+	}
+	if gd.Ctxt.Pkgpath == "internal/c23" {
+		gd.CObjects = true
 	}
 
 	// As a convenience to users (toolchain maintainers, in particular),

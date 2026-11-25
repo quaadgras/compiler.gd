@@ -7,7 +7,6 @@ package stdio
 import (
 	"bufio"
 	c23 "internal/c23"
-	"unsafe"
 )
 
 // newMemFile returns a stream of m.
@@ -16,16 +15,9 @@ func newMemFile(m *MemFile, rd, wr bool) *c23.Void { return NewMemStream(m, rd, 
 // NewMemStream returns a stream of m, which it reads and writes as a
 // file.
 func NewMemStream(m c23.MemStream, rd, wr bool) *c23.Void {
-	p := c23.New[c23.File]()
-	fl := (*c23.File)(unsafe.Pointer(p))
-	fl.Fd = -1
-	fl.Mem = m
+	fl := &c23.File{Fd: -1, Mem: m, Rd: rd, Wr: wr}
 	fl.W = bufio.NewWriter(c23.FdIO{F: fl})
-	fl.Rd, fl.Wr = rd, wr
-	c23.FilesMu.Lock()
-	c23.Files = append(c23.Files, fl)
-	c23.FilesMu.Unlock()
-	return p
+	return c23.NewStream(fl)
 }
 
 // Fmemopen is fmemopen: a stream of the size bytes at buf, or of size

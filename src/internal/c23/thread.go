@@ -509,7 +509,7 @@ func stripe(p *Void) *sync.Mutex { return &stripes[(Addr(p)>>3)%64] }
 func AtomicLoad[T atomicT](p *Void) T {
 	var z T
 	n := unsafe.Sizeof(z)
-	a := Check(p, n)
+	a := in(p, int(n))
 	switch n {
 	case 4:
 		b := atomic.LoadUint32((*uint32)(a))
@@ -527,18 +527,18 @@ func AtomicLoad[T atomicT](p *Void) T {
 
 func AtomicStore[T atomicT](p *Void, v T) {
 	n := unsafe.Sizeof(v)
-	a := p
+	a := in(p, int(n))
 	switch n {
 	case 4:
-		atomic.StoreUint32((*uint32)(unsafe.Pointer(a)), *(*uint32)(unsafe.Pointer(&v)))
+		atomic.StoreUint32((*uint32)(a), *(*uint32)(unsafe.Pointer(&v)))
 		return
 	case 8:
-		atomic.StoreUint64((*uint64)(unsafe.Pointer(a)), *(*uint64)(unsafe.Pointer(&v)))
+		atomic.StoreUint64((*uint64)(a), *(*uint64)(unsafe.Pointer(&v)))
 		return
 	}
 	m := stripe(p)
 	m.Lock()
-	*(*T)(unsafe.Pointer(a)) = v
+	*(*T)(a) = v
 	m.Unlock()
 }
 
@@ -546,25 +546,27 @@ func AtomicStore[T atomicT](p *Void, v T) {
 // compares).
 func AtomicCAS[T atomicT](p *Void, old, new T) bool {
 	n := unsafe.Sizeof(old)
-	a := p
+	a := in(p, int(n))
 	switch n {
 	case 4:
-		return atomic.CompareAndSwapUint32((*uint32)(unsafe.Pointer(a)), *(*uint32)(unsafe.Pointer(&old)), *(*uint32)(unsafe.Pointer(&new)))
+		return atomic.CompareAndSwapUint32((*uint32)(a), *(*uint32)(unsafe.Pointer(&old)), *(*uint32)(unsafe.Pointer(&new)))
 	case 8:
-		return atomic.CompareAndSwapUint64((*uint64)(unsafe.Pointer(a)), *(*uint64)(unsafe.Pointer(&old)), *(*uint64)(unsafe.Pointer(&new)))
+		return atomic.CompareAndSwapUint64((*uint64)(a), *(*uint64)(unsafe.Pointer(&old)), *(*uint64)(unsafe.Pointer(&new)))
 	}
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
-	if memEq(unsafe.Pointer(a), unsafe.Pointer(&old), n) {
-		*(*T)(unsafe.Pointer(a)) = new
+	if *(*T)(a) == old {
+		*(*T)(a) = new
 		return true
 	}
 	return false
 }
 
+// memEq reports whether the n bytes at a and at b, each a variable of
+// the caller's, are the same.
 func memEq(a, b unsafe.Pointer, n uintptr) bool {
-	return string(unsafe.Slice((*byte)(a), n)) == string(unsafe.Slice((*byte)(b), n))
+	return string(slice(a, n)) == string(slice(b, n))
 }
 
 // AtomicCmpXchg is atomic_compare_exchange: if p holds what expected
@@ -578,7 +580,7 @@ func AtomicCmpXchg[T atomicT](p, expected *Void, desired T) int32 {
 	case float64:
 		old = any(LoadF64(expected)).(T)
 	default:
-		old = *(*T)(Check(expected, unsafe.Sizeof(old)))
+		old = *(*T)(in(expected, int(unsafe.Sizeof(old))))
 	}
 	for {
 		if AtomicCAS(p, old, desired) {
@@ -586,7 +588,7 @@ func AtomicCmpXchg[T atomicT](p, expected *Void, desired T) int32 {
 		}
 		cur := AtomicLoad[T](p)
 		if !memEq(unsafe.Pointer(&cur), unsafe.Pointer(&old), unsafe.Sizeof(old)) {
-			*(*T)(unsafe.Pointer(expected)) = cur
+			*(*T)(in(expected, int(unsafe.Sizeof(old)))) = cur
 			return 0
 		}
 	}
@@ -617,8 +619,8 @@ func AtomicFetch[T atomicT](p *Void, op byte, v T) T {
 func bitOp[T atomicT](x T, op byte, y T) T {
 	var a, b uint64
 	n := unsafe.Sizeof(x)
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(&a)), n), unsafe.Slice((*byte)(unsafe.Pointer(&x)), n))
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(&b)), n), unsafe.Slice((*byte)(unsafe.Pointer(&y)), n))
+	copy(slice(unsafe.Pointer(&a), n), slice(unsafe.Pointer(&x), n))
+	copy(slice(unsafe.Pointer(&b), n), slice(unsafe.Pointer(&y), n))
 	switch op {
 	case '&':
 		a &= b
@@ -628,7 +630,7 @@ func bitOp[T atomicT](x T, op byte, y T) T {
 		a ^= b
 	}
 	var r T
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(&r)), n), unsafe.Slice((*byte)(unsafe.Pointer(&a)), n))
+	copy(slice(unsafe.Pointer(&r), n), slice(unsafe.Pointer(&a), n))
 	return r
 }
 

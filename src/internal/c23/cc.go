@@ -6,6 +6,7 @@ package c23
 
 import (
 	"fmt"
+	"internal/abi"
 	"os"
 	"reflect"
 	"sync"
@@ -44,33 +45,49 @@ func If[T any](c bool, x, y T) T {
 //go:noinline
 func Val[T any](v T) T { return v }
 
-// A Func is a C function, as an object a C pointer may point to.
+// A Func is a C function, as an object a C pointer may point to. Like a
+// Handle it is an interface and nothing else, which C cannot look into
+// or change, in an object of the heap that was allocated as a Func.
 type Func struct {
 	f any
 }
 
+var funcType = abi.TypeFor[Func]()
+
 // NewFunc returns the C pointer to the function f.
+//
+//go:nocheckptr
 func NewFunc(f any) *Void {
-	p := New[Func]()
-	(*Func)(unsafe.Pointer(p)).f = f
-	return p
+	p := (*Func)(newObject(funcType))
+	p.f = f
+	return (*Void)(unsafe.Pointer(p))
 }
 
-var funcInfo = TinfoOf[Func]()
+var funcs seen
+
+// funcAt returns the Func that p points to: p is the address of an
+// object that NewFunc made, or the call is a fault. Memory that C wrote
+// to look like a Func is not one: it could be made to call anything.
+//
+//go:nocheckptr
+func funcAt(p *Void) *Func {
+	if !funcs.is(unsafe.Pointer(p), funcType) {
+		RaiseFault("call through a pointer that is not to a function", uintptr(unsafe.Pointer(p)))
+	}
+	return (*Func)(unsafe.Pointer(p))
+}
 
 // FuncOf returns the Go function of type F that p points to, which a
 // call through a C function pointer calls.
 func FuncOf[F any](p *Void) F {
-	if p == nil {
-		RaiseFault("call through a pointer that is not to a function", Addr(p))
-	}
-	f, ok := (*Func)(unsafe.Pointer(p)).f.(F)
+	fn := funcAt(p)
+	f, ok := fn.f.(F)
 	if !ok {
-		if g, ok := adapt[F]((*Func)(unsafe.Pointer(p)).f); ok {
+		if g, ok := adapt[F](fn.f); ok {
 			return g
 		}
 		var z F
-		RaiseFault(fmt.Sprintf("call of a %T through a pointer to a function of type %T", (*Func)(unsafe.Pointer(p)).f, z), Addr(p))
+		RaiseFault(fmt.Sprintf("call of a %T through a pointer to a function of type %T", fn.f, z), Addr(p))
 	}
 	return f
 }
@@ -156,7 +173,10 @@ var emptyString [1]byte
 // The 0 byte that ends it is the one the compiler puts after the data of
 // every string constant, so s must be a constant. Its bytes are
 // read-only, as C's literal's are: storing through the pointer is a
-// fault.
+// fault. (Its conversion is of what the compiler made, and needs no
+// check.)
+//
+//go:nocheckptr
 func String(s string) *Char {
 	if len(s) == 0 {
 		return (*Char)(unsafe.Pointer(&emptyString))
@@ -168,7 +188,7 @@ func String(s string) *Char {
 // the same object, of a type the compiler makes rather than reflect.
 func StringOf[T, A any](s string) *Void {
 	p := LocalT(new(Obj[A]), TinfoOf[T]())
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(p)), len(s)), s)
+	copy(Writable(p, uintptr(len(s))), s)
 	return p
 }
 
@@ -214,47 +234,56 @@ type LDouble struct {
 	_ uint64
 }
 
-// A VaList is C's va_list: the variable arguments, and the next.
+// A VaList is C's va_list: the variable arguments that are left. Like
+// a Handle it is something that C cannot look into or change, a slice
+// and nothing else, in an object of the heap that was allocated as a
+// VaList: an argument is a Go value of its own type, and va_arg gives
+// it as that type or not at all.
 type VaList struct {
 	args []any
-	i    int
 }
 
-var vaInfo = TinfoOf[VaList]()
+var vaListType = abi.TypeFor[VaList]()
+
+var vaLists seen
 
 // VaStart is va_start: a va_list of a function's variable arguments.
+//
+//go:nocheckptr
 func VaStart(va []any) *Void {
-	p := New[VaList]()
-	(*VaList)(unsafe.Pointer(p)).args = va
-	return p
+	v := (*VaList)(newObject(vaListType))
+	v.args = va
+	return (*Void)(unsafe.Pointer(v))
 }
 
+// VaOf returns the VaList that ap points to: one that VaStart or VaCopy
+// made.
+//
+//go:nocheckptr
 func VaOf(ap *Void) *VaList {
-	if ap == nil {
-		RaiseFault("va_arg of a va_list not started", Addr(ap))
+	if !vaLists.is(unsafe.Pointer(ap), vaListType) {
+		RaiseFault("va_arg of what is not a va_list that va_start set", uintptr(unsafe.Pointer(ap)))
 	}
 	return (*VaList)(unsafe.Pointer(ap))
 }
 
 // VaCopy is va_copy.
-func VaCopy(ap *Void) *Void {
-	v := VaOf(ap)
-	p := New[VaList]()
-	*(*VaList)(unsafe.Pointer(p)) = *v
-	return p
-}
+func VaCopy(ap *Void) *Void { return VaStart(VaOf(ap).args) }
 
 func (v *VaList) Next() any {
-	if v.i >= len(v.args) {
+	if len(v.args) == 0 {
 		RaiseFault("va_arg past the last argument", 0)
 	}
-	a := v.args[v.i]
-	v.i++
+	a := v.args[0]
+	v.args = v.args[1:]
 	return a
 }
 
 // VaArg is va_arg(ap, T) of a scalar T. An argument of another type of
-// the same size and class is converted, as C allows for signedness.
+// the same size and class is converted, as C allows for signedness. An
+// integer that is read as a pointer is the pointer that the integer
+// converts to (IntPtr): one that cannot be used, if it is the address
+// of something.
 func VaArg[T any](ap *Void) T {
 	a := VaOf(ap).Next()
 	if v, ok := a.(T); ok {
@@ -264,7 +293,7 @@ func VaArg[T any](ap *Void) T {
 	if _, ok := any(r).(*Void); ok {
 		// An integer passed for a pointer (0 for a null pointer).
 		if n, ok := intArgValue(a); ok {
-			return any(FromInt(uintptr(n))).(T)
+			return any(IntPtr(uintptr(n))).(T)
 		}
 	}
 	if p, ok := a.(*Void); ok {
@@ -310,8 +339,8 @@ func VaArgPtr(ap *Void) *Void {
 // (checkRealloc).
 func ReallocOf[T any](p *Void, n uintptr) *Void {
 	q := NewArray[T](n)
-	if p != nil {
-		Memmove(q, p, min(n, sizeOf(unsafe.Pointer(p))))
+	if p != nil && q != nil {
+		memmove(unsafe.Pointer(q), unsafe.Pointer(p), min(n, reallocSize(unsafe.Pointer(p))))
 	}
 	return q
 }

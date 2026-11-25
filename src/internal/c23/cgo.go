@@ -22,7 +22,7 @@ func Arg[P any](p P) *Void {
 	case reflect.Pointer, reflect.UnsafePointer:
 		return (*Void)(*(*unsafe.Pointer)(unsafe.Pointer(&p)))
 	case reflect.Uintptr:
-		return FromInt(*(*uintptr)(unsafe.Pointer(&p)))
+		return IntPtr(*(*uintptr)(unsafe.Pointer(&p)))
 	}
 	panic("c23.Arg: not a pointer: " + t.String())
 }

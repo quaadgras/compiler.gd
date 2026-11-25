@@ -6,6 +6,7 @@ package c23
 
 import (
 	"bufio"
+	"bytes"
 	"io"
 	"math"
 	"os"
@@ -22,40 +23,33 @@ import (
 // CString allocates s as a C string.
 func CString(s string) *Void {
 	p := Malloc(uint64(len(s) + 1))
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(p)), len(s)), s)
+	copy(slice(unsafe.Pointer(p), uintptr(len(s))), s)
 	return p
 }
 
-// GoString reads the C string at p.
-func GoString(p *Void) string {
-	var b []byte
-	for {
-		c := Load8(p)
-		if c == 0 {
-			return string(b)
-		}
-		b = append(b, c)
-		p = Add(p, 1)
-	}
-}
-
-// bytesAt reads n bytes at p.
-func BytesAt(p *Void, n uintptr) []byte {
-	if n == 0 {
-		return nil
-	}
-	a := Check(p, n)
-	return unsafe.Slice((*byte)(a), n)
-}
+// GoString reads the C string at p, which ends in what p points into.
+func GoString(p *Void) string { return string(StringAt(p)) }
 
 // string.h
 
+// Memcmp is memcmp: of bytes that are in what a and b point into, as
+// far as it reads them, which is to the first that differ.
 func Memcmp(a, b *Void, n uint64) int32 {
-	for i := uint64(0); i < n; i++ {
-		x, y := Load8(Add(a, int(i))), Load8(Add(b, int(i)))
-		if x != y {
-			return int32(x) - int32(y)
+	if n == 0 {
+		return 0
+	}
+	x, y := BytesFrom(a), BytesFrom(b)
+	k := min(n, uint64(len(x)), uint64(len(y)))
+	x, y = x[:k], y[:k]
+	if !bytes.Equal(x, y) {
+		for i := range x {
+			if x[i] != y[i] {
+				return int32(x[i]) - int32(y[i])
+			}
 		}
+	}
+	if k < n {
+		outside(a, uintptr(min(n, uint64(^uintptr(0)))), uintptr(k), true)
 	}
 	return 0
 }
@@ -66,13 +60,7 @@ func Calloc(n, size uint64) *Void { return Malloc(n * size) }
 
 // Realloc is realloc: untyped memory, with what p's object holds. p is
 // NULL or what malloc returned (checkRealloc).
-func Realloc(p *Void, n uint64) *Void {
-	q := Malloc(n)
-	if p != nil {
-		Memmove(q, p, min(uintptr(n), sizeOf(unsafe.Pointer(p))))
-	}
-	return q
-}
+func Realloc(p *Void, n uint64) *Void { return ReallocRaw(p, n) }
 
 // Abort is abort: it calls SIGABRT's handler, if it has one, then ends
 // the program.
@@ -242,14 +230,16 @@ var (
 	stdio     [3]*Void
 	Files     []*File
 	FilesMu   sync.Mutex
-	fileInfo  = TinfoOf[File]()
 )
 
+// FileOf returns the stream that p, a FILE *, points to: p is what
+// NewFile or NewStream returned (a Handle), and not memory that C
+// filled in to look like a stream.
 func FileOf(p *Void) *File {
-	if p == nil {
+	f, ok := HandleOf[*File](p)
+	if !ok {
 		RaiseFault("not a FILE", Addr(p))
 	}
-	f := (*File)(unsafe.Pointer(p))
 	if f.closed {
 		RaiseFault("use of a closed FILE", Addr(p))
 	}
@@ -258,15 +248,18 @@ func FileOf(p *Void) *File {
 
 // newFile returns a stream of the file descriptor fd.
 func NewFile(fd int32, rd, wr bool) *Void {
-	p := New[File]()
-	fl := (*File)(unsafe.Pointer(p))
-	fl.Fd = fd
+	fl := &File{Fd: fd, Rd: rd, Wr: wr}
 	fl.W = bufio.NewWriter(FdIO{fl})
-	fl.Rd, fl.Wr = rd, wr
+	return NewStream(fl)
+}
+
+// NewStream returns the FILE * for C of the stream fl, which is flushed
+// with the others from here on.
+func NewStream(fl *File) *Void {
 	FilesMu.Lock()
 	Files = append(Files, fl)
 	FilesMu.Unlock()
-	return p
+	return NewHandle(fl)
 }
 
 // Stdio returns stdin (0), stdout (1) or stderr (2).
@@ -275,7 +268,7 @@ func Stdio(n int32) *Void {
 		stdio[0] = NewFile(0, true, false)
 		stdio[1] = NewFile(1, false, true)
 		stdio[2] = NewFile(2, false, true)
-		(*File)(unsafe.Pointer(stdio[2])).Unbuf = true
+		FileOf(stdio[2]).Unbuf = true
 	})
 	return stdio[n]
 }

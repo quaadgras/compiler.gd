@@ -6,7 +6,6 @@ package c23
 
 import (
 	"math/bits"
-	"unsafe"
 )
 
 // GCC's bit builtins (__builtin_clz and its kin) and C23's stdbit.h,
@@ -151,8 +150,8 @@ func LoadBytes(p *Void, n int) uint64 {
 
 // StoreBytes stores the n low bytes of v at p, little-endian.
 func StoreBytes(p *Void, n int, v uint64) {
-	a := p
-	for i := 0; i < n; i++ {
-		*(*byte)(unsafe.Add(unsafe.Pointer(a), i)) = byte(v >> (8 * i))
+	b := BytesAt(p, uintptr(n))
+	for i := range b {
+		b[i] = byte(v >> (8 * i))
 	}
 }
