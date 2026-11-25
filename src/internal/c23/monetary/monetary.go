@@ -136,7 +136,7 @@ func store(s *c23.Void, maxsize uint64, format *c23.Void, va []any) int64 {
 		c23.SetErrno(c23.E2BIG)
 		return -1
 	}
-	copy(c23.BytesAt(s, uintptr(len(out)+1)), out+"\x00")
+	copy(c23.Writable(s, uintptr(len(out)+1)), out+"\x00")
 	return int64(len(out))
 }
 

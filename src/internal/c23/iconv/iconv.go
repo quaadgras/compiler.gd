@@ -8,7 +8,6 @@ import (
 	c23 "internal/c23"
 	"strings"
 	"unicode/utf8"
-	"unsafe"
 )
 
 // An encoding is one of iconv's character sets.
@@ -62,8 +61,6 @@ type iconvT struct {
 	bomDone   bool     // the output's byte order mark is written
 }
 
-var iconvInfo = c23.TinfoOf[iconvT]()
-
 // IconvOpen is iconv_open: a conversion from fromcode to tocode, or
 // (iconv_t)-1 (errno EINVAL) if one is not a character set iconv has.
 func IconvOpen(tocode, fromcode *c23.Void) *c23.Void {
@@ -73,16 +70,14 @@ func IconvOpen(tocode, fromcode *c23.Void) *c23.Void {
 		c23.SetErrno(c23.EINVAL)
 		return c23.FromInt(^uintptr(0))
 	}
-	p := c23.New[iconvT]()
-	*(*iconvT)(unsafe.Pointer(p)) = iconvT{from: from, to: to, translit: translit, ignore: ignore}
-	return p
+	return c23.NewHandle(&iconvT{from: from, to: to, translit: translit, ignore: ignore})
 }
 
+// iconvOf returns the conversion that p, an iconv_t, is the pointer to
+// the c23.Handle of, or nil.
 func iconvOf(p *c23.Void) *iconvT {
-	if p == nil {
-		return nil
-	}
-	return (*iconvT)(unsafe.Pointer(p))
+	cv, _ := c23.HandleOf[*iconvT](p)
+	return cv
 }
 
 // IconvClose is iconv_close.
@@ -243,7 +238,7 @@ func Iconv(cd, inbuf, inleft, outbuf, outleft *c23.Void) uint64 {
 	in := c23.BytesAt(inp, uintptr(nin))
 	var out []byte
 	if nout > 0 {
-		out = c23.BytesAt(outp, uintptr(nout))
+		out = c23.Writable(outp, uintptr(nout))
 	}
 	i, o := 0, 0
 	irreversible := uint64(0)

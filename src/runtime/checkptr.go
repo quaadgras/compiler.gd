@@ -660,6 +660,22 @@ func checkptrStraddles(ptr unsafe.Pointer, size uintptr) bool {
 	return checkptrBase(ptr) != checkptrBase(end)
 }
 
+// checkptrPastC reports whether the size bytes at ptr, which is in an
+// object of C's (cspan.go), go past where the object ends: that is
+// where C asked for it to end, not where its slot does, which is all
+// that checkptrStraddles knows. unsafe.Slice and unsafe.String ask, so
+// that every element of what they return is in the object.
+func checkptrPastC(ptr unsafe.Pointer, size uintptr) bool {
+	s := spanOfHeap(uintptr(ptr))
+	if s == nil || !s.spanclass.c() {
+		return false
+	}
+	i := s.objIndex(uintptr(ptr))
+	off := uintptr(ptr) - (s.base() + i*s.elemsize)
+	n := s.cSizeOf(i)
+	return off > n || size > n-off
+}
+
 func checkptrArithmetic(p unsafe.Pointer, originals []unsafe.Pointer) {
 	// (A program with C in it keeps small integers in pointers, and
 	// adds to a null pointer: c23AllowIntegers.)
@@ -692,6 +708,26 @@ func checkptrArithmetic(p unsafe.Pointer, originals []unsafe.Pointer) {
 	}
 	base := checkptrBase(p)
 	if base == 0 {
+		// gd: p is in nothing that is known here: not in the heap, the
+		// stack or the data. If every pointer that it was computed
+		// from is in an object of the heap, it is in none of their
+		// objects, and what it is the address of, if anything, is
+		// not the program's: another thread's stack, what the
+		// runtime keeps outside the heap. (An integer that is no
+		// address, which C makes of a pointer less itself, is let
+		// be.)
+		if uintptr(p) >= minLegalPointer && len(originals) > 0 {
+			left := true
+			for _, original := range originals {
+				if spanOfHeap(uintptr(original)) == nil {
+					left = false
+					break
+				}
+			}
+			if left {
+				throw("checkptr: pointer arithmetic result is outside the object it was computed from")
+			}
+		}
 		return
 	}
 

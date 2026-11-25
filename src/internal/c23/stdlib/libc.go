@@ -28,15 +28,22 @@ type qsorter struct {
 	cmp  func(*c23.Void, *c23.Void) int32
 }
 
-func (q *qsorter) at(i int) *c23.Void { return c23.Add(q.base, i*q.size) }
+// newQsorter returns the qsorter of the n elements of size bytes at
+// base, all of which are in what base points into (c23.Array): its
+// steps and its swaps are in the array, and are not checked each.
+func newQsorter(base *c23.Void, n, size uint64, cmp func(*c23.Void, *c23.Void) int32) *qsorter {
+	return &qsorter{base: c23.Array(base, n, size), size: int(size), tmp: c23.Malloc(size), cmp: cmp}
+}
+
+func (q *qsorter) at(i int) *c23.Void { return c23.Within(q.base, i*q.size) }
 
 func (q *qsorter) less(i, j int) bool { return q.cmp(q.at(i), q.at(j)) < 0 }
 
 func (q *qsorter) swap(i, j int) {
 	sz := uintptr(q.size)
-	c23.Memmove(q.tmp, q.at(i), sz)
-	c23.Memmove(q.at(i), q.at(j), sz)
-	c23.Memmove(q.at(j), q.tmp, sz)
+	c23.Move(q.tmp, q.at(i), sz)
+	c23.Move(q.at(i), q.at(j), sz)
+	c23.Move(q.at(j), q.tmp, sz)
 }
 
 // siftDown restores the heap of the first n elements from element i.
@@ -62,7 +69,7 @@ func Qsort(base *c23.Void, n, size uint64, cmp *c23.Void) {
 	if n < 2 || size == 0 {
 		return
 	}
-	q := &qsorter{base: base, size: int(size), tmp: c23.Malloc(size), cmp: c23.CmpFunc(cmp)}
+	q := newQsorter(base, n, size, c23.CmpFunc(cmp))
 	k := int(n)
 	for i := k/2 - 1; i >= 0; i-- {
 		q.siftDown(i, k)
@@ -75,10 +82,11 @@ func Qsort(base *c23.Void, n, size uint64, cmp *c23.Void) {
 
 func Bsearch(key, base *c23.Void, n, size uint64, cmp *c23.Void) *c23.Void {
 	f := c23.CmpFunc(cmp)
+	base = c23.Array(base, n, size)
 	lo, hi := uint64(0), n
 	for lo < hi {
 		m := lo + (hi-lo)/2
-		e := c23.Add(base, int(m*size))
+		e := c23.Within(base, int(m*size))
 		switch c := f(key, e); {
 		case c == 0:
 			return e

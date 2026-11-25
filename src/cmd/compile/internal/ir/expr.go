@@ -1280,7 +1280,7 @@ func ShouldCheckPtr(gd *base.Invocation, fn *Func, level int) bool {
 	// the runtime's packages is compiled where it is instantiated, and
 	// in the runtime too, where there are none: all its copies must be
 	// the same.
-	if sym := fn.Sym(); sym != nil && sym.Pkg != nil && UncheckedPkg(sym.Pkg.Path) {
+	if sym := fn.Sym(); sym != nil && sym.Pkg != nil && NoCheckPtrPkg(sym.Pkg.Path) {
 		return false
 	}
 	return true
@@ -1329,12 +1329,26 @@ func AddrConv(x Node) *ConvExpr {
 	return nil
 }
 
-// UncheckedPkg reports whether the package with the given path is
-// compiled without -d=checkptr: the runtime's packages; the runtime of C
-// (internal/c23), which keeps pointers that the checks would not allow
-// (one past the end of an object, tagged) and has checks of its own; and
-// reflect, whose pointers are to values of the types it says they are,
-// by construction but for NewAt, which checks.
+// NoCheckPtrPkg reports whether the package with the given path is
+// compiled without -d=checkptr: the runtime's packages, and reflect,
+// whose pointers are to values of the types it says they are, by
+// construction but for NewAt, which checks.
+//
+// C's library (internal/c23) is not one of them. It is given C's
+// pointers, which are whatever the program made of them, and is checked
+// as the C that calls it is (base.Invocation.CObjects): its arithmetic
+// stays in the object, and what it converts a pointer to is what the
+// memory is claimed for. Its few functions that make a pointer of an
+// integer or keep bits in one are marked go:nocheckptr.
+func NoCheckPtrPkg(path string) bool {
+	return path != "internal/c23" && UncheckedPkg(path)
+}
+
+// UncheckedPkg reports whether the package with the given path is one
+// whose pointers the escape analysis does not follow: the runtime's
+// packages, the runtime of C (internal/c23) and reflect, which keep
+// pointers as integers and make them of memory. All but internal/c23
+// are compiled without -d=checkptr (NoCheckPtrPkg).
 func UncheckedPkg(path string) bool {
 	switch path {
 	case "internal/c23", "reflect", "internal/reflectlite":

@@ -12,7 +12,6 @@ package regex
 
 import (
 	c23 "internal/c23"
-	"unsafe"
 )
 
 // regcomp's flags.
@@ -68,13 +67,10 @@ type regexT struct {
 func opaque(preg *c23.Void) *c23.Void { return c23.Add(preg, int(c23.LongSize)) }
 
 // regexOf returns preg's regexT, or nil if regcomp did not make it (or
-// regfree freed it).
+// regfree freed it): __opaque is the pointer to a c23.Handle of it.
 func regexOf(preg *c23.Void) *regexT {
-	p := c23.LoadPtr(opaque(preg))
-	if p == nil {
-		return nil
-	}
-	return (*regexT)(unsafe.Pointer(p))
+	re, _ := c23.HandleOf[*regexT](c23.LoadPtr(opaque(preg)))
+	return re
 }
 
 // Regcomp is regcomp.
@@ -84,10 +80,8 @@ func Regcomp(preg, pattern *c23.Void, cflags int32) int32 {
 		c23.StorePtr(opaque(preg), (*c23.Void)(nil))
 		return code
 	}
-	p := c23.New[regexT]()
-	*(*regexT)(unsafe.Pointer(p)) = *re
 	c23.StoreLong(preg, int64(re.nsub))
-	c23.StorePtr(opaque(preg), p)
+	c23.StorePtr(opaque(preg), c23.NewHandle(re))
 	return 0
 }
 

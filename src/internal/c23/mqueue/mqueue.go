@@ -355,7 +355,7 @@ func MqTimedreceive(fd int32, msg *c23.Void, n uint64, prio, ts *c23.Void) int64
 	mu.Unlock()
 	c23.PollNotify()
 	if len(m.data) > 0 {
-		copy(c23.BytesAt(msg, uintptr(len(m.data))), m.data)
+		copy(c23.Writable(msg, uintptr(len(m.data))), m.data)
 	}
 	if c23.Addr(prio) != 0 {
 		c23.Store32(prio, m.prio)

@@ -147,6 +147,13 @@ func markWholeView(gd *base.Invocation, fn *ir.Func, ro *ir.ReassignOracle, n *i
 		return
 	}
 	types.CalcSize(gd, src)
+	if src.Size() == 0 {
+		// A pointer to a type of no size says nothing of what it
+		// points to: C's void * is one (internal/c23's Void), and
+		// what it is converted to is the runtime's to compare with
+		// the object, as for an unsafe.Pointer.
+		return
+	}
 	if off < 0 || size > src.Size()-off {
 		// The view goes past what the pointer is known to point
 		// to, which may be one element of many: whether it fits

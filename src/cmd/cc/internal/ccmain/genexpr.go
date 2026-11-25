@@ -148,27 +148,27 @@ func (g *gen) atomicUpdate(l lval, next func(cur string) string) (string, string
 func loadCode(addr string, t *ctype) string {
 	switch t.kind {
 	case kBool, kUChar:
-		return fmt.Sprintf("c23.Load8(%s)", addr)
+		return fmt.Sprintf("c23.Peek8(%s)", addr)
 	case kChar, kSChar:
-		return fmt.Sprintf("int8(c23.Load8(%s))", addr)
+		return fmt.Sprintf("int8(c23.Peek8(%s))", addr)
 	case kShort:
-		return fmt.Sprintf("int16(c23.Load16(%s))", addr)
+		return fmt.Sprintf("int16(c23.Peek16(%s))", addr)
 	case kUShort:
-		return fmt.Sprintf("c23.Load16(%s)", addr)
+		return fmt.Sprintf("c23.Peek16(%s)", addr)
 	case kInt:
-		return fmt.Sprintf("int32(c23.Load32(%s))", addr)
+		return fmt.Sprintf("int32(c23.Peek32(%s))", addr)
 	case kUInt:
-		return fmt.Sprintf("c23.Load32(%s)", addr)
+		return fmt.Sprintf("c23.Peek32(%s)", addr)
 	case kLong, kLLong:
-		return fmt.Sprintf("%s(c23.Load%d(%s))", goType(t), t.sizeof()*8, addr)
+		return fmt.Sprintf("%s(c23.Peek%d(%s))", goType(t), t.sizeof()*8, addr)
 	case kULong, kULLong:
-		return fmt.Sprintf("c23.Load%d(%s)", t.sizeof()*8, addr)
+		return fmt.Sprintf("c23.Peek%d(%s)", t.sizeof()*8, addr)
 	case kFloat:
-		return fmt.Sprintf("c23.LoadF32(%s)", addr)
+		return fmt.Sprintf("c23.PeekF32(%s)", addr)
 	case kDouble, kLDouble:
-		return fmt.Sprintf("c23.LoadF64(%s)", addr)
+		return fmt.Sprintf("c23.PeekF64(%s)", addr)
 	case kPtr, kNullptr, kVaList, kIntCap, kUIntCap:
-		return fmt.Sprintf("c23.LoadPtr(%s)", addr)
+		return fmt.Sprintf("c23.PeekPtr(%s)", addr)
 	case kStruct, kArray:
 		return addr
 	case kInt128:
@@ -200,19 +200,19 @@ func bitsOf(n int, t *ctype, v string, c expr) string {
 func (g *gen) store(addr string, t *ctype, v string, c expr) {
 	switch t.kind {
 	case kBool, kChar, kSChar, kUChar:
-		g.p("c23.Store8(%s, %s)", addr, bitsOf(8, t, v, c))
+		g.p("c23.Poke8(%s, %s)", addr, bitsOf(8, t, v, c))
 	case kShort, kUShort:
-		g.p("c23.Store16(%s, %s)", addr, bitsOf(16, t, v, c))
+		g.p("c23.Poke16(%s, %s)", addr, bitsOf(16, t, v, c))
 	case kInt, kUInt:
-		g.p("c23.Store32(%s, %s)", addr, bitsOf(32, t, v, c))
+		g.p("c23.Poke32(%s, %s)", addr, bitsOf(32, t, v, c))
 	case kLong, kULong, kLLong, kULLong:
-		g.p("c23.Store%d(%s, %s)", t.sizeof()*8, addr, bitsOf(int(t.sizeof()*8), t, v, c))
+		g.p("c23.Poke%d(%s, %s)", t.sizeof()*8, addr, bitsOf(int(t.sizeof()*8), t, v, c))
 	case kFloat:
-		g.p("c23.StoreF32(%s, %s)", addr, v)
+		g.p("c23.PokeF32(%s, %s)", addr, v)
 	case kDouble, kLDouble:
-		g.p("c23.StoreF64(%s, %s)", addr, v)
+		g.p("c23.PokeF64(%s, %s)", addr, v)
 	case kPtr, kNullptr, kVaList, kIntCap, kUIntCap:
-		g.p("c23.StorePtr(%s, %s)", addr, v)
+		g.p("c23.PokePtr(%s, %s)", addr, v)
 	case kStruct, kArray:
 		g.p("%s", moveCode(addr, v, t))
 	case kInt128:
@@ -266,7 +266,7 @@ func (g *gen) storeL(l lval, v string, c expr) {
 
 func (g *gen) bitLoad(addr string, f *field) string {
 	n := int(f.unit.sizeof() * 8)
-	raw := fmt.Sprintf("c23.Load%d(%s)", n, addr)
+	raw := fmt.Sprintf("c23.Peek%d(%s)", n, addr)
 	if f.ubytes > 0 {
 		n = 64
 		raw = fmt.Sprintf("c23.LoadBytes(%s, %d)", addr, f.ubytes)
@@ -301,7 +301,7 @@ func (g *gen) bitStore(addr string, f *field, v string, c expr) {
 	if n < 64 {
 		m &= uint64(1)<<n - 1
 	}
-	load, store := fmt.Sprintf("c23.Load%d(%s)", n, addr), fmt.Sprintf("c23.Store%d(%s, ", n, addr)
+	load, store := fmt.Sprintf("c23.Peek%d(%s)", n, addr), fmt.Sprintf("c23.Poke%d(%s, ", n, addr)
 	if f.ubytes > 0 {
 		load, store = fmt.Sprintf("c23.LoadBytes(%s, %d)", addr, f.ubytes), fmt.Sprintf("c23.StoreBytes(%s, %d, ", addr, f.ubytes)
 	}
@@ -878,7 +878,7 @@ func moveCode(dst, src string, t *ctype) string {
 	if t.sizeof() == target.ptrSize {
 		return fmt.Sprintf("c23.MoveWord(%s, %s)", dst, src)
 	}
-	return fmt.Sprintf("c23.Memmove(%s, %s, %d)", dst, src, t.sizeof())
+	return fmt.Sprintf("c23.Move(%s, %s, %d)", dst, src, t.sizeof())
 }
 
 func (g *gen) incDec(e *incDec, value bool) string {

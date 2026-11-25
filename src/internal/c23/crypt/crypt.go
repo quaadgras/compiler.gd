@@ -49,7 +49,7 @@ func put(buf, key, salt *c23.Void) *c23.Void {
 		c23.SetErrno(c23.EINVAL)
 		return (*c23.Void)(nil)
 	}
-	copy(c23.BytesAt(buf, uintptr(len(s)+1)), s+"\x00")
+	copy(c23.Writable(buf, uintptr(len(s)+1)), s+"\x00")
 	return buf
 }
 
@@ -322,7 +322,7 @@ func Encrypt(block *c23.Void, edflag int32) {
 	d := keyDES
 	keyMu.Unlock()
 	b = d.crypt(b, 0, edflag != 0)
-	p := c23.BytesAt(block, 64)
+	p := c23.Writable(block, 64)
 	for i := range 64 {
 		p[i] = byte(b>>(63-i)) & 1
 	}

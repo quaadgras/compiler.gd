@@ -36,6 +36,8 @@ type unionHeader struct {
 // copy, if the value came in a copy of the union's bytes; the same
 // pointer converted, if M and what the union held are pointers; zero
 // otherwise).
+//
+//go:nocheckptr
 func UnionBox[M any](slot *UnionRef) *M {
 	t := abi.TypeFor[M]()
 	if h := (*unionHeader)(*slot); h != nil && h.typ == t && h.back == unsafe.Pointer(slot) {
@@ -50,6 +52,8 @@ func unionBox(slot *UnionRef, t *abi.Type) unsafe.Pointer
 // UnionClone is for a union that was copied whole, as part of a struct
 // that was assigned: the copy, whose UnionRef is at slot, gets a value
 // of its own now, as it would when it is next used.
+//
+//go:nocheckptr
 func UnionClone(slot *UnionRef) {
 	if h := (*unionHeader)(*slot); h != nil && h.back != unsafe.Pointer(slot) {
 		unionClone(slot)
@@ -67,6 +71,8 @@ func unionPointer(x unsafe.Pointer) (unsafe.Pointer, bool)
 // union is one that is laid out as bytes and a UnionRef: the library's
 // functions that take such a union (semctl's union semun, which the
 // program declares) look there for its pointer members.
+//
+//go:nocheckptr
 func UnionValuePtr(p *Void) (*Void, bool) {
 	const word = unsafe.Sizeof(uintptr(0))
 	n, ok := usable(unsafe.Pointer(p))

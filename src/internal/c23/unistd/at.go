@@ -88,7 +88,7 @@ func Readlinkat(dirfd int32, path, buf *c23.Void, n uint64) int64 {
 		return -1
 	}
 	k := min(uint64(len(s)), n)
-	copy(c23.BytesAt(buf, uintptr(k)), s)
+	copy(c23.Writable(buf, uintptr(k)), s)
 	return int64(k)
 }
 

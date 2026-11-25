@@ -45,7 +45,7 @@ func Getdelim(lineptr, n *c23.Void, delim int32, stream *c23.Void) int64 {
 		c23.StorePtr(lineptr, buf)
 		c23.StoreLong(n, size)
 	}
-	copy(c23.BytesAt(buf, uintptr(len(b)+1)), append(b, 0))
+	copy(c23.Writable(buf, uintptr(len(b)+1)), append(b, 0))
 	return int64(len(b))
 }
 

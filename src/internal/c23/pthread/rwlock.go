@@ -204,13 +204,18 @@ func PthreadBarrierWait(p *c23.Void) int32 {
 
 // Spin locks: pthread_spinlock_t is an int, 0 when it is free.
 
-func PthreadSpinInit(p *c23.Void, pshared int32) int32 { c23.AtomicStore(p, int32(0)); return 0 }
+func PthreadSpinInit(p *c23.Void, pshared int32) int32 {
+	c23.Check(p, 4)
+	c23.AtomicStore(p, int32(0))
+	return 0
+}
 
 func PthreadSpinDestroy(p *c23.Void) int32 { return 0 }
 
 // PthreadSpinLock is pthread_spin_lock, which spins, yielding to the
 // other goroutines between tries.
 func PthreadSpinLock(p *c23.Void) int32 {
+	c23.Check(p, 4)
 	for i := 0; !c23.AtomicCAS(p, int32(0), int32(1)); i++ {
 		if i >= 64 {
 			runtime.Gosched()
@@ -220,7 +225,12 @@ func PthreadSpinLock(p *c23.Void) int32 {
 }
 
 func PthreadSpinTrylock(p *c23.Void) int32 {
+	c23.Check(p, 4)
 	return c23.If[int32](c23.AtomicCAS(p, int32(0), int32(1)), 0, c23.EBUSY)
 }
 
-func PthreadSpinUnlock(p *c23.Void) int32 { c23.AtomicStore(p, int32(0)); return 0 }
+func PthreadSpinUnlock(p *c23.Void) int32 {
+	c23.Check(p, 4)
+	c23.AtomicStore(p, int32(0))
+	return 0
+}

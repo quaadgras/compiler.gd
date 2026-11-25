@@ -28,7 +28,7 @@ func QsortR(base *c23.Void, n, size uint64, cmp, arg *c23.Void) {
 		return
 	}
 	f := c23.FuncOf[func(*c23.Void, *c23.Void, *c23.Void) int32](cmp)
-	q := &qsorter{base: base, size: int(size), tmp: c23.Malloc(size), cmp: func(a, b *c23.Void) int32 { return f(a, b, arg) }}
+	q := newQsorter(base, n, size, func(a, b *c23.Void) int32 { return f(a, b, arg) })
 	k := int(n)
 	for i := k/2 - 1; i >= 0; i-- {
 		q.siftDown(i, k)

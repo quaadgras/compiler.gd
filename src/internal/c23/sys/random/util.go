@@ -27,7 +27,7 @@ func Getrandom(buf *c23.Void, n uint64, flags uint32) int64 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
 	}
-	randomFill(c23.BytesAt(buf, uintptr(n)))
+	randomFill(c23.Writable(buf, uintptr(n)))
 	return int64(n)
 }
 
@@ -38,6 +38,6 @@ func Getentropy(buf *c23.Void, n uint64) int32 {
 		c23.SetErrno(c23.EIO)
 		return -1
 	}
-	randomFill(c23.BytesAt(buf, uintptr(n)))
+	randomFill(c23.Writable(buf, uintptr(n)))
 	return 0
 }

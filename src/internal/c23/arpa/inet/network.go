@@ -60,7 +60,7 @@ func InetMakeaddr(sret *c23.Void, net, host uint32) {
 	default:
 		a = net | host
 	}
-	copy(c23.BytesAt(sret, 4), []byte{byte(a >> 24), byte(a >> 16), byte(a >> 8), byte(a)})
+	copy(c23.Writable(sret, 4), []byte{byte(a >> 24), byte(a >> 16), byte(a >> 8), byte(a)})
 }
 
 // InetNetwork is inet_network, as glibc's: up to four parts of a network

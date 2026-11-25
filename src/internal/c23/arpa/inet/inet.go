@@ -58,7 +58,7 @@ func InetAton(cp, inp *c23.Void) int32 {
 		return 0
 	}
 	a := ip.As4()
-	copy(c23.BytesAt(inp, 4), a[:])
+	copy(c23.Writable(inp, 4), a[:])
 	return 1
 }
 
@@ -79,7 +79,7 @@ var ntoaBuf = c23.NewTLS(func() *c23.Void { return c23.Malloc(16) })
 func InetNtoa(a uint32) *c23.Void {
 	s := netip.AddrFrom4([4]byte{byte(a), byte(a >> 8), byte(a >> 16), byte(a >> 24)}).String()
 	p := ntoaBuf.Get()
-	copy(c23.BytesAt(p, uintptr(len(s)+1)), s+"\x00")
+	copy(c23.Writable(p, uintptr(len(s)+1)), s+"\x00")
 	return p
 }
 
@@ -93,7 +93,7 @@ func InetPton(family int32, src, dst *c23.Void) int32 {
 			return 0
 		}
 		a := ip.As4()
-		copy(c23.BytesAt(dst, 4), a[:])
+		copy(c23.Writable(dst, 4), a[:])
 		return 1
 	case AF_INET6:
 		ip, err := netip.ParseAddr(s)
@@ -101,7 +101,7 @@ func InetPton(family int32, src, dst *c23.Void) int32 {
 			return 0
 		}
 		a := ip.As16()
-		copy(c23.BytesAt(dst, 16), a[:])
+		copy(c23.Writable(dst, 16), a[:])
 		return 1
 	}
 	c23.SetErrno(c23.EAFNOSUPPORT)
@@ -136,6 +136,6 @@ func putString(p *c23.Void, n uint32, s string) bool {
 	if uint32(len(s)) >= n {
 		return false
 	}
-	copy(c23.BytesAt(p, uintptr(len(s)+1)), s+"\x00")
+	copy(c23.Writable(p, uintptr(len(s)+1)), s+"\x00")
 	return true
 }

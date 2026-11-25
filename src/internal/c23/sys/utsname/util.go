@@ -51,7 +51,7 @@ func Uname(name *c23.Void) int32 {
 	if runtime.GOOS == "linux" && fields[5] == "" {
 		fields[5] = "(none)"
 	}
-	b := c23.BytesAt(name, 6*65)
+	b := c23.Writable(name, 6*65)
 	clear(b)
 	for i, s := range fields {
 		copy(b[i*65:i*65+64], s)

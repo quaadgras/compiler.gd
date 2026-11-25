@@ -817,6 +817,14 @@ func c23PtrStore(p unsafe.Pointer, v unsafe.Pointer) unsafe.Pointer {
 		throw("checkptr: pointer stored over a word that holds none, or part of something else")
 	}
 	if s.spanclass.noscan() {
+		// What is no address of the heap or of the stack is an
+		// integer, which the object is for (sync/atomic's own tests
+		// store such in a uint64): a pointer there is one that the
+		// collector would not see.
+		x := uintptr(v) &^ cPtrBits
+		if gp := getg(); spanOfHeap(x) == nil && (x < gp.stack.lo || x >= gp.stack.hi) {
+			return v
+		}
 		throw("checkptr: pointer stored in an object that has no pointer")
 	}
 	base := s.base() + s.objIndex(a)*s.elemsize

@@ -84,7 +84,7 @@ func result(rec []byte) *c23.Void {
 	if c23.Addr(entry) == 0 {
 		entry = c23.Malloc(recSize)
 	}
-	copy(c23.BytesAt(entry, recSize), rec)
+	copy(c23.Writable(entry, recSize), rec)
 	return entry
 }
 

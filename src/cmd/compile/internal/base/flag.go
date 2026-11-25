@@ -383,8 +383,8 @@ func (gd *Invocation) ParseFlags(args []string) {
 		gd.Debug.Checkptr = 0
 		unchecked := false
 		switch gd.Ctxt.Pkgpath {
-		case "internal/c23", "reflect", "internal/reflectlite":
-			unchecked = true // see ir.UncheckedPkg
+		case "reflect", "internal/reflectlite":
+			unchecked = true // see ir.NoCheckPtrPkg
 		}
 		if gd.Ctxt.Arch.Family != sys.Wasm && !unchecked {
 			gd.Debug.Checkptr = 1

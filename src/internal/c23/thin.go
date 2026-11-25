@@ -18,7 +18,7 @@ import (
 
 // Lit is the array A whose bytes are s: a string literal's object.
 func Lit[A any](s string) (a A) {
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(&a)), unsafe.Sizeof(a)), s)
+	copy(slice(unsafe.Pointer(&a), unsafe.Sizeof(a)), s)
 	return a
 }
 
@@ -30,7 +30,10 @@ func Lit[A any](s string) (a A) {
 // as it looks at a word that it has no type for.
 
 // AllocOf is malloc(n) converted to *T: its words begin as those of an
-// array of T's, pointers where T has them.
+// array of T's, pointers where T has them. (The conversion is of what
+// was allocated for it, and needs no check.)
+//
+//go:nocheckptr
 func AllocOf[T any](n uint64) *T {
 	if n != uint64(uintptr(n)) {
 		return nil
@@ -86,7 +89,7 @@ func sizeOf(p unsafe.Pointer) uintptr {
 func ReallocOf1[T any](p *T, n uint64) *T {
 	q := AllocOf[T](n)
 	if p != nil && q != nil {
-		memmove(unsafe.Pointer(q), unsafe.Pointer(p), min(uintptr(n), sizeOf(unsafe.Pointer(p))))
+		memmove(unsafe.Pointer(q), unsafe.Pointer(p), min(uintptr(n), reallocSize(unsafe.Pointer(p))))
 	}
 	return q
 }
@@ -95,9 +98,25 @@ func ReallocOf1[T any](p *T, n uint64) *T {
 func ReallocRaw(p *Void, n uint64) *Void {
 	q := AllocRaw(n)
 	if p != nil && q != nil {
-		memmove(unsafe.Pointer(q), unsafe.Pointer(p), min(uintptr(n), sizeOf(unsafe.Pointer(p))))
+		memmove(unsafe.Pointer(q), unsafe.Pointer(p), min(uintptr(n), reallocSize(unsafe.Pointer(p))))
 	}
 	return q
+}
+
+// reallocSize is the number of bytes that realloc copies from p: what
+// its object has from p on. C says that p is what malloc returned; a
+// pointer into an object of the heap is taken for what is left of the
+// object (aligned_alloc's is one), and a pointer to anything else, the
+// stack or the program's data, is not something to copy from.
+func reallocSize(p unsafe.Pointer) uintptr {
+	if base, _ := object(p); base == nil {
+		RaiseFault("realloc of what malloc did not return", uintptr(p))
+	}
+	_, after, ok := extent(p)
+	if !ok {
+		RaiseFault("realloc of what malloc did not return", uintptr(p))
+	}
+	return after
 }
 
 // Free1 is free: the collector frees.
@@ -121,37 +140,47 @@ func NewArrayAlignedT(t *Type, n, align uintptr) *Void { return MallocAligned(al
 
 // The library's functions that 1:1 code calls most, on Go's pointers.
 
-// Strlen1 is strlen.
-func Strlen1(s *Void) uint64 {
-	n := uint64(0)
-	for *(*byte)(unsafe.Add(unsafe.Pointer(s), n)) != 0 {
-		n++
-	}
-	return n
-}
+// Strlen1 is strlen: of a string that ends in what s points into.
+func Strlen1(s *Void) uint64 { return uint64(len(StringAt(s))) }
 
-// Strcmp1 is strcmp.
+// Strcmp1 is strcmp. Each string is read as far as its object goes, and
+// no further: strings that do not differ and do not end there are a
+// fault.
 func Strcmp1(a, b *Void) int32 {
-	for i := 0; ; i++ {
-		x, y := *(*byte)(unsafe.Add(unsafe.Pointer(a), i)), *(*byte)(unsafe.Add(unsafe.Pointer(b), i))
-		if x != y {
-			return int32(x) - int32(y)
+	x, y := BytesFrom(a), BytesFrom(b)
+	for i := 0; i < len(x) && i < len(y); i++ {
+		if x[i] != y[i] {
+			return int32(x[i]) - int32(y[i])
 		}
-		if x == 0 {
+		if x[i] == 0 {
 			return 0
 		}
 	}
+	RaiseFault("strcmp of strings with no end in their objects", Addr(a))
+	return 0
 }
 
-// Memcpy1 is memcpy and memmove.
+// Memcpy1 is memcpy and memmove: the n bytes are in the object that
+// each pointer points into.
 func Memcpy1(to, from *Void, n uint64) *Void {
-	memmove(unsafe.Pointer(to), unsafe.Pointer(from), uintptr(n))
+	if n != 0 {
+		if n != uint64(uintptr(n)) {
+			outside(to, ^uintptr(0), 0, true)
+		}
+		Check(from, uintptr(n))
+		memmove(Check(to, uintptr(n)), unsafe.Pointer(from), uintptr(n))
+	}
 	return to
 }
 
-// Memset1 is memset.
+// Memset1 is memset: the n bytes are in the object that to points into.
 func Memset1(to *Void, c int32, n uint64) *Void {
-	memset(unsafe.Pointer(to), byte(c), uintptr(n))
+	if n != 0 {
+		if n != uint64(uintptr(n)) {
+			outside(to, ^uintptr(0), 0, true)
+		}
+		memset(Check(to, uintptr(n)), byte(c), uintptr(n))
+	}
 	return to
 }
 

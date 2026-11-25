@@ -183,7 +183,7 @@ func storeDatum(out *c23.Void, b []byte, ok bool) {
 		return
 	}
 	p := c23.Malloc(uint64(max(len(b), 1)))
-	copy(c23.BytesAt(p, uintptr(len(b))), b)
+	copy(c23.Writable(p, uintptr(len(b))), b)
 	c23.StorePtr(out, p)
 	c23.StoreLong(c23.Add(out, ws), int64(len(b)))
 }

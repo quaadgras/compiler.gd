@@ -35,6 +35,6 @@ func putString(p *c23.Void, n uint32, s string) bool {
 	if uint32(len(s)) >= n {
 		return false
 	}
-	copy(c23.BytesAt(p, uintptr(len(s)+1)), s+"\x00")
+	copy(c23.Writable(p, uintptr(len(s)+1)), s+"\x00")
 	return true
 }

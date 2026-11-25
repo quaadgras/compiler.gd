@@ -397,6 +397,7 @@ var onces sync.Map
 
 // PthreadOnce is pthread_once.
 func PthreadOnce(once, f *c23.Void) int32 {
+	c23.Check(once, 4)
 	if c23.AtomicLoad[int32](once) != 0 {
 		return 0
 	}

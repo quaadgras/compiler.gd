@@ -103,7 +103,7 @@ func Realpath(path, resolved *c23.Void) *c23.Void {
 	if c23.Addr(resolved) == 0 {
 		return c23.CString(abs)
 	}
-	copy(c23.BytesAt(resolved, uintptr(len(abs)+1)), abs+"\x00")
+	copy(c23.Writable(resolved, uintptr(len(abs)+1)), abs+"\x00")
 	return resolved
 }
 

@@ -75,7 +75,17 @@ func cUnionNew(typ *_type, back unsafe.Pointer) unsafe.Pointer {
 // cUnionValue returns the header of the union value that p points to
 // the beginning of, or nil if it points to none.
 func cUnionValue(p unsafe.Pointer) *cUnionHdr {
-	s := cSpanOf(uintptr(p))
+	return cUnionValueAt(uintptr(p))
+}
+
+// cUnionValueAt is cUnionValue for an address that may be of nothing,
+// as the one a header's size before a pointer is: it is an integer
+// until it is known to be a union value's. As a pointer it would be
+// one that the collector marks an object for, when it looks at the
+// frame, that is not there: in what is after the last object of the
+// span before, a mark that no object has.
+func cUnionValueAt(a uintptr) *cUnionHdr {
+	s := cSpanOf(a)
 	if s == nil {
 		return nil
 	}
@@ -83,15 +93,15 @@ func cUnionValue(p unsafe.Pointer) *cUnionHdr {
 	if b == nil || ids == nil {
 		return nil
 	}
-	i := s.objIndex(uintptr(p))
-	if uintptr(p) != s.base()+i*s.elemsize || s.isFree(i) {
+	i := s.objIndex(a)
+	if a != s.base()+i*s.elemsize || s.isFree(i) {
 		return nil
 	}
-	w := (uintptr(p) - s.base()) / goarch.PtrSize
+	w := (a - s.base()) / goarch.PtrSize
 	if cClass(b, w) != cTyped || atomic.Load(ids.word(w)) != cUnionValueID {
 		return nil
 	}
-	return (*cUnionHdr)(p)
+	return (*cUnionHdr)(unsafe.Pointer(a))
 }
 
 // c23UnionBox returns the value of type typ of the union whose pointer
@@ -398,7 +408,7 @@ func cUnionValueOf(a uintptr) *cUnionHdr {
 	if a < cUnionHeader {
 		return nil
 	}
-	return cUnionValue(unsafe.Pointer(a - cUnionHeader))
+	return cUnionValueAt(a - cUnionHeader)
 }
 
 // A cUnionGlobal is a variable of the program's data that has a union

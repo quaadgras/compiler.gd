@@ -497,6 +497,13 @@ func runKeyDestructors() {
 
 // Atomics. 4- and 8-byte scalars use sync/atomic; others (and pointers,
 // whose words carry capabilities) a lock chosen by the address.
+//
+// These are what translated C does to an _Atomic lvalue of its own, as
+// c23.Peek and c23.Poke are its loads and stores: the address is one
+// that the compiler checked where C made the pointer, and nothing is
+// checked here. A function of the library that is given a pointer to
+// an atomic object (atomic_flag_test_and_set, pthread_once) checks it
+// first (c23.Check).
 
 type atomicT interface {
 	~int8 | ~uint8 | ~int16 | ~uint16 | ~int32 | ~uint32 | ~int64 | ~uint64 | ~float32 | ~float64
@@ -506,10 +513,11 @@ var stripes [64]sync.Mutex
 
 func stripe(p *Void) *sync.Mutex { return &stripes[(Addr(p)>>3)%64] }
 
+//go:nocheckptr
 func AtomicLoad[T atomicT](p *Void) T {
 	var z T
 	n := unsafe.Sizeof(z)
-	a := Check(p, n)
+	a := unsafe.Pointer(p)
 	switch n {
 	case 4:
 		b := atomic.LoadUint32((*uint32)(a))
@@ -525,60 +533,66 @@ func AtomicLoad[T atomicT](p *Void) T {
 	return v
 }
 
+//go:nocheckptr
 func AtomicStore[T atomicT](p *Void, v T) {
 	n := unsafe.Sizeof(v)
-	a := p
+	a := unsafe.Pointer(p)
 	switch n {
 	case 4:
-		atomic.StoreUint32((*uint32)(unsafe.Pointer(a)), *(*uint32)(unsafe.Pointer(&v)))
+		atomic.StoreUint32((*uint32)(a), *(*uint32)(unsafe.Pointer(&v)))
 		return
 	case 8:
-		atomic.StoreUint64((*uint64)(unsafe.Pointer(a)), *(*uint64)(unsafe.Pointer(&v)))
+		atomic.StoreUint64((*uint64)(a), *(*uint64)(unsafe.Pointer(&v)))
 		return
 	}
 	m := stripe(p)
 	m.Lock()
-	*(*T)(unsafe.Pointer(a)) = v
+	*(*T)(a) = v
 	m.Unlock()
 }
 
 // AtomicCAS replaces old at p with new if it is there (by bits, as C
 // compares).
+//
+//go:nocheckptr
 func AtomicCAS[T atomicT](p *Void, old, new T) bool {
 	n := unsafe.Sizeof(old)
-	a := p
+	a := unsafe.Pointer(p)
 	switch n {
 	case 4:
-		return atomic.CompareAndSwapUint32((*uint32)(unsafe.Pointer(a)), *(*uint32)(unsafe.Pointer(&old)), *(*uint32)(unsafe.Pointer(&new)))
+		return atomic.CompareAndSwapUint32((*uint32)(a), *(*uint32)(unsafe.Pointer(&old)), *(*uint32)(unsafe.Pointer(&new)))
 	case 8:
-		return atomic.CompareAndSwapUint64((*uint64)(unsafe.Pointer(a)), *(*uint64)(unsafe.Pointer(&old)), *(*uint64)(unsafe.Pointer(&new)))
+		return atomic.CompareAndSwapUint64((*uint64)(a), *(*uint64)(unsafe.Pointer(&old)), *(*uint64)(unsafe.Pointer(&new)))
 	}
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
-	if memEq(unsafe.Pointer(a), unsafe.Pointer(&old), n) {
-		*(*T)(unsafe.Pointer(a)) = new
+	if *(*T)(a) == old {
+		*(*T)(a) = new
 		return true
 	}
 	return false
 }
 
+// memEq reports whether the n bytes at a and at b are the same.
 func memEq(a, b unsafe.Pointer, n uintptr) bool {
-	return string(unsafe.Slice((*byte)(a), n)) == string(unsafe.Slice((*byte)(b), n))
+	return string(slice(a, n)) == string(slice(b, n))
 }
 
 // AtomicCmpXchg is atomic_compare_exchange: if p holds what expected
 // points to, desired replaces it; if not, what p holds is stored where
 // expected points.
+//
+//go:nocheckptr
 func AtomicCmpXchg[T atomicT](p, expected *Void, desired T) int32 {
 	var old T
 	switch any(old).(type) {
 	case float32:
-		old = any(LoadF32(expected)).(T)
+		old = any(PeekF32(expected)).(T)
 	case float64:
-		old = any(LoadF64(expected)).(T)
+		old = any(PeekF64(expected)).(T)
 	default:
-		old = *(*T)(Check(expected, unsafe.Sizeof(old)))
+		old = *(*T)(unsafe.Pointer(expected))
 	}
 	for {
 		if AtomicCAS(p, old, desired) {
@@ -617,8 +631,8 @@ func AtomicFetch[T atomicT](p *Void, op byte, v T) T {
 func bitOp[T atomicT](x T, op byte, y T) T {
 	var a, b uint64
 	n := unsafe.Sizeof(x)
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(&a)), n), unsafe.Slice((*byte)(unsafe.Pointer(&x)), n))
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(&b)), n), unsafe.Slice((*byte)(unsafe.Pointer(&y)), n))
+	copy(slice(unsafe.Pointer(&a), n), slice(unsafe.Pointer(&x), n))
+	copy(slice(unsafe.Pointer(&b), n), slice(unsafe.Pointer(&y), n))
 	switch op {
 	case '&':
 		a &= b
@@ -628,7 +642,7 @@ func bitOp[T atomicT](x T, op byte, y T) T {
 		a ^= b
 	}
 	var r T
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(&r)), n), unsafe.Slice((*byte)(unsafe.Pointer(&a)), n))
+	copy(slice(unsafe.Pointer(&r), n), slice(unsafe.Pointer(&a), n))
 	return r
 }
 
@@ -638,24 +652,24 @@ func AtomicLoadP(p *Void) *Void {
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
-	return LoadPtr(p)
+	return PeekPtr(p)
 }
 
 func AtomicStoreP(p, v *Void) {
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
-	StorePtr(p, v)
+	PokePtr(p, v)
 }
 
 func AtomicCASP(p, old, new *Void) bool {
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
-	if Addr(LoadPtr(p)) != Addr(old) {
+	if Addr(PeekPtr(p)) != Addr(old) {
 		return false
 	}
-	StorePtr(p, new)
+	PokePtr(p, new)
 	return true
 }
 
@@ -663,12 +677,12 @@ func AtomicCmpXchgP(p, expected, desired *Void) int32 {
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
-	cur := LoadPtr(p)
-	if Addr(cur) == Addr(LoadPtr(expected)) {
-		StorePtr(p, desired)
+	cur := PeekPtr(p)
+	if Addr(cur) == Addr(PeekPtr(expected)) {
+		PokePtr(p, desired)
 		return 1
 	}
-	StorePtr(expected, cur)
+	PokePtr(expected, cur)
 	return 0
 }
 
@@ -677,11 +691,11 @@ func AtomicFetchP(p *Void, op byte, n int, v *Void) *Void {
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
-	old := LoadPtr(p)
+	old := PeekPtr(p)
 	if op == '=' {
-		StorePtr(p, v)
+		PokePtr(p, v)
 	} else {
-		StorePtr(p, Add(old, n))
+		PokePtr(p, Add(old, n))
 	}
 	return old
 }
@@ -700,7 +714,7 @@ func aggLock(p *Void) *sync.Mutex { return &aggLocks[(Addr(p)>>4)%uintptr(len(ag
 func AtomicLoadAgg(dst, src *Void, n uintptr) {
 	m := aggLock(src)
 	m.Lock()
-	Memmove(dst, src, n)
+	Move(dst, src, n)
 	m.Unlock()
 }
 
@@ -708,7 +722,7 @@ func AtomicLoadAgg(dst, src *Void, n uintptr) {
 func AtomicStoreAgg(dst, src *Void, n uintptr) {
 	m := aggLock(dst)
 	m.Lock()
-	Memmove(dst, src, n)
+	Move(dst, src, n)
 	m.Unlock()
 }
 
@@ -717,8 +731,8 @@ func AtomicStoreAgg(dst, src *Void, n uintptr) {
 func AtomicSwapAgg(p, old, v *Void, n uintptr) {
 	m := aggLock(p)
 	m.Lock()
-	Memmove(old, p, n)
-	Memmove(p, v, n)
+	Move(old, p, n)
+	Move(p, v, n)
 	m.Unlock()
 }
 
@@ -729,10 +743,10 @@ func AtomicCmpXchgAgg(p, exp, des *Void, n uintptr) bool {
 	m := aggLock(p)
 	m.Lock()
 	defer m.Unlock()
-	if Memcmp(p, exp, uint64(n)) == 0 {
-		Memmove(p, des, n)
+	if memEq(unsafe.Pointer(p), unsafe.Pointer(exp), n) {
+		Move(p, des, n)
 		return true
 	}
-	Memmove(exp, p, n)
+	Move(exp, p, n)
 	return false
 }

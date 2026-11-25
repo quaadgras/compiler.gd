@@ -922,7 +922,7 @@ func Recvfrom(fd int32, buf *c23.Void, n uint64, flags int32, addr, alen *c23.Vo
 	if s == nil {
 		return -1
 	}
-	k, from, rights, err := s.recv(c23.BytesAt(buf, uintptr(n)), nonblock || flags&MSG_DONTWAIT != 0, flags&MSG_PEEK != 0, flags&MSG_WAITALL != 0)
+	k, from, rights, err := s.recv(c23.Writable(buf, uintptr(n)), nonblock || flags&MSG_DONTWAIT != 0, flags&MSG_PEEK != 0, flags&MSG_WAITALL != 0)
 	drop(rights)
 	if err != nil && err != io.EOF {
 		return int64(fail(err))
@@ -947,7 +947,10 @@ var (
 	iovecSize = 2 * ws
 )
 
-func iovecs(msg *c23.Void) [][]byte {
+// iovecs returns the memory of msg's iovecs, each as far as it says and
+// in the object that its base points into: to write to, for a message
+// that is received.
+func iovecs(msg *c23.Void, write bool) [][]byte {
 	iov := c23.LoadPtr(c23.Add(msg, mIov))
 	n := int(c23.LoadLong(c23.Add(msg, mIovLen)))
 	var bs [][]byte
@@ -955,7 +958,9 @@ func iovecs(msg *c23.Void) [][]byte {
 		e := c23.Add(iov, i*iovecSize)
 		base := c23.LoadPtr(e)
 		l := uint64(c23.LoadLong(c23.Add(e, ws)))
-		if l > 0 {
+		if l > 0 && write {
+			bs = append(bs, c23.Writable(base, uintptr(l)))
+		} else if l > 0 {
 			bs = append(bs, c23.BytesAt(base, uintptr(l)))
 		}
 	}
@@ -969,7 +974,7 @@ func Sendmsg(fd int32, msg *c23.Void, flags int32) int64 {
 		return -1
 	}
 	var b []byte
-	for _, v := range iovecs(msg) {
+	for _, v := range iovecs(msg, false) {
 		b = append(b, v...)
 	}
 	var to net.Addr
@@ -1041,7 +1046,7 @@ func Recvmsg(fd int32, msg *c23.Void, flags int32) int64 {
 	if s == nil {
 		return -1
 	}
-	vs := iovecs(msg)
+	vs := iovecs(msg, true)
 	total := 0
 	for _, v := range vs {
 		total += len(v)
@@ -1060,7 +1065,7 @@ func Recvmsg(fd int32, msg *c23.Void, flags int32) int64 {
 		if from != nil {
 			l := Encode(from, s.family)
 			cap := int(c23.Load32(c23.Add(msg, mNameLen)))
-			copy(c23.BytesAt(name, uintptr(min(cap, len(l)))), l)
+			copy(c23.Writable(name, uintptr(min(cap, len(l)))), l)
 			c23.Store32(c23.Add(msg, mNameLen), uint32(len(l)))
 		} else {
 			c23.Store32(c23.Add(msg, mNameLen), 0)
@@ -1499,7 +1504,7 @@ func EncodeTo(a net.Addr, family int32, addr, alen *c23.Void) {
 	}
 	n := int(c23.Load32(alen))
 	if Addr(addr) != 0 && n > 0 {
-		copy(c23.BytesAt(addr, uintptr(min(n, len(b)))), b)
+		copy(c23.Writable(addr, uintptr(min(n, len(b)))), b)
 	}
 	c23.Store32(alen, uint32(len(b)))
 }

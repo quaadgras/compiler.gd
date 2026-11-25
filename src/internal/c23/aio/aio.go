@@ -100,7 +100,11 @@ func submit(cb *c23.Void, kind int32, syncOp int32, l *list) int32 {
 	if kind == LIO_READ || kind == LIO_WRITE {
 		o.off = int64(c23.Load64(c23.Add(cb, offOff)))
 		n := uint64(c23.LoadLong(c23.Add(cb, offBuf+w)))
-		o.buf = c23.BytesAt(c23.LoadPtr(c23.Add(cb, offBuf)), uintptr(n))
+		if buf := c23.LoadPtr(c23.Add(cb, offBuf)); kind == LIO_READ {
+			o.buf = c23.Writable(buf, uintptr(n))
+		} else {
+			o.buf = c23.BytesAt(buf, uintptr(n))
+		}
 	}
 	mu.Lock()
 	ops[c23.Addr(cb)] = o

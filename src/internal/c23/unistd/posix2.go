@@ -73,7 +73,7 @@ func Readlink(path, buf *c23.Void, n uint64) int64 {
 		return -1
 	}
 	k := min(uint64(len(s)), n)
-	copy(c23.BytesAt(buf, uintptr(k)), s)
+	copy(c23.Writable(buf, uintptr(k)), s)
 	return int64(k)
 }
 
@@ -95,7 +95,7 @@ func Pread(fd int32, buf *c23.Void, n uint64, off int64) int64 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
 	}
-	k, err := f.ReadAt(c23.BytesAt(buf, uintptr(n)), off)
+	k, err := f.ReadAt(c23.Writable(buf, uintptr(n)), off)
 	if err != nil && err != io.EOF {
 		c23.SetErrnoOf(err)
 		return -1

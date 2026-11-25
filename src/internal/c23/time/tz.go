@@ -188,7 +188,7 @@ func AsctimeR(p, buf *c23.Void) *c23.Void {
 		c23.SetErrno(c23.EOVERFLOW)
 		return (*c23.Void)(nil)
 	}
-	copy(c23.BytesAt(buf, uintptr(len(b))), b)
+	copy(c23.Writable(buf, uintptr(len(b))), b)
 	return buf
 }
 

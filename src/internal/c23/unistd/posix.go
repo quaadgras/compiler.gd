@@ -21,7 +21,7 @@ func Read(fd int32, buf *c23.Void, n uint64) int64 {
 		c23.SetErrno(c23.EBADF)
 		return -1
 	}
-	k, err := f.Read(c23.BytesAt(buf, uintptr(n)))
+	k, err := f.Read(c23.Writable(buf, uintptr(n)))
 	if err != nil && err != io.EOF {
 		c23.SetErrnoOf(err)
 		return -1
@@ -158,7 +158,7 @@ func Getcwd(buf *c23.Void, size uint64) *c23.Void {
 		c23.SetErrno(c23.ERANGE)
 		return (*c23.Void)(nil)
 	}
-	copy(c23.BytesAt(buf, uintptr(n)), wd+"\x00")
+	copy(c23.Writable(buf, uintptr(n)), wd+"\x00")
 	return buf
 }
 
@@ -247,10 +247,10 @@ func Gethostname(name *c23.Void, n uint64) int32 {
 	}
 	b := append([]byte(h), 0)
 	if uint64(len(b)) > n {
-		copy(c23.BytesAt(name, uintptr(n)), b)
+		copy(c23.Writable(name, uintptr(n)), b)
 		c23.SetErrno(c23.ENAMETOOLONG)
 		return -1
 	}
-	copy(c23.BytesAt(name, uintptr(len(b))), b)
+	copy(c23.Writable(name, uintptr(len(b))), b)
 	return 0
 }

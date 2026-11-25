@@ -48,13 +48,13 @@ func StrerrorR(e int32, buf *c23.Void, n uint64) int32 {
 	}
 	if uint64(len(msg)) >= n {
 		if n > 0 {
-			b := c23.BytesAt(buf, uintptr(n))
+			b := c23.Writable(buf, uintptr(n))
 			copy(b, msg[:n-1])
 			b[n-1] = 0
 		}
 		return c23.ERANGE
 	}
-	copy(c23.BytesAt(buf, uintptr(len(msg)+1)), msg+"\x00")
+	copy(c23.Writable(buf, uintptr(len(msg)+1)), msg+"\x00")
 	return r
 }
 
@@ -69,7 +69,7 @@ func GnuStrerrorR(e int32, buf *c23.Void, n uint64) *c23.Void {
 	if n == 0 {
 		return c23.Strerror(e)
 	}
-	b := c23.BytesAt(buf, uintptr(n))
+	b := c23.Writable(buf, uintptr(n))
 	k := copy(b[:n-1], msg)
 	b[k] = 0
 	return buf

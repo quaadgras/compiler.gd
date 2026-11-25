@@ -109,13 +109,18 @@ func c0_name(c c23.UInt) *c23.Char {
   over-aligned) is its bytes; its words, each a possible pointer, if a
   member is a pointer, so that the collector sees what C stores.
 - **What Go has no variable for** is reached through its address, with
-  internal/c23's loads and stores: bit-fields, `_Atomic`, `long double`
-  and `_Complex` in memory, `va_arg`. A variable length array and a
-  variable aligned more than Go aligns (`alignas(64)`) are allocated,
-  and their Go variables are the pointers to them.
-- **internal/c23 checks nothing.** `c23.Add`, `c23.Load32`,
-  `c23.Memmove` are plain operations on a `*c23.Void`. The package is
-  compiled without the compiler's checks, as the runtime is.
+  internal/c23's `Peek` and `Poke` (and `Move` for a struct that is
+  assigned): bit-fields, `_Atomic`, `long double` and `_Complex` in
+  memory, `va_arg`. They check nothing, as a load or a store through a
+  typed pointer checks nothing: the address is an lvalue's, made of a
+  pointer that was checked where C made it. A variable length array
+  and a variable aligned more than Go aligns (`alignas(64)`) are
+  allocated, and their Go variables are the pointers to them.
+- **internal/c23 is checked as the C that calls it.** The library is
+  given pointers that are whatever the program made of them. It is
+  compiled with the compiler's checks, as a package of C's, and asks
+  the runtime how far an object goes where it hands a pointer and a
+  length to code that has no check ("What the library checks", below).
 - **Speed.** On that benchmark (a sorted vector of structs, a tree, a
   hash map with string keys, byte strings), against `gcc -O2`: 0.85 to
   1.3 times with `-d=checkptr=0`. With the checks it is 1.3 to 2.3
@@ -209,6 +214,108 @@ Where C and Go's rules for pointers disagree:
   `*c23.Void` because of them; and a program with C in it runs as with
   `GODEBUG=invalidptr=0` (`runtime.c23AllowIntegers`), which also lets
   pointer arithmetic give a small integer.
+
+### What the library checks
+
+C's library is Go (`internal/c23` and a package for each header). A
+function of it is given pointers and lengths by the program, and until
+2026-11-26 believed them: `strcpy`, `memcpy`, `sprintf`, `read` and
+`qsort` wrote wherever they were told, in a package that was compiled
+without any check. Now no function of the library reads or writes
+outside what its pointers point into, as far as the runtime knows where
+that ends:
+
+- **The package is compiled as C is** (`ir.NoCheckPtrPkg`,
+  `CObjects`), and so is what is inlined of it. `c23.Add` is arithmetic
+  that stays in the object or at its end. `c23.Load8` to `Load64`,
+  `LoadPtr` and the stores are of bytes that are all in the object:
+  they move the pointer by the size and back (`c23.in`), since a
+  conversion alone lets a pointer of C's be the end of its object. A
+  loop of the library that steps a pointer is checked as a loop of C's
+  is, with the lookup before it. `LoadPtr` is a conversion to a
+  pointer to a pointer, so what the library loads as a pointer is a
+  word that is claimed for one ("The memory that malloc gives").
+- **A pointer and a length** that go to `memmove`, to `copy` or to the
+  system are checked once, by `c23.Check`, which asks
+  `runtime.c23Extent` for the bytes before and after the pointer in
+  what it points into. `c23.BytesAt(p, n)` is the n bytes to read,
+  `c23.BytesFrom(p)` and `c23.StringAt(p)` the bytes and the string up
+  to the object's end, `c23.Array(p, n, size)` an array that a
+  function then steps in without more checks (`qsort`, `bsearch`).
+  `memcpy`, `memmove` and `memset` check before the runtime copies.
+  The string functions work on those bytes: a string with no end in
+  its object, or one that does not fit where it is copied to, is a
+  fault before anything is written.
+- **`c23Extent`** knows an object of C's of the heap as far as it was
+  asked for; an object of Go's of the heap by its slot; the stack from
+  the caller's frame to the first saved frame pointer above the
+  pointer, so that what is written in a variable of a frame does not
+  reach where a function returns to; and a section of the program's
+  data, or what it has that is read-only, whole. The bounds of one
+  variable of a frame or of the data are not known yet: when they are,
+  this is the one function to tell. `memset` of 16 bytes in a global
+  of 8, and `memchr` past a string literal, are not stopped
+  (`TestUnsafe`'s status.txt).
+- **Writes that the compiler does not see**: what `copy` writes in C's
+  memory, what the system reads there from a file or a socket, what a
+  Go package fills in. Every one is through `c23.Writable(p, n)`,
+  which checks the bounds and tells the runtime
+  (`runtime.c23BytesStored`) before the bytes are written: the
+  collector sees the pointers that are written over, as `memset`'s.
+  What is still to be done there is the claims of the words, which may
+  be for pointers that the bytes are not ("A store of a byte over a
+  pointer"), and a read that blocks before it writes, when the
+  collector starts to mark meanwhile.
+- **What the library keeps for itself** and gives C a pointer to is not
+  memory that C can make or change. A `FILE`, a `DIR`, the frame of a
+  `jmp_buf`, the expression of a `regex_t` and an `iconv_t` are behind
+  a `c23.Handle`; a function is a `c23.Func` and a `va_list` a
+  `c23.VaList`. Each is an interface or a slice and nothing else: the
+  checks refuse a pointer of C's converted over part of one (also to
+  `char *`: a `void *` says nothing of what it points to), and
+  `c23Extent` refuses the library an object of Go's that holds one.
+  And each is an object of the heap that was allocated as that type,
+  which the runtime knows from the object (`c23IsObject`) and memory
+  of C's never is: bytes that are filled in to look like a `FILE`, a
+  copy of a function's descriptor, a `va_list` or a `jmp_buf` that was
+  made up are faults. A call through a pointer to a function, by the
+  program or by the library (`qsort`, `signal`, `pthread_create`,
+  `atexit`), is of a `c23.Func` and of its type.
+- **Variable arguments** are Go values of their own types. `va_arg`
+  gives one as its type, or converted as C converts integers, or not
+  at all: an integer read as a pointer is the pointer that the integer
+  converts to (`c23.IntPtr`), which faults if it is the address of
+  something; reading past the last argument is a fault. `printf` and
+  `scanf` take each argument for what it is: `%s` and `%n` of an
+  integer have no pointer to use.
+- **The address space.** The library makes no system call with an
+  address of C's. `mmap` gives memory that C allocates, never where
+  the program says (`MAP_FIXED` is `EINVAL`); the mappings are in a
+  table, and `munmap`, `mprotect` and `msync` are errors for anything
+  that is not in one, as `madvise` and `mlock` are for memory that the
+  program does not have. `shmat` attaches an object of C's and takes
+  no address; `brk`, `mremap`, `ptrace`, `process_vm_readv` and a raw
+  `syscall` are not there. `ioctl` knows `FIONREAD`, `TIOCGWINSZ`,
+  `FIONBIO`, `FIOCLEX` and `FIONCLEX`, each with the size of what it
+  stores, and `fcntl`'s locks are read and written as a `struct
+  flock`; a stack that `pthread_attr_setstack` or `sigaltstack` is
+  given is kept and not used. What the system fills in for the library
+  (`stat`, `termios`, `getrusage`) is a variable of Go's first, and is
+  stored in C's memory by the library.
+- **`free` and `realloc`.** `free` does nothing: the collector frees.
+  `realloc` copies what the object has from its pointer on, if that is
+  an object of the heap, and is a fault for anything else.
+
+What this costs, on amd64, in instructions against the library that
+checked nothing: the benchmark above is the same for its vector and
+its tree, 1.06 times for the hash map and 1.23 for the byte strings
+(`strlen` and `memcpy` of short words). Of a loop of each alone, with
+operands of some tens of bytes: `strcpy`, `strcat`, `strlen`, `strcmp`
+and `strchr` together 2.7 times, `memcpy`, `memset` and `memcmp` 1.7,
+a call through a pointer to a function 1.3, a variadic function that
+reads four arguments 1.9 (its `va_list` and its arguments are
+allocated), `fputc` and `fgetc` 1.4, `snprintf` 1.1; `qsort`,
+`malloc`, bit-fields and `_Atomic` are the same.
 
 Not there: wasm. The translation does not build for `GOARCH=wasm` yet
 (the library's 1:1 entry points take 64-bit sizes, and `GOWASM=gc`'s

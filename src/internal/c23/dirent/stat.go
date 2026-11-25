@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"unsafe"
 )
 
 const DT_UNKNOWN = 0
@@ -43,11 +42,14 @@ type Dir struct {
 // dirOf looks Dir's type up when called, not in a package variable:
 // made at init, it would link what Dir's fields reach (fs.DirEntry's
 // FileInfo, its time.Time, time's formatting) into every program.
+//
+// A DIR * is the pointer to a c23.Handle of the Dir: what C made to
+// look like one is not a DIR.
 func dirOf(p *c23.Void) *Dir {
-	if p == nil {
+	d, ok := c23.HandleOf[*Dir](p)
+	if !ok {
 		c23.RaiseFault("not a DIR", c23.Addr(p))
 	}
-	d := (*Dir)(unsafe.Pointer(p))
 	if d.closed {
 		c23.RaiseFault("use of a closed DIR", c23.Addr(p))
 	}
@@ -87,10 +89,7 @@ func Opendir(path *c23.Void) *c23.Void {
 	if err == nil && !fi.IsDir() {
 		err = c23.ErrnoErr(c23.ENOTDIR)
 	}
-	p := c23.New[Dir]()
-	d := (*Dir)(unsafe.Pointer(p))
-	d.path = name
-	d.fd = -1
+	d := &Dir{path: name, fd: -1}
 	if err == nil {
 		err = d.read()
 	}
@@ -99,7 +98,7 @@ func Opendir(path *c23.Void) *c23.Void {
 		return (*c23.Void)(nil)
 	}
 	d.ent = c23.Malloc(280)
-	return p
+	return c23.NewHandle(d)
 }
 
 // Readdir is readdir: the next entry, in an array the next call reuses,
@@ -142,7 +141,7 @@ func storeEnt(ent *c23.Void, e fs.DirEntry, off uint64, max int) int {
 	c23.Store64(c23.Add(ent, 8), off)
 	c23.Store16(c23.Add(ent, 16), uint16(reclen))
 	c23.Store8(c23.Add(ent, 18), dtype(e.Type()))
-	copy(c23.BytesAt(c23.Add(ent, 19), uintptr(len(name)+1)), name+"\x00")
+	copy(c23.Writable(c23.Add(ent, 19), uintptr(len(name)+1)), name+"\x00")
 	return reclen
 }
 

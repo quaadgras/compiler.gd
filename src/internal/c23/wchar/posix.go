@@ -252,7 +252,7 @@ func Wcsnrtombs(dst, src *c23.Void, nwc, n uint64, ps *c23.Void) uint64 {
 				c23.StorePtr(src, c23.Add(s, 4*i))
 				return k
 			}
-			copy(c23.BytesAt(c23.Add(dst, int(k)), uintptr(len(b))), b)
+			copy(c23.Writable(c23.Add(dst, int(k)), uintptr(len(b))), b)
 		}
 		k += uint64(len(b))
 	}

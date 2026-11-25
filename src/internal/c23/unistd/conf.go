@@ -128,7 +128,7 @@ func Confstr(name int32, buf *c23.Void, n uint64) uint64 {
 	}
 	if n > 0 && c23.Addr(buf) != 0 {
 		k := min(uint64(len(v)), n-1)
-		b := c23.BytesAt(buf, uintptr(k+1))
+		b := c23.Writable(buf, uintptr(k+1))
 		copy(b, v[:k])
 		b[k] = 0
 	}
@@ -169,7 +169,7 @@ func Getlogin() *c23.Void {
 	if len(name) > 255 {
 		name = name[:255]
 	}
-	copy(c23.BytesAt(loginBuf, uintptr(len(name)+1)), name+"\x00")
+	copy(c23.Writable(loginBuf, uintptr(len(name)+1)), name+"\x00")
 	return loginBuf
 }
 
@@ -182,7 +182,7 @@ func GetloginR(buf *c23.Void, n uint64) int32 {
 	if uint64(len(name)) >= n {
 		return c23.ERANGE
 	}
-	copy(c23.BytesAt(buf, uintptr(len(name)+1)), name+"\x00")
+	copy(c23.Writable(buf, uintptr(len(name)+1)), name+"\x00")
 	return 0
 }
 
@@ -223,7 +223,7 @@ func Ttyname(fd int32) *c23.Void {
 		c23.SetErrno(c23.ERANGE)
 		return (*c23.Void)(nil)
 	}
-	copy(c23.BytesAt(ttyBuf, uintptr(len(name)+1)), name+"\x00")
+	copy(c23.Writable(ttyBuf, uintptr(len(name)+1)), name+"\x00")
 	return ttyBuf
 }
 
@@ -236,7 +236,7 @@ func TtynameR(fd int32, buf *c23.Void, n uint64) int32 {
 	if uint64(len(name)) >= n {
 		return c23.ERANGE
 	}
-	copy(c23.BytesAt(buf, uintptr(len(name)+1)), name+"\x00")
+	copy(c23.Writable(buf, uintptr(len(name)+1)), name+"\x00")
 	return 0
 }
 

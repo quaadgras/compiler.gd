@@ -190,7 +190,7 @@ func Msgrcv(id int32, p *c23.Void, n uint64, msgtyp int64, flg int32) int64 {
 	data := m.data[:min(uint64(len(m.data)), n)]
 	c23.StoreLong(p, m.mtype)
 	if len(data) > 0 {
-		copy(c23.BytesAt(c23.Add(p, int(c23.LongSize)), uintptr(len(data))), data)
+		copy(c23.Writable(c23.Add(p, int(c23.LongSize)), uintptr(len(data))), data)
 	}
 	return int64(len(data))
 }

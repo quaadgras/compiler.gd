@@ -39,7 +39,7 @@ func Vfprintf(f, format, ap *c23.Void) int32 {
 
 func Vsprintf(s, format, ap *c23.Void) int32 {
 	b := c23.FormatC(c23.GoString(format), c23.VaOf(ap))
-	copy(c23.BytesAt(s, uintptr(len(b)+1)), append(b, 0))
+	copy(c23.Writable(s, uintptr(len(b)+1)), append(b, 0))
 	return int32(len(b))
 }
 
@@ -47,7 +47,7 @@ func Vsnprintf(s *c23.Void, n uint64, format, ap *c23.Void) int32 {
 	b := c23.FormatC(c23.GoString(format), c23.VaOf(ap))
 	if n > 0 {
 		k := min(uint64(len(b)), n-1)
-		copy(c23.BytesAt(s, uintptr(k+1)), append(b[:k:k], 0))
+		copy(c23.Writable(s, uintptr(k+1)), append(b[:k:k], 0))
 	}
 	return int32(len(b))
 }
@@ -76,7 +76,11 @@ func Fputc(c int32, f *c23.Void) int32 {
 }
 
 func Fwrite(p *c23.Void, size, n uint64, f *c23.Void) uint64 {
-	if size == 0 || !c23.FileOf(f).Write(c23.BytesAt(p, uintptr(size*n))) {
+	if size == 0 || n == 0 {
+		return 0
+	}
+	fl := c23.FileOf(f)
+	if !fl.Write(c23.BytesAt(c23.Array(p, n, size), uintptr(size*n))) {
 		return 0
 	}
 	return n
@@ -135,7 +139,7 @@ func Fread(p *c23.Void, size, n uint64, f *c23.Void) uint64 {
 	if !fl.Readable() {
 		return 0
 	}
-	b := c23.BytesAt(p, uintptr(size*n))
+	b := c23.Writable(c23.Array(p, n, size), uintptr(size*n))
 	k := 0
 	for k < len(b) && len(fl.Unget) > 0 {
 		b[k] = byte(fl.Getc())
@@ -264,7 +268,7 @@ func Tmpnam(s *c23.Void) *c23.Void {
 		if _, err := os.Lstat(string(name)); err == nil {
 			continue
 		}
-		copy(c23.BytesAt(s, uintptr(len(name)+1)), append(name, 0))
+		copy(c23.Writable(s, uintptr(len(name)+1)), append(name, 0))
 		return s
 	}
 	return (*c23.Void)(nil)
