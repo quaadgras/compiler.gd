@@ -525,6 +525,9 @@ func analyzePreWalk(gd *base.Invocation, fn *ir.Func) *walkAnalysis {
 	ro := &ir.ReassignOracle{}
 	ro.Init(fn)
 	markWholeViews(gd, fn, ro)
+	if gd.Debug.UintptrSurvey != 0 {
+		surveyUintptr(gd, fn)
+	}
 	sv := make(map[ir.Node]ir.Node)
 	scs := make(map[*ir.Name]*types.Type)
 	ir.Visit(fn, func(n ir.Node) {

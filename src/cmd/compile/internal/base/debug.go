@@ -21,6 +21,7 @@ type DebugFlags struct {
 	CHeaders              int    `help:"with 1, leave the checks of C's pointers and its stores of pointers to the runtime, each a call" concurrent:"ok"`
 	Checkptr              int    `help:"instrument unsafe pointer conversions\n0: instrumentation disabled\n1: conversions involving unsafe.Pointer are instrumented\n2: conversions to unsafe.Pointer force heap allocation" concurrent:"ok"`
 	Closure               int    `help:"print information about closure compilation"`
+	UintptrSurvey         int    `help:"report what is done with values of type uintptr that would change if a uintptr carried a pointer"`
 	UnsafeWhole           int    `help:"report conversions that make a partial view of a string, slice or interface, instead of failing at run time\n1: report them\n2: also report those whose source is not known"`
 	CompressInstructions  int    `help:"use compressed instructions when possible (if supported by architecture)" concurrent:"ok"`
 	Converthash           string `help:"hash value for use in debugging changes to platform-dependent float-to-[u]int conversion" concurrent:"ok"`
