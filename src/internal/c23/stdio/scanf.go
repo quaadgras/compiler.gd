@@ -433,7 +433,10 @@ func scanC(src scanSrc, f string, ap *c23.VaList) int32 {
 			}
 			if !suppress {
 				if conv == 'p' {
-					c23.StorePtr(dst, c23.FromInt(uintptr(v)))
+					// A pointer that is read is one that an
+					// integer makes: none to use, if it is the
+					// address of something.
+					c23.StorePtr(dst, c23.IntPtr(uintptr(v)))
 				} else {
 					storeInt(dst, isize, v)
 				}

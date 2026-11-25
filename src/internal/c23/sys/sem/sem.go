@@ -260,7 +260,7 @@ func semArg(va []any, wantPtr bool) (int32, *c23.Void) {
 		return int32(c23.Addr(p)), p
 	}
 	v := c23.ToInt64(va[0])
-	return int32(v), c23.FromInt(uintptr(v))
+	return int32(v), c23.IntPtr(uintptr(v))
 }
 
 // struct semid_ds, Linux's:
