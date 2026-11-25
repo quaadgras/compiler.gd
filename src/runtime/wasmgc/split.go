@@ -63,6 +63,11 @@ func splitzero(p unsafe.Pointer, n uintptr)
 func splitmovec(dst, src unsafe.Pointer, n uintptr)
 func splitzeroc(p unsafe.Pointer, n uintptr)
 
+// splitsetlim returns p as a pointer to something of lim bytes: for
+// what the runtime gives the program a pointer to that it must not look
+// into (lim 0), and for making that the pointer to it again.
+func splitsetlim(p unsafe.Pointer, lim uintptr) unsafe.Pointer
+
 // splitintptr returns the integer v as a pointer of the program's: one
 // with no size, which nothing is loaded or stored through (nil for 0).
 func splitintptr(v uintptr) unsafe.Pointer

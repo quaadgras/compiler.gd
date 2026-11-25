@@ -256,7 +256,7 @@ var handleType = abi.TypeFor[Handle]()
 func NewHandle(v any) *Void {
 	h := (*Handle)(newObject(handleType))
 	h.v = v
-	return (*Void)(unsafe.Pointer(h))
+	return seal(unsafe.Pointer(h))
 }
 
 // A seen is a set of addresses that were found to be of objects of one
@@ -289,10 +289,7 @@ var handles seen
 //
 //go:nocheckptr
 func handleAt(p *Void) *Handle {
-	if !handles.is(unsafe.Pointer(p), handleType) {
-		return nil
-	}
-	return (*Handle)(unsafe.Pointer(p))
+	return (*Handle)(unseal(&handles, p, handleType))
 }
 
 // HandleOf returns the T that p is the pointer for C to, and whether it

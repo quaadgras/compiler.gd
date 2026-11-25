@@ -970,6 +970,18 @@ func (g *gcGen) splitCall(v *ssa.Value, name string, args []*ssa.Value) bool {
 		i32Const(g.s, 0)
 		g.get(args[2], true)
 		g.helper(wasm.GCSplitChecked(wasm.GCSplitMove))
+	case "runtime.splitsetlim":
+		// The pointer, with another size of what it points into.
+		tmp := g.scratch('r')
+		g.get(args[0], false)
+		g.local(wasm.ALocalTee, tmp)
+		g.typed(wasm.AStructGet, g.ptrSym(), wasm.GCPtrAddr)
+		g.local(wasm.ALocalGet, tmp)
+		g.typed(wasm.AStructGet, g.ptrSym(), wasm.GCPtrSlots)
+		g.local(wasm.ALocalGet, tmp)
+		g.typed(wasm.AStructGet, g.ptrSym(), wasm.GCPtrOff)
+		g.get(args[1], true)
+		g.typed(wasm.AStructNew, g.ptrSym(), 0)
 	case "runtime.splitintptr":
 		g.get(args[0], false)
 		g.helper(wasm.GCSplitChecked(wasm.GCSplitIntToPtr))

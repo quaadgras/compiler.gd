@@ -11,4 +11,4 @@ static void ok(void) { printf("OK\n"); exit(0); }
 char victim[16] = "safe";
 
 static int cmp(const void *a, const void *b){ return *(const char *)a - *(const char *)b; }
-int main(void){ char *d = malloc(64); for (int i = 0; i < 64; i++) d[i] = 64 - i; size_t n = ((size_t)1 << 62) + 4; qsort(d, n, 4, cmp); unsafe("qsort of a count whose size in bytes wraps"); }
+int main(void){ char *d = malloc(64); for (int i = 0; i < 64; i++) d[i] = 64 - i; size_t n = (((size_t)-1) >> 2) + 5; qsort(d, n, 4, cmp); unsafe("qsort of a count whose size in bytes wraps"); }

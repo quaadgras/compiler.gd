@@ -192,14 +192,35 @@ func c23NewObject(t *_type) unsafe.Pointer {
 }
 
 // c23IsObject reports whether p is the address of an object that
-// c23NewObject allocated as a value of type t.
+// c23NewObject allocated as a value of type t: a pointer to the start
+// of the block, with the block's array, which is not something that
+// arithmetic on another block's pointer or an integer gives.
 //
 //go:linkname c23IsObject
 func c23IsObject(p unsafe.Pointer, t *_type) bool {
-	if p == nil || c23Objects == nil || ptroff(p) != 0 || ptrlim(p) == 0 {
+	if p == nil || c23Objects == nil || ptroff(p) != 0 || ptrnslots(p) == 0 {
 		return false
 	}
 	return c23Objects[uintptr(p)] == t
+}
+
+// c23Seal returns p, a pointer to an object of the library's, as the
+// pointer that C is given to it: one with no size, which nothing is
+// loaded or stored through. C has it to keep, to compare and to give
+// back, and cannot look at what it points to or change it.
+//
+//go:linkname c23Seal
+func c23Seal(p unsafe.Pointer) unsafe.Pointer { return splitsetlim(p, 0) }
+
+// c23Unseal returns the pointer to the object of type t that p is the
+// sealed pointer to (c23IsObject), or nil.
+//
+//go:linkname c23Unseal
+func c23Unseal(p unsafe.Pointer, t *_type) unsafe.Pointer {
+	if !c23IsObject(p, t) {
+		return nil
+	}
+	return splitsetlim(p, t.Size_)
 }
 
 // c23ObjectFreed is called when the block at addr is freed.

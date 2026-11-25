@@ -60,7 +60,7 @@ var funcType = abi.TypeFor[Func]()
 func NewFunc(f any) *Void {
 	p := (*Func)(newObject(funcType))
 	p.f = f
-	return (*Void)(unsafe.Pointer(p))
+	return seal(unsafe.Pointer(p))
 }
 
 var funcs seen
@@ -71,10 +71,11 @@ var funcs seen
 //
 //go:nocheckptr
 func funcAt(p *Void) *Func {
-	if !funcs.is(unsafe.Pointer(p), funcType) {
+	fn := (*Func)(unseal(&funcs, p, funcType))
+	if fn == nil {
 		RaiseFault("call through a pointer that is not to a function", uintptr(unsafe.Pointer(p)))
 	}
-	return (*Func)(unsafe.Pointer(p))
+	return fn
 }
 
 // FuncOf returns the Go function of type F that p points to, which a
@@ -253,7 +254,7 @@ var vaLists seen
 func VaStart(va []any) *Void {
 	v := (*VaList)(newObject(vaListType))
 	v.args = va
-	return (*Void)(unsafe.Pointer(v))
+	return seal(unsafe.Pointer(v))
 }
 
 // VaOf returns the VaList that ap points to: one that VaStart or VaCopy
@@ -261,10 +262,11 @@ func VaStart(va []any) *Void {
 //
 //go:nocheckptr
 func VaOf(ap *Void) *VaList {
-	if !vaLists.is(unsafe.Pointer(ap), vaListType) {
+	v := (*VaList)(unseal(&vaLists, ap, vaListType))
+	if v == nil {
 		RaiseFault("va_arg of what is not a va_list that va_start set", uintptr(unsafe.Pointer(ap)))
 	}
-	return (*VaList)(unsafe.Pointer(ap))
+	return v
 }
 
 // VaCopy is va_copy.

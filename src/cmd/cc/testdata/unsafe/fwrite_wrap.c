@@ -10,4 +10,4 @@ static void unsafe(const char *what) { printf("UNSAFE: %s\n", what); exit(0); }
 static void ok(void) { printf("OK\n"); exit(0); }
 char victim[16] = "safe";
 
-int main(void){ char *d = malloc(8); FILE *f = fopen("/dev/null", "w"); size_t n = ((size_t)1 << 62) + 2; if (fwrite(d, 4, n, f) == n) unsafe("fwrite of a count whose size wraps said it wrote it all"); ok(); }
+int main(void){ char *d = malloc(8); FILE *f = fopen("/dev/null", "w"); size_t n = (((size_t)-1) >> 2) + 3; if (fwrite(d, 4, n, f) == n) unsafe("fwrite of a count whose size wraps said it wrote it all"); ok(); }

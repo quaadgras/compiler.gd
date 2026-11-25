@@ -6,6 +6,7 @@ package c23
 
 import (
 	"internal/abi"
+	"math/bits"
 	"unsafe"
 )
 
@@ -49,6 +50,17 @@ func AllocRaw(n uint64) *Void {
 		return nil
 	}
 	return (*Void)(malloc(uintptr(n), nil, false))
+}
+
+// MulSize returns a times b, the size in bytes of calloc's a objects of
+// b: or, if that is more than a size holds, a size that nothing is
+// allocated for.
+func MulSize(a, b uint64) uint64 {
+	hi, lo := bits.Mul64(a, b)
+	if hi != 0 {
+		return ^uint64(0)
+	}
+	return lo
 }
 
 // malloc allocates n bytes, zeroed: for values of typ, a *abi.Type, if

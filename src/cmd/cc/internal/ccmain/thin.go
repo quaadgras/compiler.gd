@@ -1455,7 +1455,7 @@ func (g *gen) tcall(c *call) string {
 	if isLib {
 		thin = thinLibc[lib]
 		if lib == "calloc" {
-			return g.retype(fmt.Sprintf("c23.AllocRaw(uint64(%s) * uint64(%s))", g.rv(c.args[0]), g.rv(c.args[1])), voidPtr, g.gt(c.ft.ret))
+			return g.retype(fmt.Sprintf("c23.AllocRaw(c23.MulSize(uint64(%s), uint64(%s)))", g.rv(c.args[0]), g.rv(c.args[1])), voidPtr, g.gt(c.ft.ret))
 		}
 	}
 	if d, ok := c.fn.(*decay); ok {
@@ -1652,7 +1652,7 @@ func (g *gen) tallocCall(c *call, to *ctype) (string, bool) {
 	case "malloc":
 		return fmt.Sprintf("c23.AllocOf[%s](uint64(%s))", m, g.rv(c.args[0])), true
 	case "calloc":
-		return fmt.Sprintf("c23.AllocOf[%s](uint64(%s) * uint64(%s))", m, g.rv(c.args[0]), g.rv(c.args[1])), true
+		return fmt.Sprintf("c23.AllocOf[%s](c23.MulSize(uint64(%s), uint64(%s)))", m, g.rv(c.args[0]), g.rv(c.args[1])), true
 	case "realloc":
 		return fmt.Sprintf("c23.ReallocOf1[%s](%s, uint64(%s))", m, g.retype(g.rv(c.args[0]), g.gt(c.args[0].ty()), "*"+m), g.rv(c.args[1])), true
 	}
