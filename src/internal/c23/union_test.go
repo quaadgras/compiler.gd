@@ -20,6 +20,9 @@ type testUnion struct {
 // as a member of a union, and that C reads the one that the library
 // stored: sigaction's handlers are such a union.
 func TestUnionPtr(t *testing.T) {
+	if !UnionRefs {
+		t.Skip("a union is its words here: its pointer is where its integers are")
+	}
 	u := new(testUnion)
 	v := (*Void)(unsafe.Pointer(new(int64)))
 	*UnionBox[*Void](&u.p) = v

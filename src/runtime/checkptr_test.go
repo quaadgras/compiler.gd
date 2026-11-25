@@ -233,7 +233,13 @@ func TestUnsafeGo(t *testing.T) {
 		t.Skip("skipping test in -short mode")
 	}
 	testenv.MustHaveGoRun(t)
-	status, err := os.ReadFile("testdata/testunsafe/status.txt")
+	// (What gets through with GOOS=js is not what does here: an
+	// integer is never a pointer there. See doc/gd/cc.md, "On wasm".)
+	statusFile := "testdata/testunsafe/status.txt"
+	if os.Getenv("GOOS") == "js" {
+		statusFile = "testdata/testunsafe/status_js.txt"
+	}
+	status, err := os.ReadFile(statusFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +275,13 @@ func TestUnsafeGo(t *testing.T) {
 				}
 				return
 			}
-			out, err := testenv.CleanCmdEnv(exec.Command(exe)).CombinedOutput()
+			// (With GOOS=js GOARCH=wasm in the environment the
+			// program was built for that, and node runs it.)
+			run := exec.Command(exe)
+			if os.Getenv("GOOS") == "js" {
+				run = exec.Command("go_js_wasm_exec", exe)
+			}
+			out, err := testenv.CleanCmdEnv(run).CombinedOutput()
 			unsafe := bytes.Contains(out, []byte("UNSAFE: "))
 			switch {
 			case unsafe && !known[name]:

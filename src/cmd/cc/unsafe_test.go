@@ -7,11 +7,13 @@ package main
 import (
 	"bytes"
 	"cmd/cc/host"
+	"context"
 	"internal/testenv"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestUnsafe runs the programs of testdata/unsafe, each of which does
@@ -21,6 +23,11 @@ import (
 // UNSAFE if what it tried went through, and OK if what it tried did
 // nothing; it is also right for it to be stopped. status.txt lists the
 // ones that are not stopped yet: what is left to do (doc/gd/cc.md).
+//
+// With GOOS=js GOARCH=wasm in the environment the programs are built
+// for that and run under node, as the suites are (targetCommand): what
+// keeps them from the memory of others there is not what does here
+// (doc/gd/cc.md, "On wasm").
 func TestUnsafe(t *testing.T) {
 	testenv.MustHaveGoRun(t)
 	status, err := os.ReadFile("testdata/unsafe/status.txt")
@@ -67,7 +74,9 @@ func TestUnsafe(t *testing.T) {
 			if out, err := build.CombinedOutput(); err != nil {
 				t.Fatalf("go build: %v\n%s", err, out)
 			}
-			cmd := testenv.Command(t, exe)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			cmd := targetCommand(ctx, exe)
 			cmd.Dir = dir
 			out, err := cmd.CombinedOutput()
 			unsafe := bytes.Contains(out, []byte("UNSAFE: "))
