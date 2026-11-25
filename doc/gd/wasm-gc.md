@@ -2643,3 +2643,78 @@ allocates some 20 times faster and is half as large again;
 port unless `GOWASM=gc` or `gc,split` is given). An `fmt` hello world
 built with `GOOS=js GOARCH=wasm` and nothing else: 411,056 bytes
 (352,128 with `-ldflags="-s -w"`, 128,129 of that gzipped).
+
+
+### Stage 20: what a pointer points into (2026-11-26)
+
+The step of the plan for memory that C and package unsafe cannot break
+(`cc.md`, `unsafe.md`) that is for this model. Elsewhere it is done with
+checks of arithmetic and of conversions and with claims of what
+malloc's words are, because a pointer there is a word, which an integer
+can be made into. Here a pointer is an object of the engine's, which a
+program cannot make, change or look into: it is enough that the object
+says what it points into, and that nothing is loaded or stored outside
+of that.
+
+- **A pointer has a fourth field, the size of what it points into**
+  (`wasm.GCPtrLim`), counted from where its offset is counted from: the
+  block of an allocation, as it was asked for; a variable of a frame
+  (each has a pointer of its own now, with or without pointers in it);
+  a symbol of the data. Arithmetic keeps it (`wasm.addptr`). A pointer
+  made of an integer has none (`wasm.inttoptrc`), and neither has a
+  function's.
+- **Code that is not the runtime's asks before each load and store
+  through a pointer** that the bytes are in there
+  (`cmd/compile/internal/wasm/gcsplit.go`, "Bounds"): `wasm.chk1`,
+  `chk2`, `chk4`, `chk8` and `chk` return the address or stop the
+  program (`runtime.splitfault`, which no deferred call recovers from);
+  `wasm.chkw` and the others are those for a store, which is also not
+  below where the variables of the data begin (`wasm.GCGlobalROEnd`):
+  the descriptors of types and the bytes of strings are not changed.
+  The functions that load, store, copy and zero pointers have forms
+  that ask the same (`wasm.loadptrc` and the others). What the compiler
+  made the address of itself is not asked about: a variable of the
+  frame or of the data, at an offset and at indexes that are in it
+  whatever the indexes are.
+- **One check for a block.** What a block loads and stores at constant
+  offsets from one pointer (and the same indexes) is asked about once,
+  for the bytes from the first to the last. In a loop the check is
+  instructions, not a call: V8 does not always expand the call, and a
+  loop over an array of structs that updates four fields was 125 ms
+  with six calls an element, 27 with one, and 6.7 with the
+  instructions (5.7 with no check).
+- **The data.** The array of the data is indexed by the address (the
+  functions look for it: `slotOff`), so that a pointer into the data
+  has the offset in its symbol and the symbol's size: the globals that
+  the linker makes for the code, and the elements that the start
+  function sets, whose words are listed with the offset and the size if
+  what they point to is a variable (71 of them in an `fmt` hello world,
+  12 bytes each; the 2,251 that point into what nothing changes are a
+  word each as before, and point into all of that).
+- **Two things were integers that the code made pointers of**, and are
+  pointers now, read as what was stored: the word of an interface that
+  holds its type or its table, which is a pointer in memory as it was
+  in a register (`ssa.Types.ITab`, the runtime's `typeWord`), and the
+  words of a generic function's dictionary that are addresses
+  (`noder`'s `dictPtrWord`). With them, no code that is checked loads
+  at an address that it has as an integer (`GOWASMGC_NOTES=1` when
+  compiling says if any does).
+
+`GOWASMGC_NOBOUNDS=1` when compiling leaves the checks out, for
+measuring them. An `fmt` hello world: 407,405 bytes without, 416,421
+with. A program of loops (node 24, ms):
+
+|                           | no checks | checks |
+|---------------------------|----------:|-------:|
+| a list of 100,000, walked 100 times | 36.8 | 40.3 |
+| the sum of a slice of 1<<20 ints, 20 times | 8.2 | 11.5 |
+| 100,000 structs, four fields updated, 100 times | 5.7 | 6.6 |
+| sort.Ints of 200,000      | 13.3 | 14.7 |
+| strings.Fields and Repeat | 20.3 | 21.1 |
+| a map of 5,000 keys, 200,000 updates | 17.9 | 19.2 |
+| Sprintf, 50,000 times     | 51.5 | 59.1 |
+
+The tests of std pass with them as without (255 packages under node;
+`runtime/debug`'s TestStack fails in both). C that cmd/cc compiles runs
+there again, with the 1:1 translation: `cc.md`, "On wasm", which also
+says what this does not do.
