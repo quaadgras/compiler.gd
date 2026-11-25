@@ -64,8 +64,13 @@ func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, claim, load bool) {
 			// A pointer to what the object was allocated as.
 			return
 		}
-		if claim && elem.Pointers() && s.spanclass.c() {
-			cTypedPointers(uintptr(p), elem, n)
+		if s.spanclass.c() {
+			// An object of C's has no type: its words are what
+			// they were claimed for (cclaim.go).
+			if claim {
+				cClaim(s, s.objIndex(uintptr(p)), uintptr(p), elem, n, load)
+			}
+			return
 		}
 		if typ != nil {
 			checkptrWhole(typ, tbase, base+s.elemsize, uintptr(p), elem, size)
@@ -128,13 +133,12 @@ func checkptrAlignmentC(p unsafe.Pointer, elem *_type, n uintptr) {
 				if uintptr(p) > limit {
 					throw("checkptr: converted pointer is past the end of its object")
 				}
-				// That is all there is to check: an object of
-				// C's has no type, its words are what C
-				// stores in them (checkptrPointers), and it
-				// holds no string, slice or interface of Go's.
 				if elem.Pointers() && uintptr(p)&(uintptr(min(elem.Align_, goarch.PtrSize))-1) != 0 {
 					throw("checkptr: misaligned pointer conversion")
 				}
+				// An object of C's has no type: its words are
+				// what they were claimed for (cclaim.go).
+				cClaim(s, i, uintptr(p), elem, n, false)
 				return
 			}
 			if end := uintptr(p) + n*elem.Size_; end > limit && end >= uintptr(p) {

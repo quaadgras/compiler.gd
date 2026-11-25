@@ -151,13 +151,6 @@ func typedmemmove(typ *abi.Type, dst, src unsafe.Pointer) {
 	if dst == src {
 		return
 	}
-	// gd: the words of an object of C's are what typ says from here
-	// on (cspan.go).
-	var inC bool
-	var locked *mspan
-	if cSpansUsed && typ.Pointers() {
-		inC, locked = cTyped(uintptr(dst), typ, 1)
-	}
 	if writeBarrier.enabled && typ.Pointers() {
 		// This always copies a full value of type typ so it's safe
 		// to pass typ along as an optimization. See the comment on
@@ -172,12 +165,6 @@ func typedmemmove(typ *abi.Type, dst, src unsafe.Pointer) {
 	// barrier, so at worst we've unnecessarily greyed the old
 	// pointer that was in src.
 	memmove(dst, src, typ.Size_)
-	if locked != nil {
-		locked.cUnlock()
-	}
-	if inC {
-		cTypedPointers(uintptr(dst), typ, 1)
-	}
 	if goexperiment.CgoCheck2 {
 		cgoCheckMemmove2(typ, dst, src, 0, typ.Size_)
 	}
@@ -349,12 +336,6 @@ func typedslicecopy(typ *_type, dstPtr unsafe.Pointer, dstLen int, srcPtr unsafe
 		shareMove(typ, dstPtr, srcPtr, uintptr(n))
 		return n
 	}
-	// gd: as typedmemmove, for words of C's.
-	var inC bool
-	var locked *mspan
-	if cSpansUsed {
-		inC, locked = cTyped(uintptr(dstPtr), typ, uintptr(n))
-	}
 	if writeBarrier.enabled {
 		// This always copies one or more full values of type typ so
 		// it's safe to pass typ along as an optimization. See the comment on
@@ -365,12 +346,6 @@ func typedslicecopy(typ *_type, dstPtr unsafe.Pointer, dstLen int, srcPtr unsafe
 	// See typedmemmove for a discussion of the race between the
 	// barrier and memmove.
 	memmove(dstPtr, srcPtr, size)
-	if locked != nil {
-		locked.cUnlock()
-	}
-	if inC {
-		cTypedPointers(uintptr(dstPtr), typ, uintptr(n))
-	}
 	return n
 }
 

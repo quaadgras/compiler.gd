@@ -1063,24 +1063,11 @@ func shareMove(typ *_type, dst, src unsafe.Pointer, n uintptr) {
 	if n*typ.Size_ == 0 || dst == src {
 		return
 	}
-	// gd: the words of an object of C's are what typ says from here
-	// on (cspan.go), as in typedmemmove. This copy takes locks of its
-	// own and may be preempted, so the span is not kept locked for it.
-	inC := false
-	if cSpansUsed && typ.Pointers() {
-		var locked *mspan
-		if inC, locked = cTyped(uintptr(dst), typ, n); locked != nil {
-			locked.cUnlock()
-		}
-	}
 	sd, ss := shareSides(typ, dst, src)
 	if !sd && !ss {
 		shareMoveRaw(typ, dst, src, n)
 	} else {
 		shareMoveGuarded(typ, dst, src, n, sd, ss)
-	}
-	if inC {
-		cTypedPointers(uintptr(dst), typ, n)
 	}
 }
 

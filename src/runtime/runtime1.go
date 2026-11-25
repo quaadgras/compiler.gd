@@ -316,6 +316,7 @@ var debug struct {
 	gcstoptheworld           int32
 	gctrace                  int32
 	invalidptr               int32
+	cclaims                  int32 // gd: print what the claims of C's memory found (cclaim.go)
 	madvdontneed             int32 // for Linux; issue 28466
 	scavtrace                int32
 	scheddetail              int32
@@ -381,6 +382,7 @@ var dbgvars = []*dbgVar{
 	{name: "gctrace", value: &debug.gctrace},
 	{name: "harddecommit", value: &debug.harddecommit},
 	{name: "inittrace", value: &debug.inittrace},
+	{name: "cclaims", value: &debug.cclaims},
 	{name: "invalidptr", value: &debug.invalidptr},
 	{name: "madvdontneed", value: &debug.madvdontneed},
 	{name: "panicnil", atomic: &debug.panicnil},

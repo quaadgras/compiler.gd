@@ -237,13 +237,14 @@ func TestCSpanIntegers(t *testing.T) {
 
 // TestCSpanScalars stores integers over the pointers of C's objects as
 // the collector marks: what was pointed to is not lost to a goroutine
-// that has just loaded it, and the words hold no pointers after.
+// that has just loaded it, and the words are claimed for no pointers
+// after.
 func TestCSpanScalars(t *testing.T) {
 	const n = 2000
 	raw := runtime.MallocC(n * 8)
 	for round := range 20 {
 		for i := range n {
-			runtime.CStorePtr((*unsafe.Pointer)(unsafe.Add(raw, i*8)), unsafe.Pointer(newLeaf(i)))
+			*(**cLeaf)(unsafe.Add(raw, i*8)) = newLeaf(i)
 		}
 		done := make(chan bool)
 		go func() {
@@ -253,7 +254,6 @@ func TestCSpanScalars(t *testing.T) {
 		for i := range n {
 			slot := unsafe.Add(raw, i*8)
 			leaf := *(**cLeaf)(slot)
-			runtime.CScalars(slot, 8)
 			*(*uintptr)(slot) = uintptr(i)
 			if i%64 == 0 {
 				runtime.Gosched()
@@ -261,7 +261,7 @@ func TestCSpanScalars(t *testing.T) {
 			leaf.check(t, i)
 		}
 		<-done
-		if got := cKinds(raw, 4); got != "...." {
+		if got := runtime.CClasses(raw, 4); got != "...." {
 			t.Fatalf("round %d: words are %s after integers were stored", round, got)
 		}
 	}
@@ -275,124 +275,174 @@ type cPair struct {
 	next unsafe.Pointer
 }
 
-func cKinds(p unsafe.Pointer, words int) string {
-	b := make([]byte, words)
-	for i := range b {
-		b[i] = 'p'
-		if runtime.CScalar(unsafe.Add(p, i*8)) {
-			b[i] = '.'
-		}
-	}
-	return string(b)
+// The same, under other names.
+type cPair2 struct {
+	k    uint
+	l    *cLeaf2
+	f    [2]float64
+	link unsafe.Pointer
 }
 
-// TestCSpanBits follows the words of C's objects through what is stored
-// in them.
-func TestCSpanBits(t *testing.T) {
+type cLeaf2 struct {
+	k    uint
+	_    [5]int
+	self *cLeaf2
+}
+
+// TestCSpanClaims follows the words of C's objects through the
+// conversions of pointers into them.
+func TestCSpanClaims(t *testing.T) {
 	check := func(what string, p unsafe.Pointer, want string) {
 		t.Helper()
-		if got := cKinds(p, len(want)); got != want {
+		if got := runtime.CClasses(p, len(want)); got != want {
 			t.Errorf("%s: words are %s, want %s", what, got, want)
 		}
 	}
+	var last [5]uint64
+	counts := func(what string, claims, reclaims, narrowed, forged, bytes uint64) {
+		t.Helper()
+		var now [5]uint64
+		now[0], now[1], now[2], now[3], now[4] = runtime.CClaimCounts()
+		got := [5]uint64{now[0] - last[0], now[1] - last[1], now[2] - last[2], now[3] - last[3], now[4] - last[4]}
+		if want := [5]uint64{claims, reclaims, narrowed, forged, bytes}; got != want {
+			t.Errorf("%s: claimed, claimed again, typed, forged, of bytes = %v, want %v", what, got, want)
+		}
+		last = now
+	}
+	last[0], last[1], last[2], last[3], last[4] = runtime.CClaimCounts()
+
 	raw := runtime.MallocC(64)
-	check("malloc", raw, "pppppppp")
+	check("malloc", raw, "--------")
 	scalar := runtime.MallocCScalar(64)
 	check("malloc of no pointers", scalar, "........")
 	typed := runtime.MallocCTyped(3*unsafe.Sizeof(cPair{})+8, cPair{})
-	check("malloc of a type", typed, ".p..p"+".p..p"+".p..p"+"p")
+	check("malloc of a type", typed, ".p..u"+".p..u"+".p..u"+"-")
+	if got := runtime.CClaimType(unsafe.Add(typed, 8)); got != "*runtime_test.cLeaf" {
+		t.Errorf("the pointer of a pair is claimed for %q", got)
+	}
+	check("malloc of bytes", runtime.MallocCTyped(64, [4]byte{}), "--------")
+	check("malloc of integers", runtime.MallocCTyped(64, [2]int32{}), "........")
+	counts("malloc", 0, 0, 0, 0, 0)
 
-	// A pointer stored where none was.
+	// The first conversion over a word claims it.
 	leaf := newLeaf(1)
-	runtime.CStorePtr((*unsafe.Pointer)(unsafe.Add(scalar, 16)), unsafe.Pointer(leaf))
-	check("a pointer stored", scalar, "..p.....")
-	runtime.CStorePtr((*unsafe.Pointer)(unsafe.Add(scalar, 24)), nil)
-	// (Go's conversion of the address to a pointer to a pointer is what
-	// says here that one may be stored.)
-	check("nil stored", scalar, "..pp....")
+	*(**cLeaf)(unsafe.Add(raw, 16)) = leaf
+	check("a pointer", raw, "--p-----")
+	*(*uint32)(unsafe.Add(raw, 12)) = 5
+	check("an integer in half a word", raw, "-.p-----")
+	*(*unsafe.Pointer)(unsafe.Add(raw, 24)) = unsafe.Pointer(leaf)
+	check("an unsafe.Pointer", raw, "-.pu----")
+	(*[64]byte)(raw)[40] = 1
+	check("bytes", raw, "-.pu----")
+	(*cPair)(unsafe.Add(raw, 24)).n = 3
+	check("a struct", raw, "-.p.p..u")
+	counts("claims", 7, 1, 0, 0, 0) // the struct's integer is over the unsafe.Pointer
 
-	// memset, of whole words and of parts of them.
-	runtime.CMemset(unsafe.Add(raw, 8), 0, 16)
-	check("memset", raw, "p..ppppp")
-	runtime.CMemset(unsafe.Add(raw, 28), 1, 22)
-	check("memset of parts", raw, "p..p..pp")
+	// What is compatible with the claim changes nothing.
+	sink := func(any) {}
+	sink(*(**cLeaf)(unsafe.Add(raw, 16)))
+	sink((**cLeaf2)(unsafe.Add(raw, 16)))
+	sink((*unsafe.Pointer)(unsafe.Add(raw, 16)))
+	sink((*float64)(unsafe.Add(raw, 8)))
+	sink((*[16]byte)(unsafe.Add(raw, 12)))
+	sink(*(*uintptr)(unsafe.Add(raw, 16))) // only loaded
+	sink((*cPair2)(unsafe.Add(typed, unsafe.Sizeof(cPair{}))))
+	sink((*[2]cPair)(typed))
+	check("compatible conversions", raw, "-.p.p..u")
+	counts("compatible conversions", 0, 0, 0, 0, 0)
 
-	// Copies take the words as they are.
+	// What is not claims the word again.
+	*(*uintptr)(unsafe.Add(raw, 16)) = 7
+	check("an integer over a pointer", raw, "-...p..u")
+	counts("an integer over a pointer", 0, 1, 0, 0, 0)
+	*(**cLeaf)(unsafe.Add(raw, 16)) = leaf
+	check("a pointer over an integer", raw, "-.p.p..u")
+	counts("a pointer over an integer", 0, 1, 0, 1, 0)
+	sink((**int)(unsafe.Add(raw, 16)))
+	counts("a pointer to something else", 0, 1, 0, 0, 0)
+	if got := runtime.CClaimType(unsafe.Add(raw, 16)); got != "*int" {
+		t.Errorf("the word is claimed for %q", got)
+	}
+	sink((**cLeaf)(unsafe.Add(typed, 32)))
+	check("a typed pointer over an unsafe.Pointer", typed, ".p..p")
+	counts("a typed pointer over an unsafe.Pointer", 0, 0, 1, 0, 0)
+	written := runtime.MallocC(16)
+	(*[8]byte)(written)[0] = 1
+	sink((**cLeaf)(written))
+	counts("a pointer over bytes that were written", 1, 0, 0, 0, 1)
+
+	// The conversions of C's code claim too, and may be to the end.
+	c := runtime.MallocC(40)
+	runtime.CConvert(c, cPair{}, 1)
+	check("a struct of C's", c, ".p..u")
+	runtime.CConvert(unsafe.Add(c, 40), cPair{}, 1)
+	runtime.CConvert(unsafe.Add(c, 32), [2]uintptr{}, 1)
+	counts("C's conversions", 5, 1, 0, 0, 0)
+
+	// memset claims nothing, and takes no claim away.
+	runtime.CMemset(unsafe.Add(raw, 0), 0, 64)
+	check("memset", raw, "-.p.p..u")
+
+	// A copy claims what nothing claimed for what it is copied from.
 	dst := runtime.MallocC(64)
-	runtime.CMemmove(dst, scalar, 64)
-	check("a copy", dst, "..pp....")
+	*(**cLeaf)(unsafe.Add(raw, 16)) = leaf
+	runtime.CMemmove(dst, raw, 64)
+	check("a copy", dst, "-.p.p..u")
 	if *(**cLeaf)(unsafe.Add(dst, 16)) != leaf {
 		t.Errorf("the copy lost its pointer")
 	}
-	runtime.CMemmove(unsafe.Add(dst, 8), dst, 48) // overlapping
-	check("a copy over itself", dst, "...pp...")
-	runtime.CMemmove(dst, raw, 64)
-	check("a copy of words of both kinds", dst, "p..p..pp")
+	if got := runtime.CClaimType(unsafe.Add(dst, 16)); got != "*runtime_test.cLeaf" {
+		t.Errorf("the copy of a pointer is claimed for %q", got)
+	}
+	runtime.CMemmove(unsafe.Add(dst, 8), dst, 48) // overlapping: the first word gets nothing
+	check("a copy over itself", dst, "-.p.p..u")
+	dst = runtime.MallocC(64)
+	runtime.CMemmove(unsafe.Add(dst, 8), raw, 48)
+	check("a copy to other words", dst, "--.p.p.-")
 	runtime.CMemmove(unsafe.Add(dst, 1), raw, 40) // no word arrives whole
-	check("a copy to other bytes", dst, "p.....pp")
-	runtime.CMemmove(dst, unsafe.Add(raw, 3), 8) // a whole word, of parts of two
-	check("a copy from other bytes", dst, "......pp")
+	check("a copy to other bytes", dst, "--.p.p.-")
 	var onStack [4]unsafe.Pointer
+	dst = runtime.MallocC(64)
 	runtime.CMemmove(unsafe.Add(dst, 8), unsafe.Pointer(&onStack), 32)
-	check("a copy of a variable", dst, ".pppp.pp")
+	check("a copy of a variable", dst, "--------")
 	cSink = make([]byte, 64)
 	runtime.CMemmove(dst, unsafe.Pointer(&cSink[0]), 60)
-	check("a copy of Go's bytes", dst, ".......p")
-
-	// What C stores first in what malloc gave with no type, where the
-	// compiler knows it: whole words and parts of them, of one object.
-	first := runtime.MallocC(64)
-	runtime.CScalars(unsafe.Add(first, 8), 8)
-	check("an integer stored", first, "p.pppppp")
-	runtime.CScalars(unsafe.Add(first, 28), 4)
-	check("half a word stored", first, "p.p.pppp")
-	runtime.CScalars(unsafe.Add(first, 36), 16)
-	check("two words and a half stored", first, "p.p....p")
-	runtime.CStorePtr((*unsafe.Pointer)(unsafe.Add(first, 40)), unsafe.Pointer(leaf))
-	runtime.CScalars(unsafe.Add(first, 32), 8)
-	check("a pointer stored after", first, "p.p..p.p")
-	last := runtime.MallocC(24)
-	runtime.CScalars(unsafe.Add(last, 16), 1<<20)
-	check("more than the object", last, "pp.")
-	var onStack2 [2]uintptr
-	runtime.CScalars(unsafe.Pointer(&onStack2), 16)
-	runtime.CScalars(unsafe.Pointer(leaf), 8)
+	check("a copy of Go's bytes", dst, ".......-")
 
 	// Go's own stores of what has pointers: the runtime's, and those
 	// of a package that converted the pointer.
 	pair := cPair{n: 1, leaf: leaf}
-	reflect.NewAt(reflect.TypeFor[cPair](), unsafe.Add(scalar, 16)).Elem().Set(reflect.ValueOf(pair))
-	check("a value with pointers stored", scalar, "...p..p.")
+	other := runtime.MallocC(64)
+	reflect.NewAt(reflect.TypeFor[cPair](), unsafe.Add(other, 16)).Elem().Set(reflect.ValueOf(pair))
+	check("a value with pointers stored", other, "--.p..u-")
 	pairs := make([]cPair, 1)
-	copy(unsafe.Slice((*cPair)(dst), 1), pairs)
-	check("a slice with pointers copied", dst, ".p..p..p")
-	other := runtime.MallocCScalar(64)
-	(*cPair)(unsafe.Add(other, 8)).leaf = leaf
-	check("a pointer stored by Go", other, "..p..p..")
+	other = runtime.MallocC(64)
+	copy(unsafe.Slice((*cPair)(other), 1), pairs)
+	check("a slice with pointers copied", other, ".p..u---")
 	runtime.KeepAlive(typed)
 }
 
-// TestCSpanFlip keeps Go objects alive from words that held no pointers
-// when they were allocated, and frees what only an integer is the
-// address of.
+// TestCSpanFlip keeps Go objects alive from words that were allocated
+// for no pointers and claimed for one after, and frees what only an
+// integer is the address of.
 func TestCSpanFlip(t *testing.T) {
 	const n = 3000
 	blocks := make([]unsafe.Pointer, n)
 	for i := range blocks {
-		// A buffer of bytes that a header is placed in, as an
-		// allocator of C's does.
+		// A buffer that a header is placed in, as an allocator of
+		// C's does.
 		p := runtime.MallocCScalar(uintptr(64 + i%500))
 		runtime.CMemset(p, 0x55, 64)
-		runtime.CStorePtr((*unsafe.Pointer)(unsafe.Add(p, 8*(i%8))), unsafe.Pointer(newLeaf(i)))
+		*(**cLeaf)(unsafe.Add(p, 8*(i%8))) = newLeaf(i)
 		blocks[i] = p
 		if i%500 == 0 {
 			runtime.GC()
 		}
 	}
-	// Copies of them, through memmove and through realloc's way.
+	// Copies of them, as realloc makes.
 	for i, p := range blocks {
 		if i%2 == 0 {
-			q := runtime.MallocCScalar(64)
+			q := runtime.MallocC(64)
 			runtime.CMemmove(q, p, 64)
 			blocks[i] = q
 		}
@@ -423,9 +473,9 @@ func TestCSpanFlip(t *testing.T) {
 	runtime.KeepAlive(ints)
 }
 
-// TestCSpanRace stores pointers and integers in the same words from
-// several goroutines as the collector runs: a word that holds a pointer
-// at the end keeps what it points to.
+// TestCSpanRace claims the same words for pointers and for integers
+// from several goroutines as the collector runs: a word that holds a
+// pointer at the end keeps what it points to.
 func TestCSpanRace(t *testing.T) {
 	const words = 512
 	p := runtime.MallocC(words * 8)
@@ -443,14 +493,16 @@ func TestCSpanRace(t *testing.T) {
 				default:
 				}
 				w := (i*7 + g*131) % words
-				switch (i + g) % 4 {
+				switch (i + g) % 5 {
 				case 0, 1:
-					runtime.CStorePtr((*unsafe.Pointer)(unsafe.Add(p, w*8)), unsafe.Pointer(newLeaf(w)))
+					*(**cLeaf)(unsafe.Add(p, w*8)) = newLeaf(w)
 				case 2:
 					runtime.CMemset(unsafe.Add(p, w*8), byte(i), uintptr(8*(1+i%3)%((words-w)*8)+8)&^7)
 				case 3:
 					runtime.CMemmove(buf, p, words*8)
 					runtime.CMemmove(unsafe.Add(p, (w/2)*8), unsafe.Add(buf, (w/3)*8), 8*8)
+				case 4:
+					*(*uintptr)(unsafe.Add(p, w*8)) = uintptr(i)
 				}
 			}
 		}()
@@ -463,13 +515,13 @@ func TestCSpanRace(t *testing.T) {
 	// Now only pointers, in every other word, and what the others are
 	// left as.
 	for w := 0; w < words; w += 2 {
-		runtime.CStorePtr((*unsafe.Pointer)(unsafe.Add(p, w*8)), unsafe.Pointer(newLeaf(w)))
+		*(**cLeaf)(unsafe.Add(p, w*8)) = newLeaf(w)
 	}
 	cChurn()
 	cChurn()
 	for w := 0; w < words; w += 2 {
 		if runtime.CScalar(unsafe.Add(p, w*8)) {
-			t.Fatalf("word %d holds a pointer and is known to hold none", w)
+			t.Fatalf("word %d holds a pointer and is claimed for none", w)
 		}
 		(*(**cLeaf)(unsafe.Add(p, w*8))).check(t, w)
 	}
@@ -482,22 +534,24 @@ var cHeaderSink *[10]int
 // TestCSpanHeader checks what the compiled code is told of a pointer
 // once, for the checks of the pointers made of it (c23Header).
 func TestCSpanHeader(t *testing.T) {
-	// An object of C's: bounds as asked for, and its bits.
+	// An object of C's: bounds as asked for, and the classes of its
+	// words.
 	p := runtime.MallocC(40)
 	d, n, nc, b8, sh, bits := runtime.CHeader(unsafe.Add(p, 8))
 	if d != 8 || n != 40 || nc != 41 || sh != 3 {
 		t.Errorf("C: d=%d n=%d nc=%d sh=%d, want 8 40 41 3", d, n, nc, sh)
 	}
-	bit := func(off uintptr) bool {
+	class := func(off uintptr) uint32 {
 		w := (off + b8) >> sh
-		return *(*uint32)(unsafe.Pointer(bits + w/32*4))>>(w%32)&1 != 0
+		return *(*uint32)(unsafe.Pointer(bits + w/16*4)) >> (w % 16 * 2) & 3
 	}
-	if bit(16) {
-		t.Errorf("C: a word of malloc's holds no pointer")
+	if c := class(16); c != 0 {
+		t.Errorf("C: a word of malloc's has class %d", c)
 	}
-	runtime.CScalars(unsafe.Add(p, 16), 8)
-	if !bit(16) || bit(8) || bit(24) {
-		t.Errorf("C: the bits do not follow a store of an integer")
+	*(*uintptr)(unsafe.Add(p, 16)) = 1
+	*(*unsafe.Pointer)(unsafe.Add(p, 24)) = nil
+	if class(16) != 1 || class(24) != 2 || class(8) != 0 || class(32) != 0 {
+		t.Errorf("C: the classes do not follow the conversions: %d %d %d %d", class(8), class(16), class(24), class(32))
 	}
 
 	// An object of Go's: its slot, and no conversion without a look.

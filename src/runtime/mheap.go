@@ -494,8 +494,8 @@ type mspan struct {
 	exposedBits *gcBits    // bitmap of the objects whose address a program has as an integer (checkptr.go); accessed atomically
 	wholeBits   *wholeBits // states of the words of small objects, if the span holds a string, slice or interface (mwholebits.go); accessed atomically
 	cbits       *cBits     // what a span of C's objects keeps for them (cspan.go); accessed atomically
+	cids        *cBits     // the types of its words that are typed pointers (cclaim.go); accessed atomically
 	csize       uintptr    // the bytes that the object of a large span of C's was asked for
-	cseq        atomic.Uint32 // odd while a bit of cbits changes (cspan.go)
 
 	// sweep generation:
 	// if sweepgen == h->sweepgen - 2, the span needs sweeping
@@ -1899,8 +1899,8 @@ func (span *mspan) init(base uintptr, npages uintptr) {
 	span.exposedBits = nil
 	span.wholeBits = nil
 	span.cbits = nil
+	span.cids = nil
 	span.csize = 0
-	span.cseq.Store(0)
 	span.state.set(mSpanDead)
 	lockInit(&span.speciallock, lockRankMspanSpecial)
 }

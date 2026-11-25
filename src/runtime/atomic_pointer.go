@@ -46,12 +46,6 @@ func atomicstorep(ptr unsafe.Pointer, new unsafe.Pointer) {
 	if goexperiment.CgoCheck2 {
 		cgoCheckPtrWrite((*unsafe.Pointer)(ptr), new)
 	}
-	if cSpansUsed && new != nil {
-		cPointerSlot(uintptr(ptr))
-		atomic.StorepNoWB(noescape(ptr), new)
-		cPointerSlot(uintptr(ptr))
-		return
-	}
 	atomic.StorepNoWB(noescape(ptr), new)
 }
 
@@ -76,12 +70,6 @@ func atomic_casPointer(ptr *unsafe.Pointer, old, new unsafe.Pointer) bool {
 	if goexperiment.CgoCheck2 {
 		cgoCheckPtrWrite(ptr, new)
 	}
-	if cSpansUsed && new != nil {
-		cPointerSlot(uintptr(unsafe.Pointer(ptr)))
-		ok := atomic.Casp1(ptr, old, new)
-		cPointerSlot(uintptr(unsafe.Pointer(ptr)))
-		return ok
-	}
 	return atomic.Casp1(ptr, old, new)
 }
 
@@ -104,12 +92,6 @@ func sync_atomic_StorePointer(ptr *unsafe.Pointer, new unsafe.Pointer) {
 	if goexperiment.CgoCheck2 {
 		cgoCheckPtrWrite(ptr, new)
 	}
-	if cSpansUsed && new != nil {
-		cPointerSlot(uintptr(unsafe.Pointer(ptr)))
-		sync_atomic_StoreUintptr((*uintptr)(unsafe.Pointer(ptr)), uintptr(new))
-		cPointerSlot(uintptr(unsafe.Pointer(ptr)))
-		return
-	}
 	sync_atomic_StoreUintptr((*uintptr)(unsafe.Pointer(ptr)), uintptr(new))
 }
 
@@ -127,12 +109,6 @@ func sync_atomic_SwapPointer(ptr *unsafe.Pointer, new unsafe.Pointer) unsafe.Poi
 	}
 	if goexperiment.CgoCheck2 {
 		cgoCheckPtrWrite(ptr, new)
-	}
-	if cSpansUsed && new != nil {
-		cPointerSlot(uintptr(unsafe.Pointer(ptr)))
-		old := unsafe.Pointer(sync_atomic_SwapUintptr((*uintptr)(noescape(unsafe.Pointer(ptr))), uintptr(new)))
-		cPointerSlot(uintptr(unsafe.Pointer(ptr)))
-		return old
 	}
 	old := unsafe.Pointer(sync_atomic_SwapUintptr((*uintptr)(noescape(unsafe.Pointer(ptr))), uintptr(new)))
 	return old
@@ -152,12 +128,6 @@ func sync_atomic_CompareAndSwapPointer(ptr *unsafe.Pointer, old, new unsafe.Poin
 	}
 	if goexperiment.CgoCheck2 {
 		cgoCheckPtrWrite(ptr, new)
-	}
-	if cSpansUsed && new != nil {
-		cPointerSlot(uintptr(unsafe.Pointer(ptr)))
-		ok := sync_atomic_CompareAndSwapUintptr((*uintptr)(noescape(unsafe.Pointer(ptr))), uintptr(old), uintptr(new))
-		cPointerSlot(uintptr(unsafe.Pointer(ptr)))
-		return ok
 	}
 	return sync_atomic_CompareAndSwapUintptr((*uintptr)(noescape(unsafe.Pointer(ptr))), uintptr(old), uintptr(new))
 }

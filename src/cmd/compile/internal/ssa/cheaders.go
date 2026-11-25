@@ -13,11 +13,11 @@ import (
 
 // The checks of a C23Slow.
 const (
-	CSlowArith  = iota // arg0 is the result of arithmetic on arg1: runtime.checkptrArithmetic
-	CSlowConv          // arg0 is converted to a pointer to a type: runtime.checkptrAlignmentC
-	CSlowStore         // a pointer is stored at arg0: runtime.c23StorePtr
-	CSlowStored        // a pointer was stored at arg0: runtime.c23PointerSlot
-	CSlowScalar        // what holds no pointer is stored at arg0, in malloc's memory with no type: runtime.c23Scalars
+	CSlowArith       = iota // arg0 is the result of arithmetic on arg1: runtime.checkptrArithmetic
+	CSlowConv               // arg0 is converted to a pointer to a type: runtime.checkptrAlignmentC, checkptrView
+	CSlowConvScalar         // the same, to a type of one word or less that has no pointer and is not bytes
+	CSlowConvUntyped        // the same, to unsafe.Pointer or a pointer to what has no size
+	CSlowConvClaim          // the same, to any other type: the runtime's, if arg0 is in an object of C's
 )
 
 // CHeaders reports whether the checks of C's pointers, and the stores of
@@ -27,6 +27,15 @@ const (
 func (c *Config) CHeaders() bool {
 	return c.PtrSize == 8 && c.gd.Flag.N == 0 && c.gd.Debug.CHeaders == 0
 }
+
+// CClassScalar is the class of a word of C's that is claimed for no
+// pointer: runtime's cScalar.
+const CClassScalar = 1
+
+// CConvWords is the number of words of the largest type whose
+// conversion in an object of C's is compared with the classes of the
+// words in the compiled code.
+const CConvWords = 16
 
 // CConvMax is the size of the largest type that a C23Slow of a
 // conversion is for: runtime's cConvMax.
@@ -69,12 +78,6 @@ func cheaders(f *Func) {
 			if v.Op != OpC23Slow {
 				continue
 			}
-			// A store of integers that is in more than one word is
-			// the runtime's: one bit is looked at here.
-			if size, mask := v.AuxInt>>16, v.AuxInt>>8&0xff; v.AuxInt&0xff == CSlowScalar && (size > 8 || size > mask+1) {
-				cSlowAlways(v)
-				continue
-			}
 			sites = append(sites, v)
 		}
 	}
@@ -109,7 +112,6 @@ func cheaders(f *Func) {
 
 	uintptrT := f.Config.Types.Uintptr
 	boolT := f.Config.Types.Bool
-	u32T := f.Config.Types.UInt32
 
 	// The calls of runtime.c23Header, by root.
 	type header struct {
@@ -288,42 +290,65 @@ func cheaders(f *Func) {
 		case CSlowArith:
 			v.reset(OpLess64U)
 			v.AddArg2(result(h, 1), off)
-		case CSlowConv:
+		case CSlowConv, CSlowConvScalar, CSlowConvUntyped, CSlowConvClaim:
 			out := b.NewValue2(pos, OpLeq64U, boolT, result(h, 2), off)
-			if mask == 0 {
-				v.copyOf(out)
-				break
+			slow := out
+			if mask != 0 {
+				odd := b.NewValue2(pos, OpNeq64, boolT, b.NewValue2(pos, OpAnd64, uintptrT, q, f.ConstInt64(uintptrT, mask)), f.ConstInt64(uintptrT, 0))
+				slow = b.NewValue2(pos, OpOrB, boolT, slow, odd)
 			}
-			odd := b.NewValue2(pos, OpNeq64, boolT, b.NewValue2(pos, OpAnd64, uintptrT, q, f.ConstInt64(uintptrT, mask)), f.ConstInt64(uintptrT, 0))
-			v.reset(OpOrB)
-			v.AddArg2(out, odd)
-		case CSlowStore, CSlowStored, CSlowScalar:
-			out := b.NewValue2(pos, OpLess64U, boolT, result(h, 1), off)
-			// The word, or the first one if q is not in the
-			// object: its bit is then not looked at, but it is
-			// loaded.
-			w := b.NewValue2(pos, OpRsh64Ux64, uintptrT, b.NewValue2(pos, OpAdd64, uintptrT, off, result(h, 3)), result(h, 4))
-			w.AuxInt = 1 // the shift is less than 64
-			in := b.NewValue2(pos, OpSub64, uintptrT, b.NewValue1(pos, OpZeroExt8to64, uintptrT, b.NewValue1(pos, OpCvtBoolToUint8, f.Config.Types.UInt8, out)), f.ConstInt64(uintptrT, 1))
-			w = b.NewValue2(pos, OpAnd64, uintptrT, w, in)
-			at := b.NewValue2(pos, OpAdd64, uintptrT, result(h, 5), b.NewValue2(pos, OpLsh64x64, uintptrT, b.NewValue2(pos, OpRsh64Ux64, uintptrT, w, f.ConstInt64(uintptrT, 5)), f.ConstInt64(uintptrT, 2)))
-			word := b.NewValue2(pos, OpLoad, u32T, b.NewValue2(pos, OpConvert, u32T.PtrTo(), at, mem), mem)
-			shift := b.NewValue2(pos, OpRsh32Ux64, u32T, word, b.NewValue2(pos, OpAnd64, uintptrT, w, f.ConstInt64(uintptrT, 31)))
-			shift.AuxInt = 1
-			set := b.NewValue2(pos, OpNeq32, boolT, b.NewValue2(pos, OpAnd32, u32T, shift, f.ConstInt32(u32T, 1)), f.ConstInt32(u32T, 0))
-			if check == CSlowStored {
-				v.copyOf(set)
-				break
+			if check != CSlowConv {
+				// The words of an object of C's are what they
+				// were claimed for (runtime/cclaim.go): the
+				// conversion is the runtime's unless the word is
+				// claimed for what the type has there. c is all
+				// ones for an object of C's, whose shift is 3.
+				c := b.NewValue2(pos, OpSub64, uintptrT, b.NewValue2(pos, OpAnd64, uintptrT, b.NewValue2(pos, OpRsh64Ux64, uintptrT, result(h, 4), f.ConstInt64(uintptrT, 2)), f.ConstInt64(uintptrT, 1)), f.ConstInt64(uintptrT, 1))
+				differ := b.NewValue2(pos, OpNeq64, boolT, c, f.ConstInt64(uintptrT, 0))
+				if check != CSlowConvClaim {
+					// The word, or the first one if q is not in
+					// the object: its class is then not looked
+					// at, but it is loaded.
+					w := b.NewValue2(pos, OpRsh64Ux64, uintptrT, b.NewValue2(pos, OpAdd64, uintptrT, off, result(h, 3)), result(h, 4))
+					w.AuxInt = 1 // the shift is less than 64
+					in := b.NewValue2(pos, OpSub64, uintptrT, b.NewValue1(pos, OpZeroExt8to64, uintptrT, b.NewValue1(pos, OpCvtBoolToUint8, f.Config.Types.UInt8, out)), f.ConstInt64(uintptrT, 1))
+					w = b.NewValue2(pos, OpAnd64, uintptrT, w, in)
+					at := b.NewValue2(pos, OpAdd64, uintptrT, result(h, 5), b.NewValue2(pos, OpLsh64x64, uintptrT, b.NewValue2(pos, OpRsh64Ux64, uintptrT, w, f.ConstInt64(uintptrT, 4)), f.ConstInt64(uintptrT, 2)))
+					u32T, u64T := f.Config.Types.UInt32, f.Config.Types.UInt64
+					// The classes of the 16 words that w is one
+					// of, and of the 16 after them: a type of
+					// CConvWords words or less has all of its
+					// words there.
+					lo := b.NewValue2(pos, OpLoad, u32T, b.NewValue2(pos, OpConvert, u32T.PtrTo(), at, mem), mem)
+					hi := b.NewValue2(pos, OpLoad, u32T, b.NewValue2(pos, OpConvert, u32T.PtrTo(), b.NewValue2(pos, OpAdd64, uintptrT, at, f.ConstInt64(uintptrT, 4)), mem), mem)
+					both := b.NewValue2(pos, OpOr64, u64T, b.NewValue1(pos, OpZeroExt32to64, u64T, lo), b.NewValue2(pos, OpLsh64x64, u64T, b.NewValue1(pos, OpZeroExt32to64, u64T, hi), f.ConstInt64(uintptrT, 32)))
+					shift := b.NewValue2(pos, OpLsh64x64, uintptrT, b.NewValue2(pos, OpAnd64, uintptrT, w, f.ConstInt64(uintptrT, 15)), f.ConstInt64(uintptrT, 1))
+					class := b.NewValue2(pos, OpRsh64Ux64, u64T, both, shift)
+					class.AuxInt = 1
+					// The bits of the classes that are to be as
+					// want has them: both for no pointer, in every
+					// word of the type, the high one for a pointer
+					// to anything.
+					size := v.AuxInt >> 16
+					words := (size + 7) / 8
+					bits := int64(uint64(1)<<(2*words) - 1)
+					want := 0x5555555555555555 * CClassScalar & bits
+					if check == CSlowConvUntyped {
+						bits, want = 2, 2
+					}
+					class = b.NewValue2(pos, OpXor64, u64T, b.NewValue2(pos, OpAnd64, u64T, class, f.ConstInt64(u64T, bits)), f.ConstInt64(u64T, want))
+					class = b.NewValue2(pos, OpAnd64, u64T, class, c)
+					differ = b.NewValue2(pos, OpNeq64, boolT, class, f.ConstInt64(u64T, 0))
+					if check == CSlowConvScalar && size > 1 {
+						// What is in a word more than its size
+						// has is the runtime's.
+						more := b.NewValue2(pos, OpLess64U, boolT, f.ConstInt64(uintptrT, words*8-size), b.NewValue2(pos, OpAnd64, uintptrT, q, f.ConstInt64(uintptrT, 7)))
+						differ = b.NewValue2(pos, OpOrB, boolT, differ, more)
+					}
+				}
+				slow = b.NewValue2(pos, OpOrB, boolT, slow, differ)
 			}
-			if check == CSlowScalar {
-				// The call unless the word is known to hold no
-				// pointer already.
-				v.reset(OpOrB)
-				v.AddArg2(out, b.NewValue1(pos, OpNot, boolT, set))
-				break
-			}
-			v.reset(OpOrB)
-			v.AddArg2(out, set)
+			v.copyOf(slow)
 		default:
 			f.Fatalf("bad C23Slow %s", v.LongString())
 		}
@@ -353,9 +378,10 @@ func cSlowVariable(f *Func, v, r *Value) {
 	case CSlowArith:
 		v.reset(OpLess64U)
 		v.AddArg2(f.ConstInt64(uintptrT, varSize), off)
-	case CSlowConv:
+	case CSlowConv, CSlowConvScalar, CSlowConvUntyped, CSlowConvClaim:
 		// (Not past the end of the variable, where the runtime
-		// asks only that it is in the stack.)
+		// asks only that it is in the stack. A variable's words
+		// have no claims.)
 		if size > varSize {
 			cSlowAlways(v)
 			return
@@ -369,8 +395,6 @@ func cSlowVariable(f *Func, v, r *Value) {
 		v.reset(OpOrB)
 		v.AddArg2(out, odd)
 	default:
-		// A store in a variable is not one that the runtime is
-		// told of, and ssagen asks for none.
 		cSlowAlways(v)
 	}
 }

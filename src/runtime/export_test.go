@@ -2273,17 +2273,52 @@ func MallocCTyped(n uintptr, e any) unsafe.Pointer { return c23Malloc(n, efaceOf
 
 func MallocCScalar(n uintptr) unsafe.Pointer { return c23Malloc(n, nil, true) }
 
-func CStorePtr(slot *unsafe.Pointer, val unsafe.Pointer) { c23StorePtr(slot, val) }
-
-func CScalars(p unsafe.Pointer, n uintptr) { c23Scalars(p, n) }
-
 func CHeader(p unsafe.Pointer) (d, n, nc, b8, sh, bits uintptr) { return c23Header(p) }
 
-// CScalar reports whether the word at p, in an object of C's, is known to
-// hold no pointer.
+// CScalar reports whether the word at p, in an object of C's, is claimed
+// for no pointer.
 func CScalar(p unsafe.Pointer) bool {
 	s := cSpanOf(uintptr(p))
 	return s != nil && s.cScalar(uintptr(p))
+}
+
+// CConvert is the conversion of p to a pointer to n values of the type
+// of e, as a package that is C translated by cmd/cc makes it.
+func CConvert(p unsafe.Pointer, e any, n uintptr) { checkptrAlignmentC(p, efaceOf(&e)._type, n) }
+
+// CClasses returns what the words from p on, in an object of C's, are
+// claimed for: '-' nothing, '.' no pointer, 'u' a pointer to anything,
+// 'p' a pointer of a type.
+func CClasses(p unsafe.Pointer, words int) string {
+	s := cSpanOf(uintptr(p))
+	if s == nil || s.cBitsOf() == nil {
+		return ""
+	}
+	b := make([]byte, words)
+	for i := range b {
+		b[i] = "-.up"[cClass(s.cBitsOf(), (uintptr(p)-s.base())/goarch.PtrSize+uintptr(i))]
+	}
+	return string(b)
+}
+
+// CClaimType returns the type that the word at p is claimed for a
+// pointer of, or "".
+func CClaimType(p unsafe.Pointer) string {
+	s := cSpanOf(uintptr(p))
+	if s == nil || s.cBitsOf() == nil || s.cIDsOf() == nil {
+		return ""
+	}
+	w := (uintptr(p) - s.base()) / goarch.PtrSize
+	if cClass(s.cBitsOf(), w) != cTyped {
+		return ""
+	}
+	return toRType(cTypeOf(atomic.Load(s.cIDsOf().word(w)))).string()
+}
+
+// CClaimCounts returns what the claims of C's memory found so far.
+func CClaimCounts() (claims, reclaims, narrowed, forged, bytes uint64) {
+	st := &cClaimStats
+	return st.claims.Load(), st.reclaims.Load(), st.narrowed.Load(), st.forged.Load(), st.bytes.Load()
 }
 
 func CUsable(p unsafe.Pointer) (uintptr, bool) { return c23Usable(p) }

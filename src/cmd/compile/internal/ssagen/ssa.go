@@ -154,13 +154,7 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).
 		CheckPtrAlignmentLoad = typecheck.LookupRuntimeFunc(gd, "checkptrAlignmentLoad")
 	ir.Syms(gd).
-		C23StorePtr = typecheck.LookupRuntimeFunc(gd, "c23StorePtr")
-	ir.Syms(gd).
-		C23Scalars = typecheck.LookupRuntimeFunc(gd, "c23Scalars")
-	ir.Syms(gd).
 		C23Header = typecheck.LookupRuntimeFunc(gd, "c23Header")
-	ir.Syms(gd).
-		C23PointerSlot = typecheck.LookupRuntimeFunc(gd, "c23PointerSlot")
 	ir.Syms(gd).
 		CheckPtrView = typecheck.LookupRuntimeFunc(gd, "checkptrView")
 	ir.Syms(gd).
@@ -1265,7 +1259,20 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 		if elem.HasPointers() {
 			mask = min(elem.Alignment(), int64(s.config.PtrSize)) - 1
 		}
-		s.cSlow(s.newValue3I(ssa.OpC23Slow, types.Types[types.TBOOL], ssa.CSlowAux(ssa.CSlowConv, mask, size), v, v, s.mem()), call, nil)
+		// In an object of C's the words are what they were claimed
+		// for (runtime/cclaim.go): bytes are over anything, a type
+		// of a few words without pointers and an unsafe.Pointer
+		// are compared here, and any other by the runtime.
+		check := ssa.CSlowConvClaim
+		switch {
+		case fn == ir.Syms(s.gd).CheckPtrView:
+			check = ssa.CSlowConv
+		case !elem.HasPointers() && size <= ssa.CConvWords*int64(s.config.PtrSize):
+			check = ssa.CSlowConvScalar
+		case elem.IsUnsafePtr() || elem.IsPtr() && elem.Elem().Size() == 0:
+			check = ssa.CSlowConvUntyped
+		}
+		s.cSlow(s.newValue3I(ssa.OpC23Slow, types.Types[types.TBOOL], ssa.CSlowAux(check, mask, size), v, v, s.mem()), call, nil)
 		return
 	}
 	call()
@@ -2897,15 +2904,6 @@ func (s *state) moveWhichMayOverlap(t *types.Type, dst, src *ssa.Value, mayOverl
 	}
 	if s.tear && s.tearable(t) && !(isStackAddr(dst) && isStackAddr(src)) {
 		s.shareMove(t, dst, src)
-		return
-	}
-	if t.HasPointers() && s.cStore(dst) {
-		// The words may be C's (runtime/cspan.go): typedmemmove
-		// says where the pointers are. It is nosplit, and its
-		// arguments are in registers, so it writes nothing where
-		// the results of a call are, if src is one.
-		s.rtcall(ir.Syms(s.gd).Typedmemmove, true, nil, s.reflectType(t), dst, src)
-		s.curfn.SetWBPos(s.gd, s.peekPos())
 		return
 	}
 	s.rawMove(t, dst, src)
@@ -7425,22 +7423,6 @@ func (s *state) rawStoreType(t *types.Type, left, right *ssa.Value, skip skipMas
 		return
 	}
 
-	if skip == 0 && (t.IsStruct() || t.IsArray()) && t.Size() > int64(s.config.PtrSize) && s.cStore(left) {
-		// The words may be C's (runtime/cspan.go), and the value is
-		// known whole: it is stored as one, from a temporary, by
-		// typedmemmove, which says once what all of its words are.
-		// A store for each pointer of it would say it of one word
-		// at a time, and nothing of the others.
-		tmp := typecheck.TempAt(s.gd, s.peekPos(), s.curfn, t)
-		tmp.SetAddrtaken(true)
-		s.vars[memVar] = s.newValue1A(ssa.OpVarDef, types.TypeMem, tmp, s.mem())
-		addr := s.addr(tmp)
-		s.vars[memVar] = s.newValue3A(ssa.OpStore, types.TypeMem, t, addr, right, s.mem())
-		s.rtcall(ir.Syms(s.gd).Typedmemmove, true, nil, s.reflectType(t), left, addr)
-		s.curfn.SetWBPos(s.gd, s.peekPos())
-		return
-	}
-
 	if types.StringWasm32() {
 		// No write barrier (GOWASM=gc), and word 0 of a string is
 		// written as a pointer before A writes it again: pointers
@@ -7465,27 +7447,6 @@ func (s *state) rawStoreType(t *types.Type, left, right *ssa.Value, skip skipMas
 	if skip&skipPtr == 0 && t.HasPointers() {
 		s.storeTypePtrs(t, left, right)
 	}
-}
-
-// cStore reports whether a store of pointers at dst may be one in the
-// memory that C allocates, which the runtime is to know of
-// (base.Invocation.CStores): dst is not a variable's address.
-func (s *state) cStore(dst *ssa.Value) bool {
-	if !s.gd.CStores {
-		return false
-	}
-	// (Through the nil checks too, which an element of an array that
-	// is a variable has until they are taken out: the pointers that a
-	// check of pointer arithmetic is given are stored in one.)
-	for {
-		switch dst.Op {
-		case ssa.OpNilCheck, ssa.OpOffPtr, ssa.OpAddPtr, ssa.OpPtrIndex, ssa.OpCopy:
-			dst = dst.Args[0]
-			continue
-		}
-		break
-	}
-	return !ssa.IsStackAddr(dst) && !ssa.IsGlobalAddr(dst)
 }
 
 // do *left = right for all scalar (non-pointer) parts of t.
@@ -7583,28 +7544,6 @@ func (s *state) storeTypePtrs(t *types.Type, left, right *ssa.Value) {
 	case t.IsPtrShaped():
 		if t.IsPtr() && t.Elem().NotInHeap() {
 			break // see issue 42032
-		}
-		if s.cStore(left) && right.Op != ssa.OpConstNil {
-			// The word may be one of C's that holds no pointer
-			// (runtime/cspan.go), which the runtime is to
-			// know, unless the bit of the word is at hand
-			// and says that it may hold one (ssa's cheaders):
-			// then it is stored here, and the bit is looked at
-			// again after, for a store of an integer meanwhile.
-			if !s.cHeaders() {
-				s.rtcall(ir.Syms(s.gd).C23StorePtr, true, nil, left, right)
-				break
-			}
-			boolT := types.Types[types.TBOOL]
-			s.cSlow(s.newValue3I(ssa.OpC23Slow, boolT, ssa.CSlowStore, left, left, s.mem()), func() {
-				s.rtcall(ir.Syms(s.gd).C23StorePtr, true, nil, left, right)
-			}, func() {
-				s.store(t, left, right)
-				s.cSlow(s.newValue3I(ssa.OpC23Slow, boolT, ssa.CSlowStored, left, left, s.mem()), func() {
-					s.rtcall(ir.Syms(s.gd).C23PointerSlot, true, nil, left)
-				}, nil)
-			})
-			break
 		}
 		s.store(t, left, right)
 	case t.IsString():
@@ -10114,8 +10053,6 @@ func (e *ssafn) Syslook(name string) *obj.LSym {
 		return ir.Syms(e.gd).SliceHdr
 	case "slicehdrnotinheap":
 		return ir.Syms(e.gd).SliceHdrNotInHeap
-	case "c23Scalars":
-		return ir.Syms(e.gd).C23Scalars
 	case "c23Header":
 		return ir.Syms(e.gd).C23Header
 	}

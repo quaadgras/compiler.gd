@@ -99,9 +99,9 @@ func c0_name(c c23.UInt) *c23.Char {
   functions whose types differ in what their pointers point to (a
   virtual function's `this`), which to Go are different types.
 - **malloc** gives an object of spans that the runtime keeps for C
-  (below): n bytes to every check, and words that the collector knows
-  to hold a pointer or none from what C stores in them. `free` does
-  nothing.
+  (below): n bytes to every check, and words that are what the first
+  conversion of a pointer over them claims them for, which later
+  conversions are compared with. `free` does nothing.
 - **A union** (and a struct that Go cannot lay out as C does: packed,
   over-aligned) is its bytes to Go; its words, each a possible pointer,
   if a member is a pointer, so that the collector sees what C stores.
@@ -115,11 +115,13 @@ func c0_name(c c23.UInt) *c23.Char {
   compiled without the compiler's checks, as the runtime is.
 - **Speed.** On that benchmark (a sorted vector of structs, a tree, a
   hash map with string keys, byte strings), against `gcc -O2`: 0.85 to
-  1.3 times with `-d=checkptr=0`. With the checks it is 1.1 to 1.8
-  times (the vector 1.6, the strings 1.3, the tree 1.1, the hash map
-  1.8): most of them are a comparison in the compiled code (below,
+  1.3 times with `-d=checkptr=0`. With the checks it is 1.3 to 2.3
+  times (the vector 2.3, the strings 1.5, the tree 1.3, the hash map
+  2.3): most of them are a comparison in the compiled code (below,
   "The checks in the compiled code"), and a call into the runtime only
-  for what the comparison does not let through.
+  for what the comparison does not let through. (It was 1.1 to 1.8
+  before the words of malloc's memory were claimed: "The memory that
+  malloc gives" says what is still to be made cheap.)
 
 ### The checks in the compiled code
 
@@ -143,11 +145,12 @@ made of that one by an offset or an index
 - **The checks.** A pointer made by arithmetic is in its root's object,
   or at its end. A conversion to `*T` is to a pointer in an object of
   C's, or `T` is in the stack, the data or the bss whole (for types of
-  4096 bytes or less), and the pointer is aligned. A store of a pointer
-  finds the word's bit, and is a plain store if the word may hold a
-  pointer already, with the bit looked at again after it. A store of
-  integers in memory that has no type yet (below) is a look at the bit,
-  and a call only if it is clear.
+  4096 bytes or less), and the pointer is aligned; and in an object of
+  C's the words are claimed for what `T` has there (below, "The memory
+  that malloc gives"): bytes need no look, a type of 16 words or less
+  with no pointer and a `void *` are a look at the classes of the
+  words, which the header gives, and any other type, a pointer of a
+  type or a struct that has one, is the runtime's.
 - **What fails a comparison** is the runtime's call, which makes the
   whole check and says what it finds; the comparison only lets through
   what the call would have.
@@ -208,120 +211,106 @@ does; the tests set it.
 
 ## The memory that malloc gives
 
-What malloc gives has no type. C makes of it what it stores there, and
-may make something else of it later: an allocator hands out parts of a
-block of bytes, a node that was freed to a list holds text next. So it
-is not a Go object of some type, whose pointers the collector would
-know from the type. It is an object of spans of its own
-(`runtime/cspan.go`), a third set of span classes after Go's and the
-ones of objects that one goroutine reaches, and such a span keeps what
-a type would have said:
+What malloc gives has no type. C makes of it what it converts its
+pointers to, and may make something else of it later: an allocator
+hands out parts of a block of bytes, a node that was freed to a list
+holds text next. So it is not a Go object of some type, whose pointers
+the collector would know from the type. It is an object of spans of its
+own (`runtime/cspan.go`), a third set of span classes after Go's and
+the ones of objects that one goroutine reaches, and such a span keeps
+what a type would have said:
 
-- **For each word, a bit: the word holds no pointer.** The collector
-  skips it. A word whose bit is clear may hold a pointer, and the
-  collector looks at it as it looks at a word of a stack frame that it
-  has no map for: what is there is a pointer if it is the address of
-  an object that is allocated, and is nothing otherwise. So an integer
-  that happens to be an address keeps an object alive at worst, and
-  never stops the program.
+- **For each word, its claim** (`runtime/cclaim.go`): what the word is.
+  Nothing yet; no pointer; a pointer to anything (`void *`,
+  `unsafe.Pointer`); or a pointer of a type, which the span then has
+  for the word. Two bits a word, and four bytes more for a word of a
+  span that has a typed pointer in it.
 - **For each object, the bytes that were asked for.** That is where the
   object ends for pointer arithmetic and for conversions; the slot it
   is in is a size class's, with a byte more for the pointer to its end.
 
-How a word comes to be one or the other:
+The code that uses the memory is typed: it loads and stores through
+pointers that were converted to the types it has for them, and a load
+or a store is checked by nothing. So it is the conversion that says
+what the memory is, and this is the second step of the plan for
+memory-safe `unsafe` (`unsafe.md`, "Compatible types", is the first):
 
 | What C does | The words |
 | --- | --- |
-| `malloc(n)` with no type (`void *p = malloc(n)`) | may all hold pointers |
-| `(T *)malloc(n)`, `calloc`, `realloc` to a `T *` | as an array of T: pointers where T has them |
-| stores a pointer | the word may hold one |
-| `memset` | the whole words it writes hold none |
-| `memcpy`, `memmove` | as the words they are copied from |
-| assigns a struct that has pointers | all of its words, as its type says |
-| stores an integer, a float or a struct of them through a pointer that the compiler knows is into `malloc(n)` with no type | the words it writes in hold none |
-| stores an integer anywhere else, or a byte | unchanged (see below) |
+| `malloc(n)` with no type (`void *p = malloc(n)`), or for bytes (`char *s = malloc(n)`) | not claimed |
+| `(T *)malloc(n)`, `calloc`, `realloc` to a `T *` | claimed as an array of T: for no pointer, or for T's pointer there |
+| converts a pointer to `T *` over words that nothing claimed, which every step of pointer arithmetic does | claimed for what T has there: the one T at the pointer |
+| converts to a `T *` that is compatible with the claims (`unsafe.md`'s rule: the same, an `unsafe.Pointer` or `void *` over a typed pointer, a pointer to a type of the same shape) | unchanged |
+| converts to bytes (`char *`, a type of alignment 1) | unchanged: bytes claim nothing and may be over anything |
+| converts to a `T *` that is not compatible | claimed again for T, and counted |
+| `memset` | unchanged |
+| `memcpy`, `memmove` of whole words, to words that nothing claimed | claimed as the words they are copied from, if those are C's; to words that were claimed, unchanged |
 
-- **A store of a pointer** that the compiler makes in a package of C's,
-  and in internal/c23, where it is not to a variable, is a call to
-  `runtime.c23StorePtr`: it clears the bit before the store, and again
-  after it if something set it meanwhile. The runtime's atomic stores
-  do the same.
-- **A store of a struct or an array that has pointers** is one call to
-  `runtime.typedmemmove`, from a temporary if the value was in
-  registers. The value is known whole, so the bits of all of its words
-  are set at once to what its type says, a word of the bitmap at a
-  time: its integers are known to be integers from then on, which a
-  store for each of its pointers would not say. The runtime's copies
-  of slices and reflect's stores do the same.
-- **A store of what has no pointer, in memory that has no type yet,**
-  is the first to make something of it, and has a call to
-  `runtime.c23Scalars` before it: the words that it writes in, whole
-  or in part, hold no pointer from then on. With the checks in the
-  compiled code (above), a store in one word looks at the word's bit
-  first, and calls only if it is clear. The compiler does this only
-  where it knows the pointer
-  (`cmd/compile/internal/ssa/cscalars.go`): it is the result of
-  `malloc`, `calloc` or `realloc` that was given no type
-  (`void *p = malloc(n)`) in the same function, after inlining, or is
-  made of one by an offset, an index or a conversion. So
-  `void *mem = malloc(sizeof(node)); node *n = mem; n->val = i;` has
-  the call. A store through a parameter, through a pointer that was
-  loaded from memory, or into `(T *)malloc(n)`, whose words are T's
-  already, is the plain store it was. Whether something was stored
-  there since is not followed, so every such store in the function has
-  the look at the bit, or the call, which returns when it finds the bit
-  set. Where the checks are the runtime's, stores that follow one
-  another to the fields of one struct, with no word between them,
-  share one call. A store of a byte has none: C copies anything a byte
-  at a time, a pointer too.
-- **A bit is set** before the words are written, and what they held is
-  the collector's to see first, as for any pointer that is written
-  over while it marks.
-- **The sequence of a span** (`cseq`) is odd while a bit of it changes,
-  as a seqlock's is. Stores do not read it: the order above is enough
-  for them. (The call before a store of integers sets its bits without
-  it: the store comes after the call, so a copy of those words
-  meanwhile, which C does not define, may take a pointer that is about
-  to be written over for an integer.) A copy from one span of C's to
-  another does, since it reads
-  bits and the words they are for together. If the sequence moved while
-  it copied, it takes every word it wrote for a possible pointer.
-- **Go that is not C's** stores pointers with no call. Where such a
-  package converts an `unsafe.Pointer` into C's memory to a type with
-  pointers, the conversion's check clears the bits of those words.
+- **A store is a plain store**, of a pointer too: the conversion that
+  its pointer comes from claimed the word for one. (It was a call to
+  the runtime, `c23StorePtr`, when a word had a bit that a store
+  changed; a store of an integer in memory with no type had a call
+  before it, from a pass of its own; and a struct with pointers was
+  stored by `typedmemmove`. All three are gone.)
+- **The collector** skips a word that is claimed for no pointer, and
+  looks at any other as it looks at a word of a stack frame that it has
+  no map for: what is there is a pointer if it is the address of an
+  object that is allocated, and is nothing otherwise. C keeps `(void
+  *)1` and the address past an array in its pointers, so a word claimed
+  for a pointer is looked at in the same way.
+- **A word that is claimed again** is memory that C uses for something
+  else. The pointers that were converted before are then wrong for it:
+  one of them stores an integer where the new type has a pointer. The
+  plan is to stop the world there, find them, and make of them a
+  pointer that faults; and a word that is claimed for a pointer, and
+  holds what was written as an integer or as bytes, is to hold that
+  faulting pointer too. Neither is done yet: the word keeps what it
+  holds, the collector sees it, and the case is counted.
+  `GODEBUG=cclaims=1` prints the counts when the program exits, and
+  `cclaims=2` the first 64 conversions that claimed a word again.
+- **Go that is not C's** claims with its conversions as C does
+  (`checkptrAlignment`), with Go's rule that what is only loaded
+  through may have integers over pointers.
 
-What it costs, on the benchmark above, against the same translation
-with malloc as Go objects, when the checks were calls into the runtime:
-the vector and the strings 0.7 times, the tree 1.2, the hash map 1.1.
-An object of C's is scanned by itself, not with its span. A store of
-integers in memory with no type, the first time, is a call of about
-5 ns; after that a look at a bit: a loop that only stores longs through
-such a pointer takes 1.9 ns a store, and 0.9 through a `long *` that
-malloc was converted to, with the checks of the pointer.
+What the claims found, 2026-11-25:
 
-What this does not do:
+| Program | Words claimed after malloc | Claimed again | Of those |
+| --- | ---: | ---: | --- |
+| `testdata/programs/bench.c` | 0 | 0 | every allocation has a type |
+| Godot's core, the test of strings, containers and Variant (176 files) | 1758 | 18 | all 18 are Variant's union: its words, claimed for a pointer to anything, converted to `int64`, `float64`, `Vector3`, and back |
+| `testdata/programs/malloc.c`, written to use memory again as an allocator of C's does | 18268 | 1003 | integers over the pointers of blocks that were given back, and the reverse |
 
-- **A store of an integer elsewhere says nothing.** Where the compiler
-  does not know that the memory is malloc's without a type, the bit
-  stays as it was, so a word that held a pointer and now holds an
-  integer is looked at still, which costs time and nothing else. But
-  the collector is not shown the pointer that an integer is written
-  over while it marks. If that was the last pointer to an object but
-  for one that C has just loaded, the object is freed while C still
-  uses it. That takes memory with a type in which a pointer and an
-  integer have the same word: a union, or a block that C uses again
-  for something else without malloc. The same is true of a union in a
-  Go variable.
-- **A function that only passes on what malloc gave** (`xmalloc`, an
-  allocator of C++'s) hides it, unless it is inlined: its callers'
-  stores are plain stores, and the words they write in are looked at.
-- **An integer read as a pointer** is the integer: a word of C's is
-  what was last stored in it, and a conversion cannot know what will
-  be loaded. What Go's rule refuses for a Go object (`unsafe.md`: a
-  pointer where the memory has an integer) is not refused here.
-- **A package of Go's that C hands a typed pointer to**, with no
-  conversion of its own, stores pointers through it unseen. If C has
-  set the word's bit since, the collector does not see what is stored.
+So in the C++ that this was built for, memory is claimed again where a
+union is, and nowhere else: what stopping the world there would cost
+depends on unions being something else first (step 7).
+
+What it costs, on the benchmark above against `gcc -O2`: the vector 2.3
+times (1.6 before the claims), the tree 1.3 (1.1), the hash map 2.3
+(1.8), the strings 1.5 (1.3). The vector's conversions are two loads of
+classes each, where there was a comparison of bounds; the hash map's are
+of typed pointers, in the runtime; and the strings are scanned by the
+collector, as words that nothing claimed (below).
+
+What this does not do yet:
+
+- **A conversion to a typed pointer, or to a struct that has one,** in
+  an object of C's is a call to `checkptrAlignmentC`, which compares
+  each word's claim. What would make it a comparison in the compiled
+  code: the type of the run of values that an object was allocated
+  for, kept for the object and given by the header.
+- **A word that nothing claimed is still looked at by the collector**,
+  as before, so that a pointer that got there with no conversion is not
+  lost: `unsafe.Slice` over C's memory claims one element, a copy from
+  a variable of the stack or from a Go object with pointers claims
+  nothing since where their pointers are is not looked up, and
+  internal/c23's own stores are not checked. Once those claim, such a
+  word is bytes and is skipped.
+- **A union** is words that its members are converted over, each a
+  claim again of the same word: until unions are Go interfaces (the
+  plan's step 7) they are counted with the rest.
+- **A store of a byte over a pointer** is not seen (step 3).
+- **A string, a slice or an interface of Go's** in C's memory is
+  claimed as its pointers and integers, not as what it is.
 - **`new`** and the variables that the compiler moves to the heap are
   Go objects still, with the byte after them.
 - **wasm.**

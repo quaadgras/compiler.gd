@@ -340,6 +340,7 @@ func main() {
 	}
 
 	printShareStats()
+	cClaimReport()
 	exit(0)
 	for {
 		var x *int32
@@ -353,6 +354,7 @@ func main() {
 func os_beforeExit(exitCode int) {
 	runExitHooks(exitCode)
 	printShareStats()
+	cClaimReport()
 	if exitCode == 0 && raceenabled {
 		racefini()
 	}

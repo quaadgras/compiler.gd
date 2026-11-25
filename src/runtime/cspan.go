@@ -14,19 +14,23 @@ import (
 
 // The memory that C allocates (doc/gd/cc.md).
 //
-// What malloc gives has no type: C makes of it what it stores there, and
-// may make something else of it later. So it is not allocated as a Go
-// object of some type, whose pointers the collector would know from the
-// type. It is allocated in spans of its own, the spans of the classes of
-// C (spanClass.c), and such a span keeps for itself what a type would
-// have said (cBits):
+// What malloc gives has no type: C makes of it what it converts its
+// pointers to, and may make something else of it later. So it is not
+// allocated as a Go object of some type, whose pointers the collector
+// would know from the type. It is allocated in spans of its own, the
+// spans of the classes of C (spanClass.c), and such a span keeps for
+// itself what a type would have said (cBits):
 //
-//   - for each word of the span, a bit that says that the word holds no
-//     pointer. A word whose bit is clear may hold one, and the collector
-//     looks at it as it looks at a word of a stack frame that has no map:
+//   - for each word of the span, its claim (cclaim.go): what the first
+//     pointer that was converted to a type over it took it for. Nothing
+//     yet, something that is no pointer, a pointer to anything, or a
+//     pointer of a type, which is then in the span's ids. The collector
+//     skips a word that is claimed for no pointer, and looks at any
+//     other as it looks at a word of a stack frame that has no map:
 //     what is there is a pointer if it is the address of an object that
 //     is allocated, and is nothing otherwise (scanObjectC). An object
-//     begins with all of its bits clear;
+//     begins with none of its words claimed, unless malloc is told what
+//     it is for;
 //   - for each object, the number of bytes that were asked for, which is
 //     where the object ends for C: less than its slot, which is a size
 //     class's and has a byte more besides (cPad).
@@ -41,15 +45,25 @@ import (
 // object's slot and to no other object.
 const cPad = 1
 
-// cBitsWord is the number of words of memory that one word of the bitmap
-// is for.
-const cBitsWord = 32
+// cClassPer is the number of words of memory whose classes one uint32
+// of a span's cBits has, two bits each.
+const cClassPer = 16
 
-// cBits is what a span of C's objects keeps for them: a bitmap of the
-// words of the span, in uint32s, and after it, in a span of small
+// The class of a word of C's: what it was claimed for.
+const (
+	cUnclaimed = 0 // nothing yet: its bytes are whatever was written there
+	cScalar    = 1 // no pointer
+	cUntyped   = 2 // a pointer to anything: unsafe.Pointer, C's void *
+	cTyped     = 3 // a pointer of the type that the span's ids have for the word
+)
+
+// cBits is what a span of C's objects keeps for them: the classes of
+// the words of the span, in uint32s, and after them, in a span of small
 // objects, the uint16 sizes of the objects. It is outside the heap, as
 // long as its span needs (cBitsBytes), and goes back to a free list with
-// its span.
+// its span. The types of the words that are typed pointers are in
+// another, the span's ids (cIDsOf), which a span has once it has such a
+// word: a uint32 for each word of the span.
 type cBits struct {
 	_ sys.NotInHeap
 	_ uint32
@@ -59,14 +73,29 @@ type cBits struct {
 // where the collector expects a pointer (wbBufFlush1).
 var cSpansUsed bool
 
-// cBitsWords returns the number of uint32s of the bitmap of s.
+// cBitsWords returns the number of uint32s of the classes of s.
 func (s *mspan) cBitsWords() uintptr {
-	return s.npages * (pageSize / goarch.PtrSize / cBitsWord)
+	return s.npages * (pageSize / goarch.PtrSize / cClassPer)
+}
+
+// cIDsBytes returns the size of the ids of s.
+func (s *mspan) cIDsBytes() uintptr {
+	return s.npages * (pageSize / goarch.PtrSize * 4)
+}
+
+// cIDsOf returns the ids of s, a span of C's objects: nil if no word of
+// it was claimed for a typed pointer yet.
+//
+//go:nosplit
+func (s *mspan) cIDsOf() *cBits {
+	return (*cBits)(atomic.Loadp(unsafe.Pointer(&s.cids)))
 }
 
 // cBitsBytes returns the size of the cBits of s.
 func (s *mspan) cBitsBytes() uintptr {
-	n := s.cBitsWords() * 4
+	// (And a uint32 after the classes, which compiled code loads
+	// with the last of them: cmd/compile/internal/ssa's cheaders.)
+	n := s.cBitsWords()*4 + 4
 	if s.spanclass.sizeclass() != 0 {
 		n += uintptr(s.nelems) * 2
 	}
@@ -88,17 +117,42 @@ func (b *cBits) word(i uintptr) *uint32 {
 	return (*uint32)(add(unsafe.Pointer(b), i*4))
 }
 
+// cClass returns the class of the w'th word of a span.
+//
+//go:nosplit
+func cClass(b *cBits, w uintptr) uint32 {
+	return atomic.Load(b.word(w/cClassPer)) >> (w % cClassPer * 2) & 3
+}
+
+// cClassSet makes c the class of the n words from the w'th of a span:
+// other objects have classes in the same uint32s, so one is changed as
+// a whole.
+//
+//go:nosplit
+func cClassSet(b *cBits, w, n uintptr, c uint32) {
+	for n > 0 {
+		p := b.word(w / cClassPer)
+		k := min(n, cClassPer-w%cClassPer)
+		mask := uint32(uint64(1)<<(2*k)-1) << (w % cClassPer * 2)
+		val := 0x55555555 * c & mask
+		for {
+			old := atomic.Load(p)
+			if old&mask == val || atomic.Cas(p, old, old&^mask|val) {
+				break
+			}
+		}
+		w += k
+		n -= k
+	}
+}
+
 // cScalar reports whether the word at a in s, a span of C's objects, is
-// known to hold no pointer.
+// claimed for no pointer.
 //
 //go:nosplit
 func (s *mspan) cScalar(a uintptr) bool {
 	b := s.cBitsOf()
-	if b == nil {
-		return false
-	}
-	w := (a - s.base()) / goarch.PtrSize
-	return atomic.Load(b.word(w/cBitsWord))>>(w%cBitsWord)&1 != 0
+	return b != nil && cClass(b, (a-s.base())/goarch.PtrSize) == cScalar
 }
 
 // cSizeOf returns the number of bytes that the i'th object of s, a span
@@ -133,10 +187,9 @@ func cBitsOrder(n uintptr) uint {
 	return o
 }
 
-// newCBits gives s, in which nothing is allocated, its cBits: every word
-// may hold a pointer.
-func (s *mspan) newCBits() *cBits {
-	n := s.cBitsBytes()
+// cMetaAlloc returns n bytes outside the heap, zeroed, for the cBits or
+// the ids of a span.
+func cMetaAlloc(n uintptr) *cBits {
 	o := cBitsOrder(n)
 	var b *cBits
 	systemstack(func() {
@@ -159,20 +212,13 @@ func (s *mspan) newCBits() *cBits {
 			b = (*cBits)(persistentalloc(uintptr(1)<<o, 8, &memstats.gcMiscSys))
 		}
 	})
-	atomic.StorepNoWB(unsafe.Pointer(&s.cbits), unsafe.Pointer(b))
 	return b
 }
 
-// freeCBits gives back the cBits of s, which holds no objects.
+// cMetaFree gives back the n bytes at b that cMetaAlloc gave.
 //
 // mheap_.lock must be held.
-func (s *mspan) freeCBits() {
-	b := s.cBitsOf()
-	if b == nil {
-		return
-	}
-	n := s.cBitsBytes()
-	atomic.StorepNoWB(unsafe.Pointer(&s.cbits), nil)
+func cMetaFree(b *cBits, n uintptr) {
 	if o := cBitsOrder(n); o > cBitsMaxOrder {
 		sysFree(unsafe.Pointer(b), alignUp(n, physPageSize), &memstats.gcMiscSys)
 	} else {
@@ -181,9 +227,50 @@ func (s *mspan) freeCBits() {
 	}
 }
 
+// newCBits gives s, in which nothing is allocated, its cBits: no word is
+// claimed.
+func (s *mspan) newCBits() *cBits {
+	b := cMetaAlloc(s.cBitsBytes())
+	atomic.StorepNoWB(unsafe.Pointer(&s.cbits), unsafe.Pointer(b))
+	return b
+}
+
+// newCIDs gives s its ids, or returns the ones that it was given
+// meanwhile.
+func (s *mspan) newCIDs() *cBits {
+	n := s.cIDsBytes()
+	b := cMetaAlloc(n)
+	if !atomic.Casp1((*unsafe.Pointer)(unsafe.Pointer(&s.cids)), nil, unsafe.Pointer(b)) {
+		systemstack(func() {
+			lock(&mheap_.lock)
+			cMetaFree(b, n)
+			unlock(&mheap_.lock)
+		})
+		b = s.cIDsOf()
+	}
+	return b
+}
+
+// freeCBits gives back the cBits and the ids of s, which holds no
+// objects.
+//
+// mheap_.lock must be held.
+func (s *mspan) freeCBits() {
+	if b := s.cBitsOf(); b != nil {
+		n := s.cBitsBytes()
+		atomic.StorepNoWB(unsafe.Pointer(&s.cbits), nil)
+		cMetaFree(b, n)
+	}
+	if b := s.cIDsOf(); b != nil {
+		n := s.cIDsBytes()
+		atomic.StorepNoWB(unsafe.Pointer(&s.cids), nil)
+		cMetaFree(b, n)
+	}
+}
+
 // cInitObject makes the slot at x of s, which is zero, an object that
-// was asked for size bytes: every word of it may hold a pointer. The
-// caller is allocating it, and has not published it.
+// was asked for size bytes: no word of it is claimed. The caller is
+// allocating it, and has not published it.
 func (s *mspan) cInitObject(x, size uintptr) {
 	b := s.cBitsOf()
 	if b == nil {
@@ -194,29 +281,7 @@ func (s *mspan) cInitObject(x, size uintptr) {
 	} else {
 		*(*uint16)(add(unsafe.Pointer(b), s.cBitsWords()*4+s.objIndex(x)*2)) = uint16(size)
 	}
-	cBitsSet(b, (x-s.base())/goarch.PtrSize, s.elemsize/goarch.PtrSize, false)
-}
-
-// cBitsSet sets or clears the bits of the n words from the w'th of a
-// span: other objects have bits in the same uint32s, so one is changed
-// as a whole.
-func cBitsSet(b *cBits, w, n uintptr, scalar bool) {
-	for n > 0 {
-		p := b.word(w / cBitsWord)
-		k := min(n, cBitsWord-w%cBitsWord)
-		mask := uint32(1)<<k - 1
-		if k == cBitsWord {
-			mask = ^uint32(0)
-		}
-		mask <<= w % cBitsWord
-		if have := atomic.Load(p); scalar && have&mask != mask {
-			atomic.Or(p, mask)
-		} else if !scalar && have&mask != 0 {
-			atomic.And(p, ^mask)
-		}
-		w += k
-		n -= k
-	}
+	cClassSet(b, (x-s.base())/goarch.PtrSize, s.elemsize/goarch.PtrSize, cUnclaimed)
 }
 
 // mallocC allocates size bytes for C, zeroed: malloc. The object is one
@@ -440,15 +505,15 @@ func scanObjectC(b uintptr, s *mspan, gcw *gcWork) {
 	w := (b - s.base()) / goarch.PtrSize
 	for i := uintptr(0); i < n; i, w = i+goarch.PtrSize, w+1 {
 		if bits != nil {
-			scalar := atomic.Load(bits.word(w / cBitsWord))
-			if scalar == ^uint32(0) && w%cBitsWord == 0 {
+			classes := atomic.Load(bits.word(w / cClassPer))
+			if classes == 0x55555555*cScalar && w%cClassPer == 0 {
 				// Skip the words of this uint32 (the loop
 				// increment will do the last).
-				i += (cBitsWord - 1) * goarch.PtrSize
-				w += cBitsWord - 1
+				i += (cClassPer - 1) * goarch.PtrSize
+				w += cClassPer - 1
 				continue
 			}
-			if scalar>>(w%cBitsWord)&1 != 0 {
+			if classes>>(w%cClassPer*2)&3 == cScalar {
 				continue
 			}
 		}
@@ -475,7 +540,7 @@ func bulkBarrierC(s *mspan, dst, src, size uintptr, old bool) {
 	buf := &getg().m.p.ptr().wbBuf
 	w := (dst - s.base()) / goarch.PtrSize
 	for i := uintptr(0); i < size; i, w = i+goarch.PtrSize, w+1 {
-		if bits != nil && atomic.Load(bits.word(w/cBitsWord))>>(w%cBitsWord)&1 != 0 {
+		if bits != nil && cClass(bits, w) == cScalar {
 			continue
 		}
 		if old {
@@ -489,55 +554,6 @@ func bulkBarrierC(s *mspan, dst, src, size uintptr, old bool) {
 	}
 }
 
-// The bits of a span of C's objects change as C stores.
-//
-// A word whose bit is set holds no pointer: the collector does not look
-// at it, and a conversion to a pointer type that has a pointer there is
-// refused if what the word holds is an address (checkptrPointers). So:
-//
-//   - a pointer is stored in a word of C's with the bit clear. A store of
-//     a pointer that the compiler makes in a package of C's goes through
-//     c23StorePtr, and the runtime's atomic stores of pointers look as it
-//     does: the bit is cleared before the store, and again after it if
-//     it was set meanwhile;
-//   - a value of a type with pointers is stored whole by typedmemmove,
-//     which the compiler calls for it in a package of C's: the bits of
-//     all of its words become what the type says, at once (cTyped);
-//   - a bit is set by what stores no pointers and knows it: memset, a
-//     copy of words that hold none, an allocation that says what its
-//     words are, and a store of integers that the compiler makes in a
-//     package of C's through a pointer that it knows to be into what
-//     malloc gave with no type (c23Scalars). The bit is set before the
-//     words are written, and what the words held is the collector's to
-//     see first, as for any pointer that is written over while it marks.
-//
-// A bit that changes does so under the span's sequence (cseq), which is
-// odd meanwhile, as a seqlock's is. Stores do not read it. What reads
-// bits together with the words they are for does: a copy from a span of
-// C's takes the source's bits for the destination's, and if the sequence
-// moved while it copied, a word it took for an integer may be a pointer
-// by now, so it takes all of them for possible pointers instead.
-
-// cLock makes the sequence of s odd: the caller changes bits of s. It
-// cannot be preempted until cUnlock.
-//
-//go:nosplit
-func (s *mspan) cLock() {
-	for i := 0; ; i++ {
-		if v := s.cseq.Load(); v&1 == 0 && s.cseq.CompareAndSwap(v, v+1) {
-			return
-		}
-		if i < 64 {
-			procyield(16)
-		} else {
-			osyield()
-		}
-	}
-}
-
-//go:nosplit
-func (s *mspan) cUnlock() { s.cseq.Add(1) }
-
 // cSpanOf returns the span of C's objects that p points into, if it
 // does.
 //
@@ -547,606 +563,6 @@ func cSpanOf(p uintptr) *mspan {
 		return s
 	}
 	return nil
-}
-
-// cBitsGet returns the bits of the k words from the w'th of a span, at
-// most cBitsWord of them.
-//
-//go:nosplit
-func cBitsGet(b *cBits, w, k uintptr) uint32 {
-	v := uint64(atomic.Load(b.word(w / cBitsWord)))
-	if w%cBitsWord+k > cBitsWord {
-		v |= uint64(atomic.Load(b.word(w/cBitsWord+1))) << cBitsWord
-	}
-	return uint32(v>>(w%cBitsWord)) & uint32(uint64(1)<<k-1)
-}
-
-// cPointers clears the bits of the n words from the w'th of s: they may
-// hold pointers.
-//
-//go:nosplit
-func (s *mspan) cPointers(b *cBits, w, n uintptr) {
-	locked := false
-	for n > 0 {
-		p := b.word(w / cBitsWord)
-		k := min(n, cBitsWord-w%cBitsWord)
-		mask := uint32(uint64(1)<<k-1) << (w % cBitsWord)
-		if atomic.Load(p)&mask != 0 {
-			if !locked {
-				s.cLock()
-				locked = true
-			}
-			atomic.And(p, ^mask)
-		}
-		w += k
-		n -= k
-	}
-	if locked {
-		s.cUnlock()
-	}
-}
-
-// cPointerSlot is for a store of a pointer at slot, before it and after
-// it: if slot is a word of C's, the word may hold a pointer.
-//
-//go:nosplit
-func cPointerSlot(slot uintptr) {
-	if s := cSpanOf(slot); s != nil {
-		if b := s.cBitsOf(); b != nil {
-			w := (slot - s.base()) / goarch.PtrSize
-			if atomic.Load(b.word(w/cBitsWord))>>(w%cBitsWord)&1 != 0 {
-				s.cPointers(b, w, 1)
-			}
-		}
-	}
-}
-
-// c23StorePtr is *slot = val for a store that the compiler makes in a
-// package of C translated by cmd/cc, where slot is not known to be a
-// variable's: it may be a word of C's that holds no pointer.
-//
-//go:nosplit
-func c23StorePtr(slot *unsafe.Pointer, val unsafe.Pointer) {
-	if val != nil {
-		if s := cSpanOf(uintptr(unsafe.Pointer(slot))); s != nil {
-			if b := s.cBitsOf(); b != nil {
-				w := (uintptr(unsafe.Pointer(slot)) - s.base()) / goarch.PtrSize
-				p, shift := b.word(w/cBitsWord), w%cBitsWord
-				if atomic.Load(p)>>shift&1 != 0 {
-					s.cPointers(b, w, 1)
-				}
-				*slot = val
-				if atomic.Load(p)>>shift&1 != 0 {
-					// A store of an integer here set it
-					// between the two.
-					s.cPointers(b, w, 1)
-				}
-				return
-			}
-		}
-	}
-	*slot = val
-}
-
-// cTyped is for a copy of n values of typ to dst, before it: if dst is
-// words of C's, they are what typ says from here on, possible pointers
-// where it has pointers and words that hold none elsewhere, whatever
-// they were. A value's bits are set as a whole, a uint32 of the bitmap
-// at a time, and not for each pointer of it. The collector sees what
-// the words held first, if it is marking.
-//
-// It reports whether dst is C's, and returns the span if it left it
-// locked: the caller unlocks it when the words are written, and then
-// calls cTypedPointers, for a word that something else set meanwhile.
-//
-//go:nosplit
-func cTyped(dst uintptr, typ *_type, n uintptr) (inC bool, locked *mspan) {
-	s := cSpanOf(dst)
-	if s == nil {
-		return false, nil
-	}
-	b := s.cBitsOf()
-	if b == nil {
-		return true, nil
-	}
-	if dst%goarch.PtrSize != 0 || typ.Size_%goarch.PtrSize != 0 {
-		// Not whole words: only the pointers are known.
-		cTypedPointers(dst, typ, n)
-		return true, nil
-	}
-	mask := getGCMask(typ)
-	ptrs := typ.PtrBytes / goarch.PtrSize
-	each := typ.Size_ / goarch.PtrSize
-	w0 := (dst - s.base()) / goarch.PtrSize
-	// (No further than the object's slot, whatever is copied.)
-	total := min(n*each, (s.objIndex(dst)+1)*s.elemsize/goarch.PtrSize-w0)
-	if total == 0 {
-		return true, nil
-	}
-	cShade(b, w0, dst, 0, total)
-	var want, ours uint32 // the bits of this uint32 that are set, and that are the value's
-	for i := uintptr(0); i < total; i++ {
-		bit := uint32(1) << ((w0 + i) % cBitsWord)
-		ours |= bit
-		if f := i % each; f >= ptrs || *addb(mask, f/8)>>(f%8)&1 == 0 {
-			want |= bit
-		}
-		if (w0+i)%cBitsWord == cBitsWord-1 || i == total-1 {
-			p := b.word((w0 + i) / cBitsWord)
-			if have := atomic.Load(p) & ours; have != want {
-				if locked == nil {
-					s.cLock()
-					locked = s
-				}
-				if set := want &^ have; set != 0 {
-					atomic.Or(p, set)
-				}
-				if clear := have &^ want; clear != 0 {
-					atomic.And(p, ^clear)
-				}
-			}
-			want, ours = 0, 0
-		}
-	}
-	return true, locked
-}
-
-// cTypedPointers is for a copy of n values of typ to dst, after it:
-// where typ has a pointer, a word of C's at dst may hold one. It
-// reports whether dst is C's.
-//
-//go:nosplit
-func cTypedPointers(dst uintptr, typ *_type, n uintptr) bool {
-	s := cSpanOf(dst)
-	if s == nil {
-		return false
-	}
-	b := s.cBitsOf()
-	if b == nil {
-		return true
-	}
-	mask := getGCMask(typ)
-	words := typ.PtrBytes / goarch.PtrSize
-	limit := (s.objIndex(dst) + 1) * s.elemsize / goarch.PtrSize // of the object's slot
-	for i := uintptr(0); i < n; i++ {
-		w0 := (dst + i*typ.Size_ - s.base()) / goarch.PtrSize
-		for w := uintptr(0); w < words && w0+w < limit; w++ {
-			if *addb(mask, w/8)>>(w%8)&1 != 0 && atomic.Load(b.word((w0+w)/cBitsWord))>>((w0+w)%cBitsWord)&1 != 0 {
-				s.cPointers(b, w0+w, 1)
-			}
-		}
-	}
-	return true
-}
-
-// cShade is the collector's barrier for the n words of C's from the w'th
-// of a span, at dst, that may hold pointers, if the collector is
-// marking: it sees what they hold, and what the words at src do, which
-// are stored there next, if src is not 0.
-//
-//go:nosplit
-func cShade(b *cBits, w, dst, src, n uintptr) {
-	if !writeBarrier.enabled {
-		return
-	}
-	buf := &getg().m.p.ptr().wbBuf
-	for i := uintptr(0); i < n; i++ {
-		if atomic.Load(b.word((w+i)/cBitsWord))>>((w+i)%cBitsWord)&1 == 0 {
-			p := buf.get1()
-			p[0] = *(*uintptr)(unsafe.Pointer(dst + i*goarch.PtrSize))
-		}
-		if src != 0 {
-			p := buf.get1()
-			p[0] = *(*uintptr)(unsafe.Pointer(src + i*goarch.PtrSize))
-		}
-	}
-}
-
-// cScalars sets the bits of the n words from the w'th of s, which the
-// caller is about to write integers in, and has shaded. It returns
-// with s locked if any was clear: the caller unlocks it when the words
-// are written.
-//
-//go:nosplit
-func (s *mspan) cScalars(b *cBits, w, n uintptr) (locked bool) {
-	for n > 0 {
-		p := b.word(w / cBitsWord)
-		k := min(n, cBitsWord-w%cBitsWord)
-		mask := uint32(uint64(1)<<k-1) << (w % cBitsWord)
-		if atomic.Load(p)&mask != mask {
-			if !locked {
-				s.cLock()
-				locked = true
-			}
-			atomic.Or(p, mask)
-		}
-		w += k
-		n -= k
-	}
-	return locked
-}
-
-// c23Scalars is for a store of n bytes at p that holds no pointer, before
-// it: one that the compiler makes in a package of C's through a pointer
-// that it knows to be into what malloc gave with no type
-// (cmd/compile/internal/ssa/cscalars.go), which is the memory whose
-// words nothing has said anything of yet. The words that the store
-// writes in, whole or in part, hold no pointer from here on, and what
-// they held is the collector's to see first. It does nothing for a
-// word of anything else.
-//
-// The bits are set without the span's sequence, which memset has
-// until it has written: the store comes after this returns, so the
-// sequence would not be for it. A copy of these words meanwhile is one
-// that C does not define, and it takes what it finds there for an
-// integer.
-//
-//go:nosplit
-func c23Scalars(p unsafe.Pointer, n uintptr) {
-	s := cSpanOf(uintptr(p))
-	if s == nil {
-		return
-	}
-	b := s.cBitsOf()
-	if b == nil {
-		return
-	}
-	base := s.base()
-	w := (uintptr(p) - base) / goarch.PtrSize
-	if (uintptr(p)+n-1-base)/goarch.PtrSize == w {
-		// One word, as most stores are.
-		bits, bit := b.word(w/cBitsWord), uint32(1)<<(w%cBitsWord)
-		if atomic.Load(bits)&bit == 0 {
-			cShade(b, w, base+w*goarch.PtrSize, 0, 1)
-			atomic.Or(bits, bit)
-		}
-		return
-	}
-	// (No further than the object's slot, whatever is stored.)
-	end := min(uintptr(p)+n, base+(s.objIndex(uintptr(p))+1)*s.elemsize)
-	k := (alignUp(end, goarch.PtrSize)-base)/goarch.PtrSize - w
-	cShade(b, w, base+w*goarch.PtrSize, 0, k)
-	cBitsSet(b, w, k, true)
-}
-
-// cConvMax is the size of the largest type that compiled code converts
-// a pointer to with no more than c23Header's word for it: what is that
-// far from the end of the stack, the data or the bss is in it whole.
-// (cmd/compile/internal/ssa's CConvMax.)
-const cConvMax = 4096
-
-// cNoBits is the bitmap of what is not C's, for c23Header: no word of it
-// holds no pointer.
-var cNoBits uint32
-
-// c23Header returns what does not change of where p points for as long
-// as what it points into is alive, for the checks and the stores that
-// compiled code makes through the pointers that are made of p
-// (cmd/compile/internal/ssa/cheaders.go): it is looked for once for p,
-// before a loop if p is from before it, and each check is then a
-// comparison in the compiled code, with the call it was for what the
-// comparison does not let through.
-//
-// A pointer q made of p is into what p points into, or to its end, if
-//
-//	uintptr(q) - uintptr(p) + d <= n
-//
-// which is so of nothing else. That is the object of the heap that p is
-// in, as far as it was asked for if it is one of C's; the goroutine's
-// stack from p on; or the section of data or bss that p is in. (The numbers
-// are relative to p, which the compiled code has: a stack that moves
-// takes p with it, and they stay as they are.) Of anything else, only
-// p itself is.
-//
-// A q that is converted to a pointer to a type of cConvMax bytes or
-// less, for which
-//
-//	uintptr(q) - uintptr(p) + d < nc
-//
-// needs no other check than that of its alignment (checkptrAlignmentC,
-// checkptrView): it is in an object of C's or at its end, or what the
-// type covers is in the stack, the data or the bss. nc is 0 for an
-// object of Go's, which has a type to look at.
-//
-// If p is in an object of C's, the bit of the word that q is at, which
-// says that the word holds no pointer, is bit w%32 of the uint32 at
-// bits + w/32*4, where
-//
-//	w = (uintptr(q) - uintptr(p) + d + b8) >> sh
-//
-// For what is not C's, that is a bit that is never set: its words may
-// all hold pointers.
-//
-//go:nosplit
-func c23Header(p unsafe.Pointer) (d, n, nc, b8, sh, bits uintptr) {
-	sh, bits = 63, uintptr(unsafe.Pointer(&cNoBits))
-	a := uintptr(p)
-	if gp := getg(); gp.stack.lo <= a && a < gp.stack.hi {
-		n = gp.stack.hi - a - 1
-		return 0, n, max(n+1, cConvMax) - cConvMax, 0, sh, bits
-	}
-	if s := spanOfHeap(a); s != nil {
-		if s.isUserArenaChunk {
-			return
-		}
-		i := s.objIndex(a)
-		base := s.base() + i*s.elemsize
-		if !s.spanclass.c() {
-			return a - base, s.elemsize - 1, 0, 0, sh, bits
-		}
-		b := s.cBitsOf()
-		if b == nil {
-			return
-		}
-		size := s.cSizeOf(i)
-		return a - base, size, size + 1, base - s.base(), 3, uintptr(unsafe.Pointer(b))
-	}
-	for _, datap := range activeModules() {
-		for _, r := range [...][2]uintptr{
-			{datap.data, datap.edata}, {datap.bss, datap.ebss},
-			{datap.noptrdata, datap.enoptrdata}, {datap.noptrbss, datap.enoptrbss},
-		} {
-			if r[0] <= a && a < r[1] {
-				n = r[1] - r[0] - 1
-				return a - r[0], n, max(n+1, cConvMax) - cConvMax, 0, sh, bits
-			}
-		}
-	}
-	return
-}
-
-// c23PointerSlot is for a store of a pointer at slot that compiled code
-// made itself, after it (c23Header): if something set the bit of the
-// word meanwhile, the word may hold a pointer all the same.
-//
-//go:nosplit
-func c23PointerSlot(slot unsafe.Pointer) {
-	cPointerSlot(uintptr(slot))
-}
-
-// c23slow reports whether a check of the pointer q, which is made of p,
-// is to be made by the runtime: compiled code calls it where it has
-// nothing of c23Header's for p, and the compiler makes of the call what
-// it knows.
-func c23slow(q, p unsafe.Pointer) bool { return true }
-
-// c23Malloc is malloc for C translated by cmd/cc (internal/c23): size
-// bytes, zeroed. If typ is not nil the object is for values of typ: its
-// words hold pointers where typ has them and nowhere else, until C
-// stores otherwise. If scalar is set, no word of it holds a pointer,
-// until C stores one.
-//
-//go:linkname c23Malloc
-func c23Malloc(size uintptr, typ *_type, scalar bool) unsafe.Pointer {
-	x := mallocC(size)
-	if x == nil || !scalar && typ == nil {
-		return x
-	}
-	// The object is not reached yet by anything that looks at bits.
-	s := spanOfUnchecked(uintptr(x))
-	b := s.cBitsOf()
-	w := (uintptr(x) - s.base()) / goarch.PtrSize
-	n := s.elemsize / goarch.PtrSize
-	if scalar || !typ.Pointers() {
-		cBitsSet(b, w, n, true)
-		return x
-	}
-	if typ.Size_%goarch.PtrSize != 0 || typ.Size_ == 0 {
-		return x
-	}
-	mask := getGCMask(typ)
-	ptrs := typ.PtrBytes / goarch.PtrSize
-	each := typ.Size_ / goarch.PtrSize
-	// The whole values of typ that fit in size, and no more: what is
-	// left of the slot is anything. One uint32 of the bitmap at a
-	// time: other objects have bits in the same ones.
-	total := size / typ.Size_ * each
-	var set uint32
-	for i := uintptr(0); i < total; i++ {
-		if f := i % each; f >= ptrs || *addb(mask, f/8)>>(f%8)&1 == 0 {
-			set |= 1 << ((w + i) % cBitsWord)
-		}
-		if (w+i)%cBitsWord == cBitsWord-1 || i == total-1 {
-			if set != 0 {
-				atomic.Or(b.word((w+i)/cBitsWord), set)
-			}
-			set = 0
-		}
-	}
-	publicationBarrier()
-	return x
-}
-
-// c23Memmove is memmove for C: the words of it that may be whole
-// pointers are copied as pointers are, with the collector's barrier, and
-// the bytes before and after them as bytes. If it copies to an object
-// of C's, the words there are then what the words they are copied from
-// were: possible pointers, or none.
-//
-//go:linkname c23Memmove
-//go:nosplit
-func c23Memmove(dst, src unsafe.Pointer, n uintptr) {
-	if dst == src || n == 0 {
-		return
-	}
-	d, sr := uintptr(dst), uintptr(src)
-	lo, hi := alignDown(d, goarch.PtrSize), alignUp(d+n, goarch.PtrSize)
-	wlo, whi := alignUp(d, goarch.PtrSize), alignDown(d+n, goarch.PtrSize)
-	aligned := (d^sr)&(goarch.PtrSize-1) == 0
-	ds := cSpanOf(d)
-	var b *cBits
-	if ds != nil {
-		b = ds.cBitsOf()
-	}
-	if b == nil {
-		// A destination of Go's: its own bitmap says where its
-		// pointers are.
-		if writeBarrier.enabled && aligned && wlo < whi {
-			bulkBarrierPreWrite(wlo, sr+(wlo-d), whi-wlo, nil)
-		}
-		memmove(dst, src, n)
-		return
-	}
-	base := ds.base()
-	// What is written over, in whole words or in part.
-	cShade(b, (lo-base)/goarch.PtrSize, lo, 0, (hi-lo)/goarch.PtrSize)
-	if wlo >= whi {
-		memmove(dst, src, n)
-		return
-	}
-	w, words := (wlo-base)/goarch.PtrSize, (whi-wlo)/goarch.PtrSize
-	if !aligned {
-		// No word arrives whole: none is a pointer.
-		locked := ds.cScalars(b, w, words)
-		memmove(dst, src, n)
-		if locked {
-			ds.cUnlock()
-		}
-		return
-	}
-	sw := sr + (wlo - d)
-	// The bits of the source, if it has any.
-	var sb *cBits
-	var sbase uintptr
-	var seq uint32
-	ss := spanOfHeap(sw)
-	switch {
-	case ss == nil:
-		// A variable's, or not Go's: any word may be a pointer.
-	case ss.spanclass.c():
-		sb = ss.cBitsOf()
-		sbase = ss.base()
-		if ss == ds {
-			// One object's, or two of one span: the bits
-			// of both are read and written under its
-			// sequence.
-			ds.cLock()
-		} else if seq = ss.cseq.Load(); seq&1 != 0 {
-			sb = nil
-		}
-	case ss.spanclass.noscan():
-		// An object of Go's without pointers.
-		locked := ds.cScalars(b, w, words)
-		memmove(dst, src, n)
-		if locked {
-			ds.cUnlock()
-		}
-		return
-	}
-	if sb == nil {
-		// Possible pointers, all of them.
-		if ss == ds {
-			ds.cUnlock()
-		}
-		if writeBarrier.enabled {
-			buf := &getg().m.p.ptr().wbBuf
-			for i := uintptr(0); i < whi-wlo; i += goarch.PtrSize {
-				p := buf.get1()
-				p[0] = *(*uintptr)(unsafe.Pointer(sw + i))
-			}
-		}
-		ds.cPointers(b, w, words)
-		memmove(dst, src, n)
-		ds.cPointers(b, w, words)
-		return
-	}
-	// The destination's bits become the source's before the words
-	// are copied, and the collector sees the pointers that come. In
-	// one span the bits are copied as the words are, from the end
-	// that leaves what is still to be read as it was.
-	sw0 := (sw - sbase) / goarch.PtrSize
-	locked := ss == ds
-	back := ss == ds && sw0 < w
-	for done := uintptr(0); done < words; {
-		var i, k uintptr
-		if back {
-			// The chunk that ends where the last one began.
-			end := words - done
-			k = (w+end-1)%cBitsWord + 1
-			k = min(k, end)
-			i = end - k
-		} else {
-			i = done
-			k = min(words-i, cBitsWord-(w+i)%cBitsWord)
-		}
-		scalar := cBitsGet(sb, sw0+i, k)
-		q := b.word((w + i) / cBitsWord)
-		shift := (w + i) % cBitsWord
-		all := uint32(uint64(1)<<k - 1)
-		if have := atomic.Load(q) >> shift & all; have != scalar {
-			if !locked {
-				ds.cLock()
-				locked = true
-			}
-			if clear := have &^ scalar; clear != 0 {
-				atomic.And(q, ^(clear << shift))
-			}
-			if set := scalar &^ have; set != 0 {
-				atomic.Or(q, set<<shift)
-			}
-		}
-		if writeBarrier.enabled && scalar != all {
-			buf := &getg().m.p.ptr().wbBuf
-			for j := uintptr(0); j < k; j++ {
-				if scalar>>j&1 == 0 {
-					x := buf.get1()
-					x[0] = *(*uintptr)(unsafe.Pointer(sw + (i+j)*goarch.PtrSize))
-				}
-			}
-		}
-		done += k
-	}
-	memmove(dst, src, n)
-	if locked {
-		ds.cUnlock()
-	}
-	if ss != ds && ss.cseq.Load() != seq {
-		// A bit of the source changed as it was copied: a word
-		// taken for an integer may have been a pointer by then.
-		ds.cPointers(b, w, words)
-	}
-}
-
-// c23Memset is memset for C: the pointers that it writes over are the
-// collector's to see first, and the whole words that it writes in an
-// object of C's hold no pointers after.
-//
-//go:linkname c23Memset
-//go:nosplit
-func c23Memset(dst unsafe.Pointer, c byte, n uintptr) {
-	if n == 0 {
-		return
-	}
-	d := uintptr(dst)
-	lo, hi := alignDown(d, goarch.PtrSize), alignUp(d+n, goarch.PtrSize)
-	locked := false
-	s := cSpanOf(d)
-	if b := s.cBitsOfOrNil(); b != nil {
-		// Every word that is written in, whole or not.
-		cShade(b, (lo-s.base())/goarch.PtrSize, lo, 0, (hi-lo)/goarch.PtrSize)
-		if wlo, whi := alignUp(d, goarch.PtrSize), alignDown(d+n, goarch.PtrSize); wlo < whi {
-			locked = s.cScalars(b, (wlo-s.base())/goarch.PtrSize, (whi-wlo)/goarch.PtrSize)
-		}
-	} else if writeBarrier.enabled {
-		bulkBarrierPreWrite(lo, 0, hi-lo, nil)
-	}
-	if c == 0 {
-		memclrNoHeapPointers(dst, n)
-	} else {
-		// The first bytes, and then twice what is there until it is all.
-		k := min(n, 16)
-		for i := uintptr(0); i < k; i++ {
-			*(*byte)(add(dst, i)) = c
-		}
-		for k < n {
-			m := min(k, n-k)
-			memmove(add(dst, k), dst, m)
-			k += m
-		}
-	}
-	if locked {
-		s.cUnlock()
-	}
 }
 
 // cBitsOfOrNil is cBitsOf for a span that may be nil.
