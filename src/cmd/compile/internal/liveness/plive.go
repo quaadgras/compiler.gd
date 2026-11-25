@@ -1686,7 +1686,13 @@ func (lv *Liveness) emitStackVars(gd *base.Invocation) *obj.LSym {
 	x.Set(obj.AttrContentAddressable, true)
 	x.Align = 4
 	lv.fn.LSym.Func().StackVars = x
-	off := objw.Uint32(gd, x, 0, uint32(len(vars)))
+	// (The high bit of the number says that the function is of a
+	// package of C's: runtime's stackVarsC.)
+	n := uint32(len(vars))
+	if gd.CObjects {
+		n |= 1 << 31
+	}
+	off := objw.Uint32(gd, x, 0, n)
 	for _, v := range vars {
 		// As for a stack object: an offset that is not negative is
 		// from argp, and a negative one from varp.

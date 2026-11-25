@@ -658,6 +658,7 @@ type m struct {
 	// (checkptrProbe): what it would stop the program for sets
 	// cprobeFail instead.
 	cprobe, cprobeFail bool
+	cprobeStrict       bool // a word that nothing claimed fails too (crepair.go)
 	cprobeDepth        uint16
 
 	g0      *g     // goroutine with scheduling stack

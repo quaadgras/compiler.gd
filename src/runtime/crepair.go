@@ -42,7 +42,10 @@ import (
 //     records none loses its pointers into the object;
 //   - in the program's data, by the table of its variables (datavar.go);
 //   - in the frames of every goroutine, by the tables of their variables
-//     (stackvar.go). A goroutine that was stopped where the compiler has
+//     (stackvar.go). The compiled code of C keeps a pointer whose
+//     conversion was not checked, what malloc returned for a type, as
+//     an unsafe.Pointer, which C itself has none of: that is taken
+//     away too. A goroutine that was stopped where the compiler has
 //     no map has pointers in registers that have no type: what was saved
 //     of them is looked at as words, and one that is an address in the
 //     object is taken away too.
@@ -98,7 +101,8 @@ func cRepairWord(a, lo, hi uintptr, elem *_type, c bool) {
 	if !cRepairIn(v, lo, hi) || elem.Size_ == 0 {
 		return
 	}
-	if nv := cConvProbeElem(v, elem, c); nv != v {
+	nv := cConvProbeElem(v, elem, c)
+	if nv != v {
 		*(*uintptr)(unsafe.Pointer(a)) = nv
 	}
 }
@@ -164,6 +168,12 @@ func cRepairTyped(base, lo, hi uintptr, typ *_type, c bool) {
 //go:systemstack
 func cRepairWorld(cur *g, pc, sp, lo, hi uintptr) {
 	const word = goarch.PtrSize
+	// (A pointer of a type is to words that its conversion claimed:
+	// one that is to a word that nothing claims now, which bytes were
+	// stored in, is asked about as one to any other.)
+	mp := getg().m
+	mp.cprobeStrict = true
+	defer func() { mp.cprobeStrict = false }()
 
 	// The heap.
 	for _, s := range mheap_.allspans {
@@ -276,7 +286,9 @@ func cRepairWorld(cur *g, pc, sp, lo, hi uintptr) {
 			if p == nil {
 				continue
 			}
-			recs := unsafe.Slice((*stackVarRecord)(add(p, 4)), int(*(*uint32)(p)))
+			n := *(*uint32)(p)
+			c := n&stackVarsC != 0
+			recs := unsafe.Slice((*stackVarRecord)(add(p, 4)), int(n&^stackVarsC))
 			for k := range recs {
 				r := &recs[k]
 				ref := frame.varp
@@ -286,7 +298,19 @@ func cRepairWorld(cur *g, pc, sp, lo, hi uintptr) {
 				if ref == 0 {
 					continue
 				}
-				cRepairTyped(uintptr(int64(ref)+int64(r.off)), lo, hi, (*_type)(unsafe.Pointer(frame.fn.datap.types+uintptr(r.typ))), true)
+				a := uintptr(int64(ref) + int64(r.off))
+				t := (*_type)(unsafe.Pointer(frame.fn.datap.types + uintptr(r.typ)))
+				if c && t.Kind() == abi.UnsafePointer {
+					// What the compiled code of C kept of a
+					// pointer that it uses as one of a type: a
+					// conversion that was not checked made it
+					// (malloc's result, a union's value), and
+					// the type went with the copy. C's own
+					// pointer to anything is a *c23.Void.
+					cRepairDrop(a, lo, hi)
+					continue
+				}
+				cRepairTyped(a, lo, hi, t, c)
 			}
 		}
 	})

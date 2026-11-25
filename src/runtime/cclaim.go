@@ -295,6 +295,10 @@ func cClaim(s *mspan, i, p uintptr, elem *_type, n uintptr, load, c bool) {
 			// load makes nothing of the word.
 			continue
 		case have == cUnclaimed:
+			if mp := getg().m; mp.cprobe && mp.cprobeStrict {
+				mp.cprobeFail = true
+				continue
+			}
 			cClaimStats.claims.Add(1)
 			cClaimWord(s, b, w, a, have, want, id)
 			continue
@@ -884,9 +888,48 @@ func c23ByteStore(p unsafe.Pointer, n uintptr) {
 	if a < minLegalPointer || a&(cPoison|cEnd) != 0 {
 		return // the store faults
 	}
-	if cByteOver(a&^cPtrBits, n) {
+	if cByteOver(a&^cPtrBits, n) && !cStoreReclaim(a&^cPtrBits, n, cUnclaimed) {
 		throw("checkptr: bytes stored over a pointer")
 	}
+}
+
+// cStoreReclaim is for a store that the words it is to do not let
+// through, in an object of C's: bytes over words that hold pointers
+// (want is cUnclaimed), or a pointer to anything over a word that holds
+// none (cUntyped). The memory is used for something else than it was,
+// as it is where a conversion says so (cReclaim): the words are claimed
+// again, for nothing or for a pointer to anything, and the pointers
+// that were converted before are taken away (crepair.go). It reports
+// false if that is not to be: the store is not to an object of C's, or
+// GODEBUG=creclaim=2, or the world cannot be stopped here.
+func cStoreReclaim(a, n uintptr, want uint32) bool {
+	const word = goarch.PtrSize
+	s := spanOfHeap(a)
+	if s == nil || !s.spanclass.c() || s.isUserArenaChunk {
+		return false
+	}
+	b := s.cBitsOf()
+	mode := debug.creclaim
+	if b == nil || mode == 2 || mode == 0 && !cCanRepair() {
+		return false
+	}
+	i := s.objIndex(a)
+	base := s.base() + i*s.elemsize
+	size := s.cSizeOf(i)
+	lo, hi := alignDown(a, word), min(alignUp(a+n, word), alignUp(base+size, word))
+	for x := lo; x < hi; x += word {
+		w := (x - s.base()) / word
+		have := cClass(b, w)
+		if want == cUnclaimed && have < cUntyped || want == cUntyped && have == cUntyped {
+			continue
+		}
+		cClaimStats.reclaims.Add(1)
+		cClaimWord(s, b, w, x, have, want, 0)
+	}
+	if mode == 0 {
+		cRepair(base, size)
+	}
+	return true
 }
 
 // c23PtrStore is called before the pointer v is stored at p through a
@@ -940,11 +983,8 @@ func c23PtrStore(p unsafe.Pointer, v unsafe.Pointer) unsafe.Pointer {
 				}
 			}
 		case cScalar:
-			if debug.creclaim != 0 {
-				// (Counted, and the word claimed again, as a
-				// conversion that is not compatible is.)
-				cClaimStats.reclaims.Add(1)
-				cClaimWord(s, b, w, a, cScalar, cUntyped, 0)
+			// The word is used for something else than it was.
+			if cStoreReclaim(a, word, cUntyped) {
 				return v
 			}
 		}
@@ -1181,6 +1221,23 @@ func cWordOf(a uintptr) (uint32, uint32) {
 	return cScalar, 0
 }
 
+// cRevive returns p as a pointer to bytes: without cEnd, if it has it
+// and is not to the end of what it points into. A pointer that nothing
+// is loaded through as what its type says, since the memory is used for
+// something else (crepair.go), is one to the bytes that are there all
+// the same.
+func cRevive(p unsafe.Pointer) unsafe.Pointer {
+	a := uintptr(p)
+	if a&cEnd == 0 || a&cPoison != 0 {
+		return p
+	}
+	x := a &^ cPtrBits
+	if base, size, kind := cObjectOf(cEndAddr(a)); kind != cObjNone && x-base < size {
+		return unsafe.Pointer(x)
+	}
+	return p
+}
+
 // cMoveBounds stops the program if the n bytes at a, which memcpy or
 // memset is given, are not in one object. It returns the span of the
 // object, if it is one of the heap.
@@ -1263,12 +1320,13 @@ func cMoveCheck(d, sr, n uintptr, apply bool) (fix bool) {
 	}
 	wlo, whi := alignUp(d, word), alignDown(d+n, word)
 	if (d^sr)&(word-1) != 0 || wlo >= whi {
-		if !apply && cByteOver(d, n) {
+		if !apply && cByteOver(d, n) && !cStoreReclaim(d, n, cUnclaimed) {
 			throw("checkptr: bytes copied over a pointer")
 		}
 		return false
 	}
-	if !apply && (d < wlo && cByteOver(d, wlo-d) || whi < d+n && cByteOver(whi, d+n-whi)) {
+	if !apply && (d < wlo && cByteOver(d, wlo-d) && !cStoreReclaim(d, wlo-d, cUnclaimed) ||
+		whi < d+n && cByteOver(whi, d+n-whi) && !cStoreReclaim(whi, d+n-whi, cUnclaimed)) {
 		throw("checkptr: bytes copied over a pointer")
 	}
 	if ds != nil && !ds.spanclass.c() {
@@ -1360,6 +1418,7 @@ func c23Memmove(dst, src unsafe.Pointer, n uintptr) {
 	if dst == src || n == 0 {
 		return
 	}
+	dst, src = cRevive(dst), cRevive(src)
 	ds := cMoveBounds(uintptr(dst), n)
 	ss := cMoveBounds(uintptr(src), n)
 	// (Nothing to ask where no word that is copied to holds a
@@ -1545,11 +1604,18 @@ func c23Memset(dst unsafe.Pointer, c byte, n uintptr) {
 		return
 	}
 	const word = goarch.PtrSize
+	dst = cRevive(dst)
 	d := uintptr(dst)
 	poison := false
 	if ds := cMoveBounds(d, n); ds != nil && cMovePtrs(ds, d, n) && cByteOver(d, n) {
 		wlo, whi := alignUp(d, word), alignDown(d+n, word)
-		if wlo >= whi || d < wlo && cByteOver(d, wlo-d) || whi < d+n && cByteOver(whi, d+n-whi) {
+		switch {
+		case wlo >= whi:
+			if !cStoreReclaim(d, n, cUnclaimed) {
+				throw("checkptr: bytes set over part of a pointer")
+			}
+		case d < wlo && cByteOver(d, wlo-d) && !cStoreReclaim(d, wlo-d, cUnclaimed),
+			whi < d+n && cByteOver(whi, d+n-whi) && !cStoreReclaim(whi, d+n-whi, cUnclaimed):
 			throw("checkptr: bytes set over part of a pointer")
 		}
 		poison = c != 0

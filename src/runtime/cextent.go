@@ -33,7 +33,9 @@ import (
 //
 //go:linkname c23Extent
 func c23Extent(p unsafe.Pointer) (before, after uintptr, ok bool) {
-	a := uintptr(p)
+	// (A pointer that nothing is loaded through as what its type says
+	// is one to bytes all the same: cRevive.)
+	a := uintptr(cRevive(p))
 	if gp := getg(); gp.stack.lo <= a && a < gp.stack.hi {
 		// A variable of a frame (stackvar.go): what is in none that
 		// is known is not C's to look at.

@@ -44,6 +44,14 @@ type stackVarRecord struct {
 	typ int32
 }
 
+// stackVarsC is the bit of the number of a table's records that says
+// that the function is of a package of C's (one that imports
+// internal/c23): a pointer to a byte in one of its variables is C's
+// char *, a pointer to anything, and an unsafe.Pointer there is what
+// the compiler kept of a pointer whose type it did not need
+// (crepair.go).
+const stackVarsC = 1 << 31
+
 // stackVarOf returns the variable of a frame of gp's stack that addr
 // is in: where it begins, its size and its type. ok is false if addr is
 // in no variable that a table has: in a frame of the runtime's or of
@@ -108,7 +116,7 @@ func stackVarLookup(f funcInfo, ref, addr uintptr) (base, size uintptr, typ *_ty
 	if p == nil {
 		return
 	}
-	n := int(*(*uint32)(p))
+	n := int(*(*uint32)(p) &^ stackVarsC)
 	recs := unsafe.Slice((*stackVarRecord)(add(p, 4)), n)
 	// The last variable that begins at addr or before it. (An offset
 	// from varp is negative, and one from argp is not: the difference
