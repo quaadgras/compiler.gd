@@ -61,6 +61,26 @@ int main(void) {
 	for (int i = 0; i < 100; i++) sum += i % 2 ? (long)strlen(list[i].str.s) + list[i].str.tag : list[i].num.tag;
 	printf("%ld\n", sum);
 
+	// Copies of the bytes: memcpy, and realloc, which moves them.
+	Node c1, c2;
+	memset(&c1, 0, sizeof c1);
+	c1.str.tag = 5;
+	c1.str.s = "five";
+	memcpy(&c2, &c1, sizeof c2);
+	c2.str.s = "changed";
+	c2.str.tag++;
+	printf("%d %s %d %s\n", c1.str.tag, c1.str.s, c2.str.tag, c2.str.s);
+	list = realloc(list, 400 * sizeof *list);
+	sum = 0;
+	for (int i = 0; i < 100; i++) sum += i % 2 ? (long)strlen(list[i].str.s) + list[i].str.tag : list[i].num.tag;
+	list[1].str.s = "longer";
+	printf("%ld %s %s\n", sum, list[1].str.s, list[3].str.s);
+	Node pair[2];
+	memcpy(pair, list + 1, sizeof pair[0]);
+	memcpy(pair + 1, pair, sizeof pair[0]);
+	pair[1].str.s = "second";
+	printf("%s %s %s\n", list[1].str.s, pair[0].str.s, pair[1].str.s);
+
 	Variant v = { 0 };
 	v.type = 1;
 	var_string(&v)->text = "a string";

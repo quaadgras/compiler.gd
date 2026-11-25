@@ -555,11 +555,11 @@ func (g *gen) record(t *ctype) string {
 	}
 	var b strings.Builder
 	if r.uptr {
-		// The members without pointers are in the bytes, and the
-		// pointer that a member is, in the interface value: no
+		// The members without pointers are in the bytes, and what
+		// has one is in an object that the pointer points to: no
 		// word is an integer to one member and a pointer to
 		// another (types.go's unionPtr).
-		fmt.Fprintf(&b, "// %s is C's %s, as Go sees it: the bytes of its members that are not\n// pointers, and the pointer that the others are.\ntype %s struct {\n\t_ [0]uint64\n\tb [%d]byte\n\tp any\n}\n\n",
+		fmt.Fprintf(&b, "// %s is C's %s, as Go sees it: the bytes of its members that have no\n// pointer, and the pointer to what of it has one.\ntype %s struct {\n\t_ [0]uint64\n\tb [%d]byte\n\tp unsafe.Pointer\n}\n\n",
 			name, what, name, r.ubytes)
 	} else if bytes {
 		// As cgo does for unions, Go sees the bytes. The tag tells

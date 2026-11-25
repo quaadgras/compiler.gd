@@ -797,13 +797,10 @@ func (g *gen) tcompound(e *compoundLit) string {
 }
 
 // unionHeld is the member of type t, which has a pointer, of the union
-// u, whose pointers are in a Go interface value (types.go's unionPtr):
-// the pointer that the value holds, if t is one, and otherwise the
-// object that it points to (internal/c23's UnionPtr and UnionBox).
+// u, whose pointers are in an object of the heap (types.go's unionPtr):
+// the object that the union's pointer points to (internal/c23's
+// UnionBox).
 func (g *gen) unionHeld(u string, t *ctype) string {
-	if t.kind == kPtr || t.kind == kNullptr {
-		return fmt.Sprintf("(*c23.UnionPtr[%s](&%s.p))", g.mirror(t), u)
-	}
 	return fmt.Sprintf("(*c23.UnionBox[%s](&%s.p))", g.mirror(t), u)
 }
 
@@ -812,9 +809,9 @@ func (g *gen) unionHeld(u string, t *ctype) string {
 // is one and to points to a type with pointers: C uses a union's bytes
 // for a value that is none of its members (Godot's Variant keeps a
 // String, an Array, a Callable in an array of bytes), and a pointer in
-// those bytes would be one that nothing sees. The value is in the
-// interface value, where a member with pointers is: itself, if it is
-// one pointer, and otherwise in an object of its own.
+// those bytes would be one that nothing sees. The value is where a
+// member with pointers is: in an object of its own, which the union's
+// pointer points to.
 func (g *gen) unionCast(e expr, to *ctype) (string, bool) {
 	t := to.elem
 	if t == nil || !to.isPtr() || !t.isComplete() || t.kind == kVoid || t.kind == kFunc || !hasPointers(t) {
@@ -866,42 +863,7 @@ func (g *gen) unionCast(e expr, to *ctype) (string, bool) {
 // unionAs is the pointer, of type to, to what the union u holds as a t,
 // a type with pointers.
 func (g *gen) unionAs(u string, t, to *ctype) string {
-	var p string
-	switch {
-	case t.kind == kPtr || t.kind == kNullptr:
-		p = fmt.Sprintf("c23.UnionPtr[%s](&%s.p)", g.mirror(t), u)
-	case onePointer(t):
-		p = fmt.Sprintf("c23.UnionVal[%s](&%s.p)", g.mirror(t), u)
-	default:
-		p = fmt.Sprintf("c23.UnionBox[%s](&%s.p)", g.mirror(t), u)
-	}
-	return g.retype(p, "*"+g.mirror(t), g.gt(to))
-}
-
-// onePointer reports whether t is a struct that is one pointer and
-// nothing else, as Go lays it out: what an interface value holds in its
-// own pointer.
-func onePointer(t *ctype) bool {
-	for t.kind == kStruct && t.rec.complete && !t.rec.union && !t.rec.bytes && t.sizeof() == target.ptrSize {
-		var only *field
-		for _, f := range t.rec.fields {
-			if f.bits >= 0 || f.t.sizeof() == 0 {
-				return false
-			}
-			if only != nil {
-				return false
-			}
-			only = f
-		}
-		if only == nil {
-			return false
-		}
-		if only.t.kind == kPtr {
-			return true
-		}
-		t = only.t
-	}
-	return false
+	return g.retype(fmt.Sprintf("c23.UnionBox[%s](&%s.p)", g.mirror(t), u), "*"+g.mirror(t), g.gt(to))
 }
 
 // unionClones gives the unions of x, an object of type t that was

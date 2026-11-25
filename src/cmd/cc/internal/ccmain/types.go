@@ -103,10 +103,9 @@ type record struct {
 
 	bytes bool // its mirror is bytes (gen.go's record)
 
-	// A union whose members with pointers are all pointers themselves
-	// (uptr) is its bytes, ubytes of them, in which the members without
-	// pointers are, and after them a Go interface value, in which the
-	// pointer members are: see unionPtr.
+	// A union that has a member with a pointer (uptr) is its bytes,
+	// ubytes of them, in which the members without pointers are, and
+	// after them a pointer to what of it has one: see unionPtr.
 	uptr   bool
 	ubytes int64
 	sys    bool // declared in one of cc's own headers
@@ -861,27 +860,22 @@ func (r *record) layout() {
 		}
 	}
 	if r.unionPtr() {
-		// The bytes, in words, and the interface value after them.
+		// The bytes, in words, and the pointer after them.
 		r.uptr = true
 		r.ubytes = (max(size, 1) + 7) / 8 * 8
-		size, align = r.ubytes+unionIfaceSize, 8
+		size, align = r.ubytes+target.ptrSize, 8
 	}
 	r.align = align
 	r.size = (size + align - 1) / align * align
 	r.complete = true
 }
 
-// unionIfaceSize is the size of a Go interface value with 8-byte words.
-const unionIfaceSize = 32
-
 // unionPtr reports whether r is a union that is laid out as its bytes
-// and one Go interface value for what of it has pointers (doc/gd/cc.md,
-// "Unions"): one that has a member with a pointer. A member with no
-// pointer is in the bytes. A member that is a pointer is the pointer
-// that the interface value holds, and any other that has one is an
-// object of its own that the value points to (internal/c23's UnionPtr
-// and UnionBox). So a pointer is never the same memory as an integer,
-// and neither can be made of the other.
+// and one pointer for what of it has pointers (doc/gd/cc.md, "Unions"):
+// one that has a member with a pointer. A member with no pointer is in
+// the bytes. Any other is in an object of the heap of its own, which
+// the pointer points to (internal/c23's UnionBox). So a pointer is never
+// the same memory as an integer, and neither can be made of the other.
 func (r *record) unionPtr() bool {
 	if !r.union || r.packed > 0 || target.ptrSize != 8 {
 		return false

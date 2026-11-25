@@ -103,11 +103,11 @@ func c0_name(c c23.UInt) *c23.Char {
   conversion of a pointer over them claims them for, which later
   conversions are compared with. `free` does nothing.
 - **A union** with no pointer in it is its bytes to Go. One that has a
-  pointer is its bytes and a Go interface value, in which whatever of
-  it has a pointer is ("Unions", below): 32 bytes more than in C. A
-  struct that Go cannot lay out as C does (packed, over-aligned) is its
-  bytes; its words, each a possible pointer, if a member is a pointer,
-  so that the collector sees what C stores.
+  pointer is its bytes and a pointer to an object of the heap, in which
+  whatever of it has a pointer is ("Unions", below): 8 bytes more than
+  in C. A struct that Go cannot lay out as C does (packed,
+  over-aligned) is its bytes; its words, each a possible pointer, if a
+  member is a pointer, so that the collector sees what C stores.
 - **What Go has no variable for** is reached through its address, with
   internal/c23's loads and stores: bit-fields, `_Atomic`, `long double`
   and `_Complex` in memory, `va_arg`. A variable length array and a
@@ -460,69 +460,86 @@ integer to one member and a pointer to another, and nothing says which
 it is now. Go sees a union that has no pointer in any member as its
 bytes, as cgo does, and nothing more is needed: integers and floats may
 be taken for one another. A union that has a pointer in a member is, to
-Go, its bytes and one interface value after them (`cmd/cc`'s
+Go, its bytes and one pointer after them (`cmd/cc`'s
 `record.unionPtr`):
 
 ```go
 type union_value struct {
 	_ [0]uint64
-	b [16]byte // the members that have no pointer
-	p any      // whatever of it has a pointer
+	b [16]byte       // the members that have no pointer
+	p unsafe.Pointer // to what of it has one, in the heap
 }
 ```
 
 - **A member with no pointer** is in the bytes, at its offset, as
   before. The members that are integers, floats and arrays of them
   share the bytes as C has it.
-- **A member that is a pointer** is the pointer that the interface
-  value holds, whose type is the member's (`c23.UnionPtr`): `u.p` is
-  `(*c23.UnionPtr[*T](&u.p))`, the address of the value's own pointer
-  word, so `&u.p` is a `T **` as it is in C. The members that are
-  pointers share it. One that is read after another of another type
-  was stored is that pointer converted, which is checked as a
-  conversion of C's is (`void *` to anything, and the reverse, as
-  always).
-- **A member with a pointer inside it** (a struct, an array of
-  pointers) is an object of the heap of its own, which the interface
-  value points to (`c23.UnionBox`, a `c23.Box[M]`). `&u.m` is a pointer
-  to that object. When the union is used for something else, the value
-  points to something else, and a pointer that was taken before still
-  points to the object it was taken of, which is what it was: nothing
-  is claimed again, and no pointer is made of an integer.
+- **A member with a pointer**, one that is a pointer or that has one
+  inside it, is in an object of the heap of its own, which the union's
+  pointer points to (`c23.UnionBox`, a `c23.Box[M]`). `u.m` is
+  `(*c23.UnionBox[M](&u.p))`, and `&u.m` is a pointer to that object.
+  When the union is used for something else it gets another object,
+  and a pointer that was taken before still points to the one it was
+  taken of, which is what it was: nothing is claimed again, no pointer
+  is made of an integer, and no pointer of one type is read as one of
+  another. Only a member that is a pointer and is read after another
+  pointer member was stored is that pointer, converted, which is
+  checked as a conversion of C's is.
+- **The object begins with what it is and whose it is** (`boxHeader`):
+  the type of the object, and a back reference, the address of the
+  pointer of the union that it is the value of. An access through a
+  union looks at both. An object of another type is not the member's:
+  the union gets a new one, zero. An object of another union is one
+  that came in a copy of the union's bytes, by `memcpy` or `realloc`,
+  which copy the pointer and not what it points to: the union gets a
+  copy of the object for itself then. A struct that is assigned gives
+  the unions of the copy objects of their own at once
+  (`c23.UnionClone`).
 - **A cast of the address of the bytes** to a pointer to a type with
-  pointers, `(T *)u.bytes` or `(T *)&u`, where it is written as that
-  (`thin.go`'s `unionCast`: a cast, a placement `new`), is taken for
-  what it means: the union holds a `T`. If `T` is one pointer and
-  nothing else, it is the interface value's own pointer
-  (`c23.UnionVal`); otherwise it is an object of its own, as a member
-  is. This is how Godot's Variant keeps a String, an Array or a
-  Callable in an array of bytes. A cast to a type with no pointer is to
-  the bytes.
-- **A copy** of a struct that has such a union, by assignment, gives
-  the copy an object of its own (`c23.UnionClone`).
+  pointers, `(T *)u.bytes`, `(T *)&u` or `(T *)up`, where it is written
+  as that (`thin.go`'s `unionCast`: a cast, the placement `new` of the
+  language), is taken for what it means: the union holds a `T`, in an
+  object of its own, as a member is. This is how Godot's Variant keeps
+  a String, an Array or a Callable in an array of bytes. A cast to a
+  type with no pointer is to the bytes.
+
+In Godot's core (the test of strings, containers and Variant) no word
+of malloc's memory is claimed again with this: the 18 that were, were
+all Variant's union. It runs in the time it did, 8 ms.
 
 What is not C's:
 
-- **The size.** Such a union is its size in C, rounded to 8, and 32
+- **The size.** Such a union is its size in C, rounded to 8, and 8
   bytes. A program that asserts it, or lays a file or a message out
   with it, sees the difference. Godot asserts that a Callable, which
   has a union of an id and a pointer, is 16 bytes and fits in a
-  Variant's bytes (`register_core_types.cpp`, `variant.cpp`): it is 48
+  Variant's bytes (`register_core_types.cpp`, `variant.cpp`): it is 24
   here, and is kept in an object of its own, so the two assertions are
-  about what no longer happens, and fail.
+  about what no longer happens, and fail. (The measurements above are
+  with those two lines changed, in a copy.)
 - **A pointer and an integer are not the same bytes.** What is stored
-  as a pointer member is not read as an integer member, and the
-  reverse: the integer is what the bytes last were, the pointer what
-  the interface value last held. An object that a member is in begins
-  as zero, whatever another member was.
-- **`memcpy` of a union** copies the interface value, and with it the
-  pointer to an object that the two then share. (`realloc`, which
-  leaves one of them, is as it was.)
-- **The address of the bytes that is kept** in a `void *` and cast
-  later, in another expression, is a cast of a pointer to bytes: it
-  does not find the union. In malloc's memory it claims the bytes
-  again; in a variable, the pointer that is stored there is one that
-  the collector does not see.
+  as a member with a pointer is not read as one without, and the
+  reverse. An object that a member is in begins as zero, whatever
+  another member was.
+- **A member with a pointer is not at the union's address.** C has it
+  that a pointer to a union, converted, points to each member, and the
+  reverse (C11 6.7.2.1). Here `(void *)&u.m == (void *)&u` is false for
+  such a member, and so is what follows from it: a pointer to the
+  struct that the union is in, made of a pointer to the member by
+  subtracting an offset, leaves the member's object and stops the
+  program.
+- **The address of a union that is kept** in a `void *` and cast to a
+  pointer to a type with pointers later, in another expression, does
+  not find the union: it is a cast of a pointer to bytes. In malloc's
+  memory it claims the bytes again; in a variable, the pointer that is
+  stored there is one that the collector does not see. (To come: a bit
+  of the `void *` or `char *` that says it is a union's, and the back
+  reference for the reverse.)
+- **A copy by `memcpy`** is the union's own when the copy is next
+  used, not when it is made: what is stored through the original
+  between the two is in the copy.
+- **A union that holds something with a pointer is in the heap**: the
+  object points back to it.
 - **The unions of cc's own headers** (`union sigval`, `epoll_data_t`)
   are their words, as before: internal/c23 reads them at the offsets
   that the system gives them. `semctl` looks for the pointer of a

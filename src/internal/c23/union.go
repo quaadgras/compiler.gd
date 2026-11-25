@@ -9,107 +9,105 @@ import (
 	"unsafe"
 )
 
-// A union of C's that has pointers in its members is to Go its bytes and
-// one interface value (doc/gd/cc.md, "Unions"). The members that have
-// no pointer are in the bytes. Whatever of it has a pointer is in the
-// interface value, whose type says what that is: so a word of the union
-// is never an integer to one member and a pointer to another, and what
-// the value holds is never one thing to one member and another to the
-// next without a look.
-
-// What the interface value of a union holds is one of three things, and
-// its type says which:
+// A union of C's that has a pointer in a member is to Go its bytes and
+// one pointer (doc/gd/cc.md, "Unions"). The members that have no
+// pointer are in the bytes. Whatever of it has a pointer, a member that
+// is one or that has one inside it, or a value that C makes in its
+// bytes through a cast, is in an object of the heap of its own, a Box,
+// which the pointer points to. So a word of the union is never an
+// integer to one member and a pointer to another; and a pointer that
+// was taken to a member points to the object that the member was in
+// then, which stays what it was when the union is used for something
+// else and gets another.
 //
-//   - a pointer, for a member that is one (UnionPtr): the type is the
-//     member's pointer type;
-//   - a value of one pointer and nothing else, a struct of C's that is
-//     one, where it is, for a cast of the address of the union's bytes
-//     to a pointer to such a type (UnionVal): the type is the struct's;
-//   - anything else that has a pointer in it, a member that is a struct
-//     or an array with pointers or the target of such a cast, in an
-//     object of its own that the value points to (UnionBox): the type is
-//     Box's of it. A pointer to such a member is a pointer to that
-//     object, which stays what it is when the union is used for
-//     something else and gets another.
-//
-// A union that is used as another of the three, or as a value or a box
-// of another type, begins as zero for it: only a pointer that is read as
-// a pointer of another type is the same pointer, converted.
+// A Box begins with what it is, the type of the Box itself, and with
+// where the union is that it is the value of, its back reference. An
+// access through a union looks at both: a Box of another type is not
+// the member's, and a Box of another union is one that came here in a
+// copy of the union's bytes (memcpy, realloc), which the union then
+// gets a copy of for itself.
 
-// UnionPtr returns the place of the pointer of the union whose
-// interface value is at slot, for a member of type P, a pointer type.
-// If the value holds a pointer of another type, it is converted to P as
-// a pointer of C's is, which is checked. The place is one that a
-// pointer of type P may be loaded from and stored in for as long as the
-// union is not used for something else.
-func UnionPtr[P any](slot *any) *P {
-	e := (*abi.EmptyInterface)(unsafe.Pointer(slot))
-	if t := abi.TypeFor[P](); e.Type != t {
-		unionRetype(e, t)
-	}
-	return (*P)(unsafe.Pointer(&e.Data))
-}
-
-// unionRetype makes t, a pointer type, the type of what e holds.
-func unionRetype(e *abi.EmptyInterface, t *abi.Type) {
-	if e.Data != nil && e.Type != nil {
-		switch e.Type.Kind() {
-		case abi.Pointer, abi.UnsafePointer:
-			if t.Kind() == abi.Pointer {
-				if elem := t.Elem(); elem.Size() != 0 {
-					unionConvert(e.Data, elem, 1)
-				}
-			}
-		default:
-			// A value, or a box: not a pointer of the member's.
-			e.Data = nil
-		}
-	}
-	e.Type = t
-}
-
-// UnionVal returns the place of the value of type T, a struct that is
-// one pointer, of the union whose interface value is at slot: the
-// pointer that the value holds, as a T.
-func UnionVal[T any](slot *any) *T {
-	e := (*abi.EmptyInterface)(unsafe.Pointer(slot))
-	if t := abi.TypeFor[T](); e.Type != t {
-		e.Data = nil
-		e.Type = t
-	}
-	return (*T)(unsafe.Pointer(&e.Data))
-}
-
-// A Box is the object that a union's member of type M is in, if M has
-// pointers and is more than one: with a byte after it, as every object
-// of C's on the heap has, for the pointer to its end.
+// A Box is the object that a union's value of type M is in, with a byte
+// after it, as every object of C's on the heap has, for the pointer to
+// its end.
 type Box[M any] struct {
+	boxHeader
 	V M
 	_ byte
 }
 
-// UnionBox returns the member of type M of the union whose interface
-// value is at slot: the object that the value points to, a new one if
-// the union was used for something else.
-func UnionBox[M any](slot *any) *M {
-	e := (*abi.EmptyInterface)(unsafe.Pointer(slot))
-	if t := abi.TypeFor[Box[M]](); e.Type != t || e.Data == nil {
-		e.Data = unsafe.Pointer(new(Box[M]))
-		e.Type = t
+// A boxHeader is what every Box begins with.
+type boxHeader struct {
+	typ  *abi.Type      // the Box's own type
+	back unsafe.Pointer // the pointer of the union that this is the value of
+}
+
+// UnionBox returns the value of type M of the union whose pointer is at
+// slot: the object that the pointer points to, if it is the union's own
+// Box of an M, and otherwise a new one that the union gets.
+func UnionBox[M any](slot *unsafe.Pointer) *M {
+	h := (*boxHeader)(*slot)
+	if t := abi.TypeFor[Box[M]](); h == nil || h.typ != t || h.back != unsafe.Pointer(slot) {
+		h = unionRebox[M](slot, h, t)
 	}
-	return &(*Box[M])(e.Data).V
+	return &(*Box[M])(unsafe.Pointer(h)).V
+}
+
+// unionRebox gives the union whose pointer is at slot a Box of an M of
+// its own: a copy of the one it has, h, if that is an M's and another
+// union's; the pointer that it holds converted, if it holds a pointer
+// and M is one; and otherwise one that is zero.
+func unionRebox[M any](slot *unsafe.Pointer, h *boxHeader, t *abi.Type) *boxHeader {
+	b := new(Box[M])
+	b.typ, b.back = t, unsafe.Pointer(slot)
+	switch {
+	case h == nil:
+	case h.typ == t:
+		b.V = (*Box[M])(unsafe.Pointer(h)).V
+	default:
+		// A pointer member that is read as another: the same
+		// pointer, converted as a pointer of C's is, which is
+		// checked.
+		if mt := abi.TypeFor[M](); mt.Kind() == abi.Pointer || mt.Kind() == abi.UnsafePointer {
+			if p, ok := boxPointer(h); ok && p != nil {
+				if mt.Kind() == abi.Pointer {
+					if elem := mt.Elem(); elem.Size() != 0 {
+						unionConvert(p, elem, 1)
+					}
+				}
+				*(*unsafe.Pointer)(unsafe.Pointer(&b.V)) = p
+			}
+		}
+	}
+	*slot = unsafe.Pointer(b)
+	return &b.boxHeader
+}
+
+// boxPointer returns the pointer that the Box at h holds, if it is the
+// Box of a pointer.
+func boxPointer(h *boxHeader) (unsafe.Pointer, bool) {
+	st := h.typ.StructType()
+	if st == nil || len(st.Fields) < 2 {
+		return nil, false
+	}
+	if k := st.Fields[1].Typ.Kind(); k != abi.Pointer && k != abi.UnsafePointer {
+		return nil, false
+	}
+	return *(*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(h), st.Fields[1].Offset)), true
 }
 
 // UnionClone is for a union that was copied whole, as part of a struct
-// that was assigned: if the interface value at slot points to a box,
-// the copy gets a box of its own.
-func UnionClone(slot *any) {
-	e := (*abi.EmptyInterface)(unsafe.Pointer(slot))
-	if t := e.Type; t != nil && e.Data != nil && t.Kind() == abi.Struct && t.TFlag&abi.TFlagDirectIface == 0 {
-		p := unionNew(t)
-		unionMove(t, p, e.Data)
-		e.Data = p
+// that was assigned: the copy, whose pointer is at slot, gets a Box of
+// its own now, as it would when it is next used.
+func UnionClone(slot *unsafe.Pointer) {
+	h := (*boxHeader)(*slot)
+	if h == nil || h.back == unsafe.Pointer(slot) {
+		return
 	}
+	p := unionNew(h.typ)
+	unionMove(h.typ, p, unsafe.Pointer(h))
+	(*boxHeader)(p).back = unsafe.Pointer(slot)
+	*slot = p
 }
 
 //go:linkname unionNew runtime.c23New
@@ -126,15 +124,19 @@ func unionConvert(p unsafe.Pointer, elem *abi.Type, n uintptr)
 
 // UnionValuePtr returns the pointer that a union holds, of which p is
 // the copy that was passed by value in variable arguments, if the
-// union is one that is laid out as bytes and an interface value: the
+// union is one that is laid out as bytes and a pointer to a Box: the
 // library's functions that take such a union (semctl's union semun,
 // which the program declares) look there for its pointer members.
 func UnionValuePtr(p *Void) (*Void, bool) {
-	const iface = unsafe.Sizeof(any(nil))
+	const word = unsafe.Sizeof(uintptr(0))
 	n, ok := usable(unsafe.Pointer(p))
-	if !ok || unsafe.Sizeof(uintptr(0)) != 8 || n < 8+iface || n%8 != 0 {
+	if !ok || word != 8 || n < 2*word || n%word != 0 {
 		return nil, false
 	}
-	e := (*abi.EmptyInterface)(unsafe.Add(unsafe.Pointer(p), n-iface))
-	return (*Void)(e.Data), true
+	h := (*boxHeader)(*(*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(p), n-word)))
+	if h == nil {
+		return nil, true
+	}
+	q, ok := boxPointer(h)
+	return (*Void)(q), ok
 }

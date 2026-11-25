@@ -698,7 +698,7 @@ C's variable: 42 43
 enum: 5 6 true
 string: HELLO
 arrays summed from one past their end: 45760
-variant's list, after 3 collections: 10 type 2 size 40
+variant's list, after 3 collections: 10 type 2 size 16
 variant's long: 12
 objects in a pool, after 3 collections: 9 1 2
 C frees what malloc and the like returned: 1
