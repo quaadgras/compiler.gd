@@ -443,6 +443,29 @@ and for http ClientServer, within their spread of runs, and +0.2% for json.
 
 `-gcflags=all=-d=checkptr=0` turns the checks off.
 
+## What is outside
+
+The checks are of Go and of C that this compiler compiled. A program
+is only as safe as they say if nothing in it is outside them:
+
+- **Assembly.** A `.s` file does what it likes. The standard library's
+  are part of what is trusted; a program's own are not checked.
+- **`//go:linkname` to the runtime's own functions** (`runtime.memmove`,
+  `mallocgc`, `typedmemmove` and the others that packages pull) calls
+  them with whatever it passes.
+- **cgo with a C compiler.** What gcc or clang compiled has no checks:
+  C is safe here when cmd/cc translates it (`cc.md`), which is what
+  `CGO_ENABLED=0` does for a package that imports "C".
+- **`-d=checkptr=0`, `//go:nocheckptr`, and the packages that are
+  compiled without the checks** (the runtime's, reflect). The standard
+  library's uses are part of what is trusted.
+- **Two goroutines that store to the same string, slice or interface
+  at once** with nothing between them: Go does not define what a third
+  one loads. (That is the work on values of two words that are stored
+  whole, not this document's.)
+- **A check and the store that it is for are two steps**: a goroutine
+  that changes what the memory is between them is not seen.
+
 ## What it does not see
 
 - What the gaps of "Compatible types" list: the types of a small
