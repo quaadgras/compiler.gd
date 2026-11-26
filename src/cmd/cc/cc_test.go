@@ -651,6 +651,32 @@ func TestPxIPC(t *testing.T) {
 	}
 }
 
+// TestLibraryPointers runs testdata/libptrs.c, which uses what the
+// library returns pointers to (the environment, struct tm, passwd,
+// addrinfo, glob's and scandir's lists, getline's buffer and the like)
+// as memory of its own: none of it is refused by a check, on Linux,
+// whose files the program reads.
+func TestLibraryPointers(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the program reads Linux's files")
+	}
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/libptrs.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := goRun(t, module(t, src, true))
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 20 || lines[len(lines)-1] != "done" {
+		t.Fatalf("the program did not finish:\n%s", out)
+	}
+	for _, l := range lines[:len(lines)-1] {
+		if !strings.HasSuffix(l, ": 1") {
+			t.Errorf("%s", l)
+		}
+	}
+}
+
 // TestInterop checks that Go and C use each other's memory: an ordinary
 // cgo package (testdata/interop), which go build compiles with cmd/cc
 // because cgo is off.
@@ -705,6 +731,7 @@ objects in a pool, after 3 collections: 9 1 2
 C frees what malloc and the like returned: 1
 a local moved to the heap at a call, summed from its end: 10
 a result that no buffer was given for, summed from its end: 26
+a handle that C kept: a value of Go's true 3
 `
 	if string(b) != want {
 		t.Errorf("got:\n%s\nwant:\n%s", b, want)

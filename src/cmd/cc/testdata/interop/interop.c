@@ -147,3 +147,14 @@ int free_mallocd(void) {
 	free_sized(malloc(8), 8);
 	return realloc(NULL, 8) != NULL;
 }
+
+// A handle of Go's (runtime/cgo), which C keeps as the integer it is.
+static uintptr_t kept_handle;
+
+uintptr_t keep_handle(uintptr_t h) {
+	uintptr_t old = kept_handle;
+	kept_handle = h;
+	return old;
+}
+
+intptr_t negate(intptr_t x) { return -x; }

@@ -51,6 +51,9 @@ static void locales(void) {
 	printf("main still cloc: %d\n", uselocale(0) == cloc);
 	uselocale(LC_GLOBAL_LOCALE);
 	printf("back to global: %d\n", uselocale(0) == LC_GLOBAL_LOCALE);
+	locale_t g = duplocale(LC_GLOBAL_LOCALE);
+	printf("dup of global: %d\n", g != 0 && g != LC_GLOBAL_LOCALE);
+	freelocale(g);
 	// musl's C.UTF-8 is LC_CTYPE's only: setlocale(LC_ALL) differs.
 	printf("setlocale C.UTF-8: %d\n", setlocale(LC_ALL, "C.UTF-8") != 0);
 	printf("query: %s\n", setlocale(LC_CTYPE, 0));

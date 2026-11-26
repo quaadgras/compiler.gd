@@ -83,6 +83,17 @@ func c23Extent(p unsafe.Pointer) (before, after uintptr, ok bool) {
 	return off, lim - off, true
 }
 
+// c23Trim returns x, the pointer to a block that was just allocated,
+// as a pointer to its first size bytes.
+//
+//go:linkname c23Trim
+func c23Trim(x unsafe.Pointer, size uintptr) unsafe.Pointer {
+	if x == nil || ptroff(x) != 0 || size >= ptrlim(x) {
+		return x
+	}
+	return splitsetlim(x, size)
+}
+
 // c23Usable returns the number of bytes from p to the end of what it
 // points into, and whether it points into a block of the heap.
 //

@@ -91,7 +91,10 @@ func resolve(mask uint32, name string) (utf8 uint32, ok bool) {
 	return utf8, true
 }
 
-func isGlobal(p *c23.Void) bool { return p == nil && uint32(c23.Addr(p)) == 0xffffffff }
+// isGlobal reports whether p is LC_GLOBAL_LOCALE: the integer -1 as a
+// pointer, whatever else the conversion made of its bits. No object has
+// such an address.
+func isGlobal(p *c23.Void) bool { return uint32(c23.Addr(p)) == 0xffffffff }
 
 func globalPtr() *c23.Void { return c23.FromInt(^uintptr(0)) }
 

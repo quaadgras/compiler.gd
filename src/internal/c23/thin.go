@@ -134,11 +134,26 @@ func reallocSize(p unsafe.Pointer) uintptr {
 // Free1 is free: the collector frees.
 func Free1(p *Void) {}
 
-// MallocAligned is aligned_alloc: n bytes at a multiple of align.
+// MallocAligned is aligned_alloc: n bytes at a multiple of align. They
+// are the last of an object that is as much longer as it takes to have
+// such an address in it: what is after them is not the object's.
 func MallocAligned(align, n uintptr) *Void {
+	if n+align < n {
+		return nil
+	}
 	p := AllocRaw(uint64(n + align))
-	return Add(p, int((align-Addr(p)%align)%align))
+	if p == nil {
+		return nil
+	}
+	pad := (align - Addr(p)%align) % align
+	return Add((*Void)(trim(unsafe.Pointer(p), pad+n)), int(pad))
 }
+
+// trim makes the object at p, which malloc just returned, one of n
+// bytes, and returns the pointer to it.
+//
+//go:linkname trim runtime.c23Trim
+func trim(p unsafe.Pointer, n uintptr) unsafe.Pointer
 
 // NewAligned allocates an object of type T at a multiple of align.
 func NewAligned[T any](align uintptr) *Void { return NewAlignedT(TinfoOf[T](), align) }

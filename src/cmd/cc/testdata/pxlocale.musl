@@ -7,6 +7,7 @@ thread starts global: 1
 thread uses its own: 1
 main still cloc: 1
 back to global: 1
+dup of global: 1
 setlocale C.UTF-8: 1
 query: C.UTF-8
 setlocale C: C

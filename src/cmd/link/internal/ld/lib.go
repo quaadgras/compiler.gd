@@ -561,11 +561,21 @@ func (ctxt *Link) loadlib() {
 			loadobjfile(ctxt, lib)
 		}
 	}
-	ctxt.
-		// At this point, the Go objects are "preloaded". Not all the symbols are
-		// added to the symbol table (only defined package symbols are). Looking
-		// up symbol by name may not get expected result.
-		iscgo = ctxt.LibraryByPkg["runtime/cgo"] != nil
+	// At this point, the Go objects are "preloaded". Not all the symbols are
+	// added to the symbol table (only defined package symbols are). Looking
+	// up symbol by name may not get expected result.
+	//
+	// (gd: with cgo off runtime/cgo is its handles alone, which a
+	// program that has C compiled by cmd/cc uses too, and is no cgo:
+	// what is of cgo's runtime has directives of cgo's.)
+	ctxt.iscgo = false
+	if ctxt.LibraryByPkg["runtime/cgo"] != nil {
+		for _, d := range ctxt.cgodata {
+			if d.pkg == "runtime/cgo" {
+				ctxt.iscgo = true
+			}
+		}
+	}
 
 	// Plugins a require cgo support to function. Similarly, plugins may require additional
 	// internal linker support on some platforms which may not be implemented.

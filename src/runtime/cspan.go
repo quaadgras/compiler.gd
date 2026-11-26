@@ -578,6 +578,29 @@ func (s *mspan) cBitsOfOrNil() *cBits {
 	return s.cBitsOf()
 }
 
+// c23Trim makes the object of C's at x one that was asked for size
+// bytes, fewer than it was, and returns x. The caller allocated it and
+// has not published it: aligned_alloc, whose object ends where the
+// bytes that were asked for do.
+//
+//go:linkname c23Trim
+func c23Trim(x unsafe.Pointer, size uintptr) unsafe.Pointer {
+	s := spanOfHeap(uintptr(x))
+	if s == nil || !s.spanclass.c() {
+		return x
+	}
+	i := s.objIndex(uintptr(x))
+	if uintptr(x) != s.base()+i*s.elemsize || size >= s.cSizeOf(i) {
+		return x
+	}
+	if s.spanclass.sizeclass() == 0 {
+		atomic.Storeuintptr(&s.csize, size)
+	} else {
+		*(*uint16)(add(unsafe.Pointer(s.cBitsOf()), s.cBitsWords()*4+i*2)) = uint16(size)
+	}
+	return x
+}
+
 // c23Usable returns the number of bytes from p to the end of the object
 // of C's that it points into, as it was asked for, and whether p points
 // into one.

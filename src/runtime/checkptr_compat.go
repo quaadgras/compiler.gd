@@ -214,6 +214,14 @@ func compatLeaves(mk uint8, mt *_type, min uintptr, vk uint8, vt *_type, vin uin
 			mk = compatUnsafe
 		}
 	}
+	if seen.cmem && view && vk == compatCap && mk == compatUnsafe {
+		// An intptr_t of C's over a void * of C's own: the value of
+		// one is a pointer to anything or an integer that is no
+		// pointer, which is what the other holds, and where it is not
+		// in memory an intptr_t is a void * (internal/c23's
+		// intcap.go). A parameter of that type is such a variable.
+		return compatOK
+	}
 	if mk == compatScalar || vk == compatScalar {
 		switch {
 		case mk == vk:

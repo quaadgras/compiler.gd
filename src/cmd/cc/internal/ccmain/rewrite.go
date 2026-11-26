@@ -31,6 +31,12 @@ var cgoBasic = map[string]string{
 // translated to, with the arguments as they are: but that void * is
 // *c23.Void where cgo has unsafe.Pointer, which an argument is
 // converted from and a result to.
+//
+// C.uintptr_t and C.intptr_t are uintptr and int, as with cgo (a
+// cgo.Handle is passed as one), and an argument or a result of such a
+// type is converted to and from what C has for it. A field of such a
+// type in a struct of C's is not an integer of Go's: it is a
+// c23.Intcap, which Go code does not convert.
 func (g *gen) rewrite(fset *gotoken.FileSet, f *ast.File, src []byte) (out []byte, err error) {
 	defer catch(&err)
 	tf := fset.File(f.Pos())
@@ -130,6 +136,14 @@ func (g *gen) cName(line int, name string) string {
 	if s != nil {
 		switch s.kind {
 		case symTypedef:
+			if s.t.isCap() {
+				// uintptr_t and intptr_t are integers of Go's, as
+				// with cgo: see rewriteCall.
+				if s.t.kind == kUIntCap {
+					return "uintptr"
+				}
+				return "int"
+			}
 			return cgoQual(g.mirror(s.t))
 		case symEnumConst:
 			return fmt.Sprintf("(%d)", s.val)
@@ -189,9 +203,28 @@ func (g *gen) rewriteCall(b *edit.Buffer, off func(gotoken.Pos) int, line int, c
 	case ft.ret.kind == kBool:
 		b.Insert(off(call.Pos()), "(")
 		b.Insert(off(call.End()), " != 0)")
+	case ft.ret.kind == kUIntCap:
+		// uintptr_t: a uintptr, as with cgo. What C made of a pointer
+		// is its address.
+		b.Insert(off(call.Pos()), "_c23.CapUint(")
+		b.Insert(off(call.End()), ")")
+	case ft.ret.kind == kIntCap:
+		b.Insert(off(call.Pos()), "_c23.CapSintOf(")
+		b.Insert(off(call.End()), ")")
 	}
 	b.Replace(off(call.Fun.Pos()), off(call.Fun.End()), g.names[s])
 	for i, a := range call.Args {
+		if pt := ft.params[i]; pt.isCap() {
+			// An integer of Go's: to C it is an integer, which is no
+			// pointer to anything if C converts it to one.
+			conv := "_c23.IntToCap(int64("
+			if pt.kind == kUIntCap {
+				conv = "_c23.UintToCap(uint64("
+			}
+			b.Insert(off(a.Pos()), conv)
+			b.Insert(off(a.End()), "))")
+			continue
+		}
 		if !ft.params[i].isPtr() || g.gt(ft.params[i]) != voidPtr {
 			continue // a Go pointer of the parameter's type, or no pointer
 		}

@@ -2,6 +2,8 @@
 #ifndef INTEROP_H
 #define INTEROP_H
 
+#include <stdint.h>
+
 struct node {
 	int v;
 	struct node *next;
@@ -55,5 +57,7 @@ struct node *in_pool(void);
 void make_pool(void);
 long pool_sum(void);
 int free_mallocd(void);
+uintptr_t keep_handle(uintptr_t h);
+intptr_t negate(intptr_t x);
 
 #endif

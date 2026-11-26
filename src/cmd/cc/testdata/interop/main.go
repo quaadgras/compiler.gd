@@ -11,6 +11,7 @@ import "C"
 import (
 	"fmt"
 	"runtime"
+	"runtime/cgo"
 	"testing"
 	"unsafe"
 )
@@ -117,6 +118,14 @@ func main() {
 	keptResult = fresh()
 	collect()
 	fmt.Println("a result that no buffer was given for, summed from its end:", C.sum_back((*C.int)(unsafe.Add(unsafe.Pointer(keptResult), 16)), 4))
+
+	// A handle, which C keeps as a uintptr_t and gives back.
+	hd := cgo.NewHandle("a value of Go's")
+	C.keep_handle(C.uintptr_t(hd))
+	collect()
+	back := cgo.Handle(C.keep_handle(0))
+	fmt.Println("a handle that C kept:", back.Value(), back == hd, C.negate(C.intptr_t(-3)))
+	hd.Delete()
 }
 
 var kept, keptResult *[4]C.int

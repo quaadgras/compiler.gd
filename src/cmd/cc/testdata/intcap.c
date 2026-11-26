@@ -24,6 +24,12 @@ static uintptr_t sum(int n, ...) {
 	return s;
 }
 
+// Parameters: an intptr_t that a function is called with.
+static uintptr_t echo(uintptr_t x) { return x; }
+static intptr_t neg(intptr_t x) { x = -x; return x; }
+static int *moved(uintptr_t x, intptr_t d) { x += d; return (int *)x; }
+static void set(uintptr_t *to, uintptr_t x) { *to = x; }
+
 static int *global;
 static uintptr_t gaddr = 0;
 
@@ -91,6 +97,11 @@ int main(void) {
 	gaddr = (uintptr_t)&x;
 	global = (int *)gaddr;
 	printf("global %d\n", *global);
+
+	// Parameters.
+	uintptr_t got;
+	set(&got, echo((uintptr_t)&arr[3]));
+	printf("params %d %d %d %d\n", (int)echo(7), (int)neg(5), *moved((uintptr_t)&arr[1], sizeof(int)), *(int *)got);
 
 	// The usual conversions keep intptr_t's capability; _Generic tells it apart.
 	long off = 2 * (long)sizeof(int);

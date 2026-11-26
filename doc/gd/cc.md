@@ -115,7 +115,12 @@ func c0_name(c c23.UInt) *c23.Char {
   typed pointer checks nothing: the address is an lvalue's, made of a
   pointer that was checked where C made it. A variable length array
   and a variable aligned more than Go aligns (`alignas(64)`) are
-  allocated, and their Go variables are the pointers to them.
+  allocated, and their Go variables are the pointers to them. What
+  is allocated at an alignment (these, and `aligned_alloc`,
+  `posix_memalign`, `memalign`) is the last bytes of an object that is
+  as much longer as it takes to have such an address in it: the object
+  ends where the bytes that were asked for do (`c23Trim`), and what is
+  before them, up to the alignment, is the object's too.
 - **internal/c23 is checked as the C that calls it.** The library is
   given pointers that are whatever the program made of them. It is
   compiled with the compiler's checks, as a package of C's, and asks
@@ -552,6 +557,15 @@ files as cgo rewrites them (`rewrite.go`), into the object directory:
   globals are the Go variables they are translated to; `C.CString`,
   `C.GoString`, `C.malloc` and `C.free` work as in cgo. A field that is
   a `void *` is a `*c23.Void` to Go, not an `unsafe.Pointer`.
+- `C.uintptr_t` and `C.intptr_t` are `uintptr` and `int`, as with cgo:
+  an argument of such a type is converted to what C has for it and a
+  result from it. So a `cgo.Handle` is passed to C and taken back as it
+  is with cgo, and `runtime/cgo`, with cgo off, is its handles alone
+  (its other files are for cgo's own runtime, and did not link without
+  it). An address that Go passes so is an integer to C: C that converts
+  it to a pointer has a pointer to nothing, as for any integer. A field
+  of such a type in a struct of C's is a `c23.Intcap` to Go, which Go
+  code does not convert.
 - Every name cc generates starts with `_C23`, so nothing clashes with the
   package's own.
 - A function with variable arguments, and one that takes or returns a
@@ -559,8 +573,9 @@ files as cgo rewrites them (`rewrite.go`), into the object directory:
 
 `testdata/interop` is such a package: lists that each side allocates and
 the other walks, a slice kept by C, strings, variables, enumerations,
-unions, memory that malloc was given no type for, and arrays summed
-from one past their end, across collections (`TestInterop`).
+unions, memory that malloc was given no type for, arrays summed from
+one past their end, and a handle that C keeps, across collections
+(`TestInterop`).
 
 ## What Go may rely on, with no checks
 
