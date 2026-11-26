@@ -1635,6 +1635,8 @@ func (pr *pkgReader) dictNameOf(dict *readerDict) *ir.Name {
 		reflectdata.MarkTypeUsedInInterface(pr.gd, iface, lsym)
 	}
 
+	pr.useAllMethods(dict, lsym)
+
 	objw.Global(pr.gd, lsym, int32(ot), obj.DUPOK|obj.RODATA)
 
 	return name

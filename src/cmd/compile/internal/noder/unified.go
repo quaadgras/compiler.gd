@@ -536,7 +536,7 @@ func writeUnifiedExport(gd *base.Invocation, out io.Writer) {
 			assert(gd, xpath == pr.PkgPath())
 			assert(gd, xtag != pkgbits.ObjStub)
 
-			if types.IsExported(xname) {
+			if types.IsExported(xname) || isReflectTypeForMethods(xpath, xname) {
 				l.relocIdx(gd, pr, pkgbits.SectionObj, idx)
 			}
 		}

@@ -1130,6 +1130,14 @@ func usemethod(gd *base.Invocation, n *ir.CallExpr) {
 			return
 		}
 	}
+	if sym := ir.CurFunc(gd).Nname.Sym(); sym.Pkg.Path == "reflect" &&
+		(strings.HasPrefix(sym.Name, "(*rtype).methods.") || strings.HasPrefix(sym.Name, "typeForMethods[")) {
+		// reflect.TypeFor[T]().Methods(): the methods of the type argument,
+		// which the linker keeps for the dictionary (R_USEALLMETHODS).
+		// The instances of reflect.typeForMethods are compiled in the
+		// packages that use them, where (*rtype).methods may be inlined.
+		return
+	}
 
 	dot, ok := n.Fun.(*ir.SelectorExpr)
 	if !ok {

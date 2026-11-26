@@ -98,6 +98,13 @@ const (
 	// The target is a symbol containing the name of a method called via a generic
 	// interface or looked up via MethodByName("F").
 	R_USENAMEDMETHOD
+	// R_USEALLMETHODS marks that the exported methods of a type must not be
+	// eliminated, as reflection lists them: the target is the type descriptor.
+	// The compiler puts it in the dictionaries of reflect.typeForMethods, which
+	// it calls for reflect.TypeFor[T]().Methods().
+	// This is a marker relocation (0-sized), for the linker's reachabililty
+	// analysis.
+	R_USEALLMETHODS
 	// R_METHODOFF resolves to a 32-bit offset from the beginning of the section
 	// holding the data being relocated to the referenced symbol.
 	// It is a variant of R_ADDROFF used when linking from the uncommonType of a

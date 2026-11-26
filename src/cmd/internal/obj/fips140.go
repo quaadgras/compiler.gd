@@ -320,7 +320,8 @@ func (s *LSym) checkFIPSReloc(ctxt *Link, rel Reloc) {
 		objabi.R_KEEP,
 		objabi.R_USEIFACE,
 		objabi.R_USEIFACEMETHOD,
-		objabi.R_USENAMEDMETHOD:
+		objabi.R_USENAMEDMETHOD,
+		objabi.R_USEALLMETHODS:
 		return
 	}
 

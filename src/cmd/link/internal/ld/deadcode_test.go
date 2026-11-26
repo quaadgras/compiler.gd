@@ -36,6 +36,10 @@ func TestDeadcode(t *testing.T) {
 		{"ifacemethod5", []string{"main.S.M"}, nil, ""},
 		{"ifacemethod6", []string{"main.S.M"}, []string{"main.S.N"}, ""},
 		{"structof_funcof", []string{"main.S.M"}, []string{"main.S.N"}, ""},
+		// gd: reflect.TypeFor[T]().Methods() keeps the exported methods
+		// of T, and of no other type.
+		{"typeformethods", []string{"main.T.M", "main.(*P).M", "main.G[int].M", "main.B.M"},
+			[]string{"main.T.m", "main.S.M", "main.(*T).N"}, ""},
 		{"globalmap", []string{"main.small", "main.effect"},
 			[]string{"main.large"}, ""},
 	}

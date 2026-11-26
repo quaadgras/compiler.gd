@@ -2273,6 +2273,20 @@ func (w *writer) expr(expr syntax.Expr) {
 			}
 		}
 
+		if fn, targs, typeFor := w.p.typeForMethods(expr); fn != nil {
+			// reflect.TypeFor[T]().Methods() is reflect.typeForMethods[T](),
+			// which lists the methods of T alone (see reflectmethods.go).
+			w.Code(exprCall)
+			w.Bool(false) // not a method call
+			w.Bool(true)  // call to instanced function
+			w.pos(typeFor)
+			w.funcInst(fn, targs)
+			w.pos(expr)
+			w.multiExpr(expr, nil, nil)
+			w.Bool(false) // no dots
+			break
+		}
+
 		writeFunExpr := func() {
 			fun := syntax.Unparen(expr.Fun)
 

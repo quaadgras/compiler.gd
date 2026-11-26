@@ -67,6 +67,10 @@ type Type interface {
 
 	// Methods returns an iterator over each method in the type's method set. The sequence is
 	// equivalent to calling Method successively for each index i in the range [0, NumMethod()).
+	//
+	// Calling this method will force the linker to retain all exported methods in all packages,
+	// as calling Method does, except in the expression TypeFor[T]().Methods(), which has it
+	// retain the exported methods of the type T only (T may be a type parameter).
 	Methods() iter.Seq[Method]
 
 	// MethodByName returns the method with that name in the type's
@@ -1395,6 +1399,30 @@ func TypeOf(i any) Type {
 func TypeFor[T any]() Type {
 	// toRType is safe to use here; type is never nil as T is statically known.
 	return toRType(abi.TypeFor[T]())
+}
+
+// typeForMethods returns TypeFor[T]().Methods(). The compiler calls it for
+// that expression, and puts a relocation with the type T in the dictionary
+// of each of its instances, for which the linker keeps the exported methods
+// of T (see cmd/link/internal/ld/deadcode.go): a call of Methods of any
+// other [Type] has it keep the exported methods of every type. It is not
+// inlined, so that what calls it refers to that dictionary.
+//
+//go:noinline
+func typeForMethods[T any]() iter.Seq[Method] {
+	return toRType(abi.TypeFor[T]()).methods()
+}
+
+// methods is Methods for typeForMethods, which the compiler does not take
+// for a function that looks up the methods of any type.
+func (t *rtype) methods() iter.Seq[Method] {
+	return func(yield func(Method) bool) {
+		for i := range t.NumMethod() {
+			if !yield(t.Method(i)) {
+				return
+			}
+		}
+	}
 }
 
 // rtypeOf directly extracts the *rtype of the provided value.

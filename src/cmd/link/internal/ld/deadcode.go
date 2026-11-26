@@ -24,10 +24,11 @@ type deadcodePass struct {
 	ldr  *loader.Loader
 	wq   heap // work queue, using min-heap for better locality
 
-	ifaceMethod        map[methodsig]bool // methods called from reached interface call sites
-	genericIfaceMethod map[string]bool    // names of methods called from reached generic interface call sites
-	markableMethods    []methodref        // methods of reached types
-	reflectSeen        bool               // whether we have seen a reflect method call
+	ifaceMethod        map[methodsig]bool  // methods called from reached interface call sites
+	genericIfaceMethod map[string]bool     // names of methods called from reached generic interface call sites
+	markableMethods    []methodref         // methods of reached types
+	reflectSeen        bool                // whether we have seen a reflect method call
+	reflectTypes       map[loader.Sym]bool // types whose exported methods reflection lists (R_USEALLMETHODS)
 	dynlink            bool
 
 	methodsigstmp []methodsig // scratch buffer for decoding method signatures
@@ -39,6 +40,7 @@ func (d *deadcodePass) init() {
 	d.ldr.InitReachable()
 	d.ifaceMethod = make(map[methodsig]bool)
 	d.genericIfaceMethod = make(map[string]bool)
+	d.reflectTypes = make(map[loader.Sym]bool)
 	if buildcfg.Experiment.FieldTrack {
 		d.ldr.Reachparent = make([]loader.Sym, d.ldr.NSym())
 	}
@@ -241,6 +243,27 @@ func (d *deadcodePass) flood() {
 				if !d.ldr.IsGoType(rs) && !d.ctxt.linkShared {
 					panic(fmt.Sprintf("R_USEIFACE in %s references %s which is not a type or itab", d.ldr.SymName(symIdx), d.ldr.SymName(rs)))
 				}
+				if !d.ldr.AttrUsedInIface(rs) {
+					d.ldr.SetAttrUsedInIface(rs, true)
+					if d.ldr.AttrReachable(rs) {
+						d.ldr.SetAttrReachable(rs, false)
+						d.mark(rs, symIdx)
+					}
+				}
+				continue
+			case objabi.R_USEALLMETHODS:
+				// R_USEALLMETHODS is a marker relocation that marks the exported
+				// methods of a type as used: reflection lists the methods of
+				// that type, and of no other. The type is used in an interface
+				// then, as for R_USEIFACE.
+				rs := r.Sym()
+				if !d.ldr.IsGoType(rs) && !d.ctxt.linkShared {
+					panic(fmt.Sprintf("R_USEALLMETHODS in %s references %s which is not a type", d.ldr.SymName(symIdx), d.ldr.SymName(rs)))
+				}
+				if d.ctxt.Debugvlog > 1 {
+					d.ctxt.Logf("reached all methods of: %s\n", d.ldr.SymName(rs))
+				}
+				d.reflectTypes[rs] = true
 				if !d.ldr.AttrUsedInIface(rs) {
 					d.ldr.SetAttrUsedInIface(rs, true)
 					if d.ldr.AttrReachable(rs) {
@@ -464,6 +487,10 @@ func (d *deadcodePass) markMethod(m methodref) {
 // emits a relocation with the method name. Matching methods are kept in all
 // reachable types.
 //
+// reflect.TypeFor[T]().Methods() is not a REFLECTMETHOD either: the compiler
+// calls reflect.typeForMethods[T] for it, whose dictionary has a relocation
+// (R_USEALLMETHODS) with the type. The exported methods of that type are kept.
+//
 // Any unreached text symbols are removed from ctxt.Textp.
 func deadcode(ctxt *Link) {
 	ldr := ctxt.loader
@@ -484,7 +511,8 @@ func deadcode(ctxt *Link) {
 		// in the last pass.
 		rem := d.markableMethods[:0]
 		for _, m := range d.markableMethods {
-			if (d.reflectSeen && (m.isExported() || d.dynlink)) || d.ifaceMethod[m.m] || d.genericIfaceMethod[m.m.name] {
+			if (d.reflectSeen && (m.isExported() || d.dynlink)) || d.ifaceMethod[m.m] || d.genericIfaceMethod[m.m.name] ||
+				(d.reflectTypes[m.src] && m.isExported()) {
 				d.markMethod(m)
 			} else {
 				rem = append(rem, m)
