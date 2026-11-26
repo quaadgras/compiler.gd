@@ -135,7 +135,9 @@ func cClaimFresh(s *mspan, b *cBits, w, a uintptr, plan *cPlan) bool {
 				// rest is cClaim's to compare, word by word.
 				// (The ids that were stored are of words whose
 				// classes say that nothing claimed them.)
-				cClaimStats.claims.Add(int64(i))
+				if cClaimCounting || debug.cclaims != 0 {
+					cClaimStats.claims.Add(int64(i))
+				}
 				releasem(mp)
 				return false
 			}
@@ -145,7 +147,9 @@ func cClaimFresh(s *mspan, b *cBits, w, a uintptr, plan *cPlan) bool {
 		}
 		i += c
 	}
-	cClaimStats.claims.Add(int64(k))
+	if cClaimCounting || debug.cclaims != 0 {
+		cClaimStats.claims.Add(int64(k))
+	}
 	releasem(mp)
 	return true
 }

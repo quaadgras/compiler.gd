@@ -258,6 +258,8 @@ func (s *mspan) newCIDs() *cBits {
 func (s *mspan) freeCBits() {
 	if b := s.cBitsOf(); b != nil {
 		n := s.cBitsBytes()
+		// (What the Ps remember of the span is no longer so.)
+		cHeaderEpoch.Add(1)
 		atomic.StorepNoWB(unsafe.Pointer(&s.cbits), nil)
 		cMetaFree(b, n)
 	}

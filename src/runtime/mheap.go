@@ -420,15 +420,23 @@ func (b *mSpanStateBox) get() mSpanState {
 }
 
 type mspan struct {
-	_    sys.NotInHeap
-	next *mspan     // next span in list, or nil if none
-	prev *mspan     // previous span in list, or nil if none
-	list *mSpanList // For debugging.
+	_ sys.NotInHeap
 
 	startAddr uintptr // address of first byte of span aka s.base()
 	npages    uintptr // number of pages in span
 
-	manualFreeList gclinkptr // list of free objects in mSpanManual spans
+	// gd: what says which object an address is in, and what the
+	// checks of C's pointers ask of a span (c23Header), is here with
+	// the two above: a lookup loads one or two cache lines of the
+	// span, not four.
+	elemsize         uintptr       // computed from sizeclass or from npages
+	limit            uintptr       // end of data in span
+	cbits            *cBits        // what a span of C's objects keeps for them (cspan.go); accessed atomically
+	divMul           uint32        // for divide by elemsize
+	spanclass        spanClass     // size class and noscan (uint8)
+	state            mSpanStateBox // mSpanInUse etc; accessed atomically (get/set methods)
+	needzero         uint8         // needs to be zeroed before allocation
+	isUserArenaChunk bool          // whether or not this span represents a user arena
 
 	// freeindex is the slot index between 0 and nelems at which to begin scanning
 	// for the next free object in this span.
@@ -487,16 +495,19 @@ type mspan struct {
 	// The sweep will free the old allocBits and set allocBits to the
 	// gcmarkBits. The gcmarkBits are replaced with a fresh zeroed
 	// out memory.
-	allocBits   *gcBits
-	gcmarkBits  *gcBits
-	pinnerBits  *gcBits    // bitmap for pinned objects; accessed atomically
-	sharedBits  *gcBits    // bitmap of the objects other goroutines may reach (shared.go); accessed atomically
-	exposedBits *gcBits    // bitmap of the objects whose address a program has as an integer (checkptr.go); accessed atomically
-	wholeBits   *wholeBits // states of the words of small objects, if the span holds a string, slice or interface (mwholebits.go); accessed atomically
-	cbits       *cBits     // what a span of C's objects keeps for them (cspan.go); accessed atomically
-	cids        *cBits     // the types of its words that are typed pointers (cclaim.go); accessed atomically
-	otypes      *cBits     // the types that its objects were allocated for, if they have pointers and no header (mobjtypes.go); written by the allocation, read atomically
-	csize       uintptr    // the bytes that the object of a large span of C's was asked for
+	allocBits      *gcBits
+	gcmarkBits     *gcBits
+	pinnerBits     *gcBits    // bitmap for pinned objects; accessed atomically
+	sharedBits     *gcBits    // bitmap of the objects other goroutines may reach (shared.go); accessed atomically
+	exposedBits    *gcBits    // bitmap of the objects whose address a program has as an integer (checkptr.go); accessed atomically
+	wholeBits      *wholeBits // states of the words of small objects, if the span holds a string, slice or interface (mwholebits.go); accessed atomically
+	cids           *cBits     // the types of its words that are typed pointers (cclaim.go); accessed atomically
+	otypes         *cBits     // the types that its objects were allocated for, if they have pointers and no header (mobjtypes.go); written by the allocation, read atomically
+	csize          uintptr    // the bytes that the object of a large span of C's was asked for
+	next           *mspan     // next span in list, or nil if none
+	prev           *mspan     // previous span in list, or nil if none
+	list           *mSpanList // For debugging.
+	manualFreeList gclinkptr  // list of free objects in mSpanManual spans
 
 	// sweep generation:
 	// if sweepgen == h->sweepgen - 2, the span needs sweeping
@@ -507,19 +518,12 @@ type mspan struct {
 	// h->sweepgen is incremented by 2 after every GC
 
 	sweepgen              uint32
-	divMul                uint32        // for divide by elemsize
-	allocCount            uint16        // number of allocated objects
-	spanclass             spanClass     // size class and noscan (uint8)
-	state                 mSpanStateBox // mSpanInUse etc; accessed atomically (get/set methods)
-	needzero              uint8         // needs to be zeroed before allocation
-	isUserArenaChunk      bool          // whether or not this span represents a user arena
-	allocCountBeforeCache uint16        // a copy of allocCount that is stored just before this span is cached
-	elemsize              uintptr       // computed from sizeclass or from npages
-	limit                 uintptr       // end of data in span
-	speciallock           mutex         // guards specials list and changes to pinnerBits
-	specials              *special      // linked list of special records sorted by offset.
-	userArenaChunkFree    addrRange     // interval for managing chunk allocation
-	largeType             *_type        // malloc header for large objects.
+	allocCount            uint16    // number of allocated objects
+	allocCountBeforeCache uint16    // a copy of allocCount that is stored just before this span is cached
+	speciallock           mutex     // guards specials list and changes to pinnerBits
+	specials              *special  // linked list of special records sorted by offset.
+	userArenaChunkFree    addrRange // interval for managing chunk allocation
+	largeType             *_type    // malloc header for large objects.
 }
 
 func (s *mspan) base() uintptr {

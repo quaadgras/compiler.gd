@@ -58,7 +58,7 @@ const (
 	inlineBigFunctionNodes      = 5000                 // Functions with this many nodes are considered "big".
 	inlineBigFunctionMaxCost    = 20                   // Max cost of inlinee when inlining into a "big" function.
 	inlineC23MaxBudget          = 200                  // Max cost of an internal/c23 inlinee (isC23), into any function.
-	inlineHintMaxBudget         = 320                  // gd: Max cost of an inlinee marked go:inline, as C's inline functions are: GCC gives a function declared inline some four times what it gives one that is not.
+	inlineHintMaxBudget         = inlineMaxBudget      // gd: Max cost of an inlinee marked go:inline, as C's inline functions are: no more than any function's, unless -d=inlinehint says so. (Four times that, as GCC gives a function declared inline, made Godot's core 78% bigger and 1% faster: what is inlined takes its checks with it.)
 	inlineAlwaysMaxBudget       = 20000                // gd: Max cost of an inlinee marked go:alwaysinline.
 	inlineClosureCalledOnceCost = 10 * inlineMaxBudget // if a closure is just called once, inline it.
 )
@@ -232,11 +232,17 @@ func isC23(fn *ir.Func) bool {
 
 // pragmaBudget returns the budget that fn's directives ask for: that of
 // go:alwaysinline or go:inline, or 0.
-func pragmaBudget(fn *ir.Func) int32 {
+func pragmaBudget(gd *base.Invocation, fn *ir.Func) int32 {
 	switch {
 	case fn.Pragma&ir.AlwaysInline != 0:
+		if n := gd.Debug.InlineAlways; n != 0 {
+			return int32(n)
+		}
 		return inlineAlwaysMaxBudget
 	case fn.Pragma&ir.InlineHint != 0:
+		if n := gd.Debug.InlineHint; n != 0 {
+			return int32(n)
+		}
 		return inlineHintMaxBudget
 	}
 	return 0
@@ -291,7 +297,7 @@ func inlineBudget(gd *base.Invocation, fn *ir.Func, profile *pgoir.Profile, rela
 	if isC23(fn) {
 		budget = max(budget, inlineC23MaxBudget)
 	}
-	budget = max(budget, pragmaBudget(fn))
+	budget = max(budget, pragmaBudget(gd, fn))
 
 	if IsPgoHotFunc(gd, fn, profile) {
 		budget = inlineHotMaxBudgetOf(gd)
@@ -1075,9 +1081,9 @@ func inlineCostOK(gd *base.Invocation, n *ir.CallExpr, caller, callee *ir.Func, 
 	}
 	if !isPkgInit(caller) {
 		if callee.Pragma&ir.AlwaysInline != 0 {
-			maxCost = max(maxCost, pragmaBudget(callee))
+			maxCost = max(maxCost, pragmaBudget(gd, callee))
 		} else if !bigCaller {
-			maxCost = max(maxCost, pragmaBudget(callee))
+			maxCost = max(maxCost, pragmaBudget(gd, callee))
 		}
 	}
 

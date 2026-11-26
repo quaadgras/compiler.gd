@@ -2319,6 +2319,7 @@ func CClaimType(p unsafe.Pointer) string {
 
 // CClaimCounts returns what the claims of C's memory found so far.
 func CClaimCounts() (claims, reclaims, narrowed, forged, bytes uint64) {
+	cClaimCounting = true
 	st := &cClaimStats
 	return st.claims.Load(), st.reclaims.Load(), st.narrowed.Load(), st.forged.Load(), st.bytes.Load()
 }

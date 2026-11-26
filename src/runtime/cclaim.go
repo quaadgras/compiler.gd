@@ -88,6 +88,12 @@ var cClaimStats struct {
 	bytes    atomic.Uint64 // words claimed for a pointer that bytes were written in
 }
 
+// cClaimCounting is set if the first claims that are made at once
+// (cClaimScalars, cClaimFresh) are counted too, as they are with
+// GODEBUG=cclaims: a count is an atomic addition for each, which is as
+// much as the claim. The tests that read the counts set it.
+var cClaimCounting bool
+
 // cClaimReport prints cClaimStats.
 func cClaimReport() {
 	if debug.cclaims == 0 || !cSpansUsed {
@@ -512,8 +518,10 @@ func cClaimScalars(b *cBits, w, k uintptr) bool {
 			return true
 		}
 		if atomic.Cas(p, old, old|want) {
-			// Each word that nothing claimed is a claim.
-			cClaimStats.claims.Add(int64(k) - int64(sys.OnesCount64(uint64(old&mask))))
+			if cClaimCounting || debug.cclaims != 0 {
+				// Each word that nothing claimed is a claim.
+				cClaimStats.claims.Add(int64(k) - int64(sys.OnesCount64(uint64(old&mask))))
+			}
 			return true
 		}
 	}
@@ -691,9 +699,26 @@ func c23Header(p unsafe.Pointer) (d, n, m, b8, sh, bits uintptr) {
 	}
 	// la is an address in what p points into: a pointer to the end
 	// of something that is not C's is the address of what is next.
-	la := cEndAddr(uintptr(p))
-	if gp := getg(); gp.stack.lo <= la && la < gp.stack.hi {
+	la := a
+	if uintptr(p)&cEnd != 0 {
+		la = cEndAddr(uintptr(p))
+	}
+	gp := getg()
+	if gp.stack.lo <= la && la < gp.stack.hi {
 		return c23HeaderVar(a, la)
+	}
+	// The span of a small object of C's that was looked up before
+	// is remembered with all that is asked of it here (cHeaderEnt).
+	var he *cHeaderEnt
+	epoch := cHeaderEpoch.Load()
+	if pp := gp.m.p.ptr(); pp != nil {
+		he = &pp.cHeaders[la/pageSize%uintptr(len(pp.cHeaders))]
+		if he.page == la/pageSize && he.epoch == epoch {
+			i := uintptr(uint64(la-he.base) * uint64(he.divMul) >> 32)
+			base := he.base + i*he.elemsize
+			size := uintptr(*(*uint16)(unsafe.Pointer(he.sizes + i*2)))
+			return a - base, size, size, base - he.base, 3, he.bits
+		}
 	}
 	if s := spanOfHeap(la); s != nil {
 		if s.isUserArenaChunk {
@@ -713,10 +738,42 @@ func c23Header(p unsafe.Pointer) (d, n, m, b8, sh, bits uintptr) {
 			return
 		}
 		size := s.cSizeOf(i)
+		if he != nil && s.spanclass.sizeclass() != 0 {
+			// (The epoch is from before the span was found:
+			// if it was freed since, this is not found again.)
+			*he = cHeaderEnt{
+				page: la / pageSize, epoch: epoch, base: s.base(), elemsize: s.elemsize, divMul: s.divMul,
+				bits: uintptr(unsafe.Pointer(b)), sizes: uintptr(unsafe.Pointer(b)) + s.cBitsWords()*4,
+			}
+		}
 		return a - base, size, size, base - s.base(), 3, uintptr(unsafe.Pointer(b))
 	}
 	return c23HeaderVar(a, la)
 }
+
+// A cHeaderEnt is what c23Header says of the objects of a span of C's
+// small objects, for one page of the span: where the span begins, the
+// size of its slots and the number that divides by it, where the
+// classes of its words are and where the sizes that its objects were
+// asked for are. Finding them takes loads from the heap's table of
+// spans, from the span and from its cBits, each of memory that is
+// seldom in a cache; a P keeps them for the pages that it looked up.
+//
+// What is kept holds while the span is in use, which it is for as long
+// as a pointer of the program's points into it. cHeaderEpoch changes
+// when a span of C's gives its cBits back (freeCBits), and nothing
+// that was kept before that is used after it.
+type cHeaderEnt struct {
+	page     uintptr // the number of the page; no page of the heap is 0
+	epoch    uint64
+	base     uintptr
+	elemsize uintptr
+	bits     uintptr // *cBits
+	sizes    uintptr // the uint16s after the classes
+	divMul   uint32
+}
+
+var cHeaderEpoch atomic.Uint64
 
 // c23HeaderVar is c23Header for an address a that is in no object of
 // the heap: what it says is of the variable of the stack or of the

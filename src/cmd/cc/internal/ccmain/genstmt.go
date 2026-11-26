@@ -118,9 +118,10 @@ func (g *gen) function(f *funcDecl) {
 	g.localNames = nil
 	lit := g.funcLit(f)
 	// What the source asks to have inlined, Go is asked too: a
-	// function declared inline, or defined in its class, has a bigger
-	// budget in cmd/compile, and one that is always_inline has no
-	// budget.
+	// function that is always_inline is inlined whatever it costs,
+	// and one declared inline, or defined in its class, is marked,
+	// which gives it a bigger budget only if cmd/compile is told so
+	// (-d=inlinehint).
 	switch {
 	case f.sym.always:
 		g.funcs.WriteString("//go:alwaysinline\n")
