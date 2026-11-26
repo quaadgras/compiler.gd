@@ -8,6 +8,7 @@ import (
 	"internal/abi"
 	"internal/goarch"
 	"internal/runtime/atomic"
+	"internal/runtime/sys"
 	"unsafe"
 )
 
@@ -243,6 +244,14 @@ func cClaim(s *mspan, i, p uintptr, elem *_type, n uintptr, load, c bool) {
 				return
 			}
 		}
+		if load {
+			// What is loaded as an integer, whatever it is: a load
+			// makes nothing of the words.
+			return
+		}
+		if w%cClassPer+k <= cClassPer && cClaimScalars(b, w, k) {
+			return
+		}
 	}
 	aligned := p&(word-1) == 0 && elem.Pointers()
 	var mask *byte
@@ -451,6 +460,38 @@ func cNarrow(a uintptr, id uint32) {
 		nv := cConvProbe(v, id)
 		if nv == v || atomic.Casuintptr(p, v, nv) {
 			return
+		}
+	}
+}
+
+// cClaimScalars claims for no pointer the k words from the w'th, whose
+// classes are in one uint32 of b, if each of them is claimed so or by
+// nothing, and reports whether it did. That is the first conversion of
+// what malloc gave, the usual one. It is what cClaimWord does for each
+// word, at once, and only while the collector is not marking, when what
+// the words hold is nothing that it is to be shown.
+//
+//go:nosplit
+func cClaimScalars(b *cBits, w, k uintptr) bool {
+	if writeBarrier.enabled || getg().m.cprobe {
+		return false
+	}
+	p := b.word(w / cClassPer)
+	mask := uint32(uint64(1)<<(2*k)-1) << (w % cClassPer * 2)
+	want := 0x55555555 * cScalar & mask
+	for {
+		old := atomic.Load(p)
+		if old&mask&0xaaaaaaaa != 0 {
+			// A word that is claimed for a pointer.
+			return false
+		}
+		if old&mask == want {
+			return true
+		}
+		if atomic.Cas(p, old, old|want) {
+			// Each word that nothing claimed is a claim.
+			cClaimStats.claims.Add(int64(k) - int64(sys.OnesCount64(uint64(old&mask))))
+			return true
 		}
 	}
 }
