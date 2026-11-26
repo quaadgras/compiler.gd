@@ -70,6 +70,13 @@ static void *mqSender(void *arg) {
 }
 
 static void mqNotifyThread(union sigval v) {
+	// (The thread is still there when the signal of the next test is
+	// sent, and the library starts it with no signal blocked: it is not
+	// to be the one that takes it.)
+	sigset_t set;
+	sigemptyset(&set);
+	sigaddset(&set, SIGUSR1);
+	pthread_sigmask(SIG_BLOCK, &set, NULL);
 	notifiedValue = v.sival_int;
 	sem_post(&notified);
 }

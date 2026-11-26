@@ -5204,6 +5204,10 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 	case ir.OSLICE, ir.OSLICEARR, ir.OSLICE3, ir.OSLICE3ARR:
 		n := n.(*ir.SliceExpr)
 		check := s.checkPtrEnabled && n.Op() == ir.OSLICE3ARR && n.X.Op() == ir.OCONVNOP && n.X.(*ir.ConvExpr).X.Type().IsUnsafePtr()
+		if check && n.X.(*ir.ConvExpr).CheckPtr() {
+			// Of a function that is not checked, inlined.
+			check = false
+		}
 		v := s.exprCheckPtr(n.X, !check)
 		var i, j, k *ssa.Value
 		if n.Low != nil {

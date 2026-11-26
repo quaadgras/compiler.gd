@@ -516,41 +516,49 @@ func TestMapConcurrentWrites(t *testing.T) {
 	m := map[int]int{}
 	var panics atomic.Int64
 	var wrong atomic.Value
-	var wg sync.WaitGroup
-	for id := 0; id < G; id++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			write := func(k int) {
-				defer func() {
-					switch e := recover().(type) {
-					case nil:
-					case runtime.Error:
-						if e.Error() != "concurrent map writes" {
-							wrong.CompareAndSwap(nil, e.Error())
+	// The writers start together, and write again if none of them met
+	// another: on a machine that is slow to start a thread, one may be
+	// done before the next begins.
+	for round := 0; round < 50 && (round == 0 || panics.Load() == 0 && !goexperiment.Sharing); round++ {
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for id := 0; id < G; id++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				write := func(k int) {
+					defer func() {
+						switch e := recover().(type) {
+						case nil:
+						case runtime.Error:
+							if e.Error() != "concurrent map writes" {
+								wrong.CompareAndSwap(nil, e.Error())
+							}
+							panics.Add(1)
+						default:
+							wrong.CompareAndSwap(nil, "a panic that is not a runtime.Error")
 						}
-						panics.Add(1)
+					}()
+					switch k % 16 {
+					case 0:
+						delete(m, k/16)
+					case 1:
+						if k%4096 == 1 {
+							clear(m)
+						}
 					default:
-						wrong.CompareAndSwap(nil, "a panic that is not a runtime.Error")
+						m[k%2048] = k%2048 + 1
 					}
-				}()
-				switch k % 16 {
-				case 0:
-					delete(m, k/16)
-				case 1:
-					if k%4096 == 1 {
-						clear(m)
-					}
-				default:
-					m[k%2048] = k%2048 + 1
 				}
-			}
-			for i := 0; i < n; i++ {
-				write(i*7 + id)
-			}
-		}()
+				for i := 0; i < n; i++ {
+					write(i*7 + id)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
 	}
-	wg.Wait()
 	if e := wrong.Load(); e != nil {
 		t.Fatalf("wrong panic: %v", e)
 	}
