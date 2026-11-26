@@ -409,7 +409,7 @@ memory-safe `unsafe` (`unsafe.md`, "Compatible types", is the first):
     pointer that nothing is loaded through if what it points to is not
     what the type says.
 
-  The look is at the class of the word, two bits that the compiled code
+  The look is at the class of the word, the low two bits of a byte that the compiled code
   loads where it has the header of what the pointer points into, with
   the call for what that does not let through. A store to a member
   through a pointer to a struct is not looked at: the struct's

@@ -45,9 +45,26 @@ import (
 // object's slot and to no other object.
 const cPad = 1
 
-// cClassPer is the number of words of memory whose classes one uint32
-// of a span's cBits has, two bits each.
-const cClassPer = 16
+// cClassPer is the number of words of memory whose classes one uint64
+// of a span's cBits has, a byte each: the class is the byte's low two
+// bits.
+const cClassPer = 8
+
+const (
+	cClassLows  = 0x0101010101010101 // the low bit of each class of a uint64
+	cClassHighs = 0x0202020202020202 // the high bit of each: a pointer
+	cClassAll   = 0x0303030303030303
+)
+
+// cClassesOf returns the bits of the first k classes of a uint64.
+//
+//go:nosplit
+func cClassesOf(k uintptr) uint64 {
+	if k >= cClassPer {
+		return cClassAll
+	}
+	return cClassAll & (uint64(1)<<(8*k) - 1)
+}
 
 // The class of a word of C's: what it was claimed for.
 const (
@@ -58,8 +75,8 @@ const (
 )
 
 // cBits is what a span of C's objects keeps for them: the classes of
-// the words of the span, in uint32s, and after them, in a span of small
-// objects, the uint16 sizes of the objects. It is outside the heap, as
+// the words of the span, a byte each, in uint64s, and after them, in a
+// span of small objects, the uint16 sizes of the objects. It is outside the heap, as
 // long as its span needs (cBitsBytes), and goes back to a free list with
 // its span. The types of the words that are typed pointers are in
 // another, the span's ids (cIDsOf), which a span has once it has such a
@@ -73,9 +90,12 @@ type cBits struct {
 // where the collector expects a pointer (wbBufFlush1).
 var cSpansUsed bool
 
-// cBitsWords returns the number of uint32s of the classes of s.
+// cBitsWords returns the number of bytes of the classes of s, in
+// uint32s: a byte for each word of the span, and a uint64 more, which
+// is loaded with the last of them (cClassWindow, and
+// cmd/compile/internal/ssa's cheaders).
 func (s *mspan) cBitsWords() uintptr {
-	return s.npages * (pageSize / goarch.PtrSize / cClassPer)
+	return s.npages*(pageSize/goarch.PtrSize/4) + 2
 }
 
 // cIDsBytes returns the size of the ids of s.
@@ -93,9 +113,7 @@ func (s *mspan) cIDsOf() *cBits {
 
 // cBitsBytes returns the size of the cBits of s.
 func (s *mspan) cBitsBytes() uintptr {
-	// (And a uint32 after the classes, which compiled code loads
-	// with the last of them: cmd/compile/internal/ssa's cheaders.)
-	n := s.cBitsWords()*4 + 4
+	n := s.cBitsWords() * 4
 	if s.spanclass.sizeclass() != 0 {
 		n += uintptr(s.nelems) * 2
 	}
@@ -110,7 +128,7 @@ func (s *mspan) cBitsOf() *cBits {
 	return (*cBits)(atomic.Loadp(unsafe.Pointer(&s.cbits)))
 }
 
-// word returns the i'th uint32 of the bitmap.
+// word returns the i'th uint32 of the ids.
 //
 //go:nosplit
 func (b *cBits) word(i uintptr) *uint32 {
@@ -121,23 +139,42 @@ func (b *cBits) word(i uintptr) *uint32 {
 //
 //go:nosplit
 func cClass(b *cBits, w uintptr) uint32 {
-	return atomic.Load(b.word(w/cClassPer)) >> (w % cClassPer * 2) & 3
+	return uint32(atomic.Load8((*uint8)(add(unsafe.Pointer(b), w)))) & 3
+}
+
+// group returns the i'th uint64 of the classes.
+//
+//go:nosplit
+func (b *cBits) group(i uintptr) *uint64 {
+	return (*uint64)(add(unsafe.Pointer(b), i*8))
+}
+
+// cClassWindow returns the classes of the cClassPer words from the
+// w'th, the w'th lowest.
+//
+//go:nosplit
+func cClassWindow(b *cBits, w uintptr) uint64 {
+	v := atomic.Load64(b.group(w / cClassPer))
+	if sh := w % cClassPer * 8; sh != 0 {
+		v = v>>sh | atomic.Load64(b.group(w/cClassPer+1))<<(64-sh)
+	}
+	return v
 }
 
 // cClassSet makes c the class of the n words from the w'th of a span:
-// other objects have classes in the same uint32s, so one is changed as
+// other objects have classes in the same uint64s, so one is changed as
 // a whole.
 //
 //go:nosplit
 func cClassSet(b *cBits, w, n uintptr, c uint32) {
 	for n > 0 {
-		p := b.word(w / cClassPer)
+		p := b.group(w / cClassPer)
 		k := min(n, cClassPer-w%cClassPer)
-		mask := uint32(uint64(1)<<(2*k)-1) << (w % cClassPer * 2)
-		val := 0x55555555 * c & mask
+		mask := cClassesOf(k) << (w % cClassPer * 8)
+		val := cClassLows * uint64(c) & mask
 		for {
-			old := atomic.Load(p)
-			if old&mask == val || atomic.Cas(p, old, old&^mask|val) {
+			old := atomic.Load64(p)
+			if old&mask == val || atomic.Cas64(p, old, old&^mask|val) {
 				break
 			}
 		}
@@ -511,15 +548,15 @@ func scanObjectC(b uintptr, s *mspan, gcw *gcWork) {
 		// nothing claimed is bytes, and a pointer that was written
 		// there as bytes is one that cannot be used when the word
 		// is claimed for it (cClaimWord).
-		classes := atomic.Load(bits.word(w / cClassPer))
-		if classes&(0x55555555*cUntyped) == 0 && w%cClassPer == 0 {
-			// Skip the words of this uint32 (the loop
+		classes := atomic.Load64(bits.group(w / cClassPer))
+		if classes&cClassHighs == 0 && w%cClassPer == 0 {
+			// Skip the words of this uint64 (the loop
 			// increment will do the last).
 			i += (cClassPer - 1) * goarch.PtrSize
 			w += cClassPer - 1
 			continue
 		}
-		if classes>>(w%cClassPer*2)&3 < cUntyped {
+		if classes>>(w%cClassPer*8)&3 < cUntyped {
 			continue
 		}
 		val := *(*uintptr)(unsafe.Pointer(b + i)) &^ cPtrBits

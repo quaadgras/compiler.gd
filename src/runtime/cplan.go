@@ -21,11 +21,11 @@ type cPlan struct {
 	c      bool // the conversion is C's (cWant)
 	unions bool // cUnionRefType was set when it was made
 	// For cConvFast: whether a word of it is a union's, and, if it
-	// has cClassPer words or less, the classes of all of them as
+	// has 2*cClassPer words or less, the classes of all of them as
 	// they are in a span's bits.
 	hasUnion bool
 	small    bool
-	cls      uint32
+	cls      [2]uint64
 	words    [cPlanMaxWords]cPlanWord
 }
 
@@ -73,11 +73,11 @@ func cPlanOf(elem *_type, c bool) *cPlan {
 			e.want, e.id, e.union = class, uid, true
 			pl.hasUnion = true
 		}
-		if k < cClassPer {
-			pl.cls |= e.want << (2 * k)
+		if k < 2*cClassPer {
+			pl.cls[k/cClassPer] |= uint64(e.want) << (8 * (k % cClassPer))
 		}
 	}
-	pl.small = words <= cClassPer
+	pl.small = words <= 2*cClassPer
 	atomicstorep(unsafe.Pointer(slot), unsafe.Pointer(pl))
 	return pl
 }
@@ -90,7 +90,7 @@ func cPlanOf(elem *_type, c bool) *cPlan {
 // the words does not expect.
 //
 // It does for all the words what cClaimWord does for each: the ids
-// first, then the classes, a uint32 of them at once. Only while the
+// first, then the classes, a uint64 of them at once. Only while the
 // collector is not marking, which cannot begin before this is done: a
 // word that becomes one it looks at holds nothing, so there is nothing
 // to show it.
@@ -104,8 +104,8 @@ func cClaimFresh(s *mspan, b *cBits, w, a uintptr, plan *cPlan) bool {
 	}
 	for i := uintptr(0); i < k; {
 		c := min(k-i, cClassPer-(w+i)%cClassPer)
-		mask := uint32(uint64(1)<<(2*c)-1) << ((w + i) % cClassPer * 2)
-		if atomic.Load(b.word((w+i)/cClassPer))&mask != 0 {
+		mask := cClassesOf(c) << ((w + i) % cClassPer * 8)
+		if atomic.Load64(b.group((w+i)/cClassPer))&mask != 0 {
 			releasem(mp)
 			return false
 		}
@@ -132,15 +132,15 @@ func cClaimFresh(s *mspan, b *cBits, w, a uintptr, plan *cPlan) bool {
 	}
 	for i := uintptr(0); i < k; {
 		c := min(k-i, cClassPer-(w+i)%cClassPer)
-		shift := (w + i) % cClassPer * 2
-		var val uint32
+		shift := (w + i) % cClassPer * 8
+		var val uint64
 		for j := uintptr(0); j < c; j++ {
-			val |= plan.words[i+j].want << (shift + 2*j)
+			val |= uint64(plan.words[i+j].want) << (shift + 8*j)
 		}
-		p := b.word((w + i) / cClassPer)
-		mask := uint32(uint64(1)<<(2*c)-1) << shift
+		p := b.group((w + i) / cClassPer)
+		mask := cClassesOf(c) << shift
 		for {
-			old := atomic.Load(p)
+			old := atomic.Load64(p)
 			if old&mask != 0 {
 				// Another thread claimed a word meanwhile: the
 				// rest is cClaim's to compare, word by word.
@@ -152,7 +152,7 @@ func cClaimFresh(s *mspan, b *cBits, w, a uintptr, plan *cPlan) bool {
 				releasem(mp)
 				return false
 			}
-			if atomic.Cas(p, old, old|val) {
+			if atomic.Cas64(p, old, old|val) {
 				break
 			}
 		}
@@ -197,16 +197,16 @@ func cConvFast(a uintptr, elem *_type, load bool) bool {
 	}
 	b := (*cBits)(unsafe.Pointer(h.bits))
 	w, k := (a-h.base)/word, elem.Size_/word
-	v := uint64(atomic.Load(b.word(w / cClassPer)))
-	if w%cClassPer+k > cClassPer {
-		v |= uint64(atomic.Load(b.word(w/cClassPer+1))) << 32
+	have := cClassWindow(b, w) & cClassesOf(k)
+	var more uint64
+	if k > cClassPer {
+		more = cClassWindow(b, w+cClassPer) & cClassesOf(k-cClassPer)
 	}
-	have := uint32(v>>(w%cClassPer*2)) & uint32(uint64(1)<<(2*k)-1)
 	s := (*mspan)(unsafe.Pointer(h.span))
-	if have == 0 {
+	if have|more == 0 {
 		return !load && cClaimFresh(s, b, w, a, plan)
 	}
-	if have != plan.cls {
+	if have != plan.cls[0] || more != plan.cls[1] {
 		return false
 	}
 	ids := s.cIDsOf()

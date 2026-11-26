@@ -244,9 +244,8 @@ func cClaim(s *mspan, i, p uintptr, elem *_type, n uintptr, load, c bool) {
 			if cClass(b, w) == cScalar {
 				return
 			}
-		} else if w%cClassPer+k <= cClassPer {
-			mask := uint32(uint64(1)<<(2*k)-1) << (w % cClassPer * 2)
-			if atomic.Load(b.word(w/cClassPer))&mask == 0x55555555*cScalar&mask {
+		} else if k <= cClassPer {
+			if mask := cClassesOf(k); cClassWindow(b, w)&mask == cClassLows*cScalar&mask {
 				return
 			}
 		}
@@ -255,7 +254,7 @@ func cClaim(s *mspan, i, p uintptr, elem *_type, n uintptr, load, c bool) {
 			// makes nothing of the words.
 			return
 		}
-		if w%cClassPer+k <= cClassPer && cClaimScalars(b, w, k) {
+		if k <= 2*cClassPer && cClaimScalars(b, w, k) {
 			return
 		}
 	}
@@ -493,38 +492,46 @@ func cNarrow(a uintptr, id uint32) {
 	}
 }
 
-// cClaimScalars claims for no pointer the k words from the w'th, whose
-// classes are in one uint32 of b, if each of them is claimed so or by
-// nothing, and reports whether it did. That is the first conversion of
-// what malloc gave, the usual one. It is what cClaimWord does for each
-// word, at once, and only while the collector is not marking, when what
-// the words hold is nothing that it is to be shown.
+// cClaimScalars claims for no pointer the k words from the w'th, if
+// each of them is claimed so or by nothing, and reports whether it did.
+// That is the first conversion of what malloc gave, the usual one. It
+// is what cClaimWord does for each word, the words of a uint64 of b at
+// once, and only while the collector is not marking, when what the
+// words hold is nothing that it is to be shown. (Words that it claimed
+// before it met one that is a pointer's stay claimed: they were no
+// pointer's.)
 //
 //go:nosplit
 func cClaimScalars(b *cBits, w, k uintptr) bool {
 	if writeBarrier.enabled || getg().m.cprobe {
 		return false
 	}
-	p := b.word(w / cClassPer)
-	mask := uint32(uint64(1)<<(2*k)-1) << (w % cClassPer * 2)
-	want := 0x55555555 * cScalar & mask
-	for {
-		old := atomic.Load(p)
-		if old&mask&0xaaaaaaaa != 0 {
-			// A word that is claimed for a pointer.
-			return false
-		}
-		if old&mask == want {
-			return true
-		}
-		if atomic.Cas(p, old, old|want) {
-			if cClaimCounting || debug.cclaims != 0 {
-				// Each word that nothing claimed is a claim.
-				cClaimStats.claims.Add(int64(k) - int64(sys.OnesCount64(uint64(old&mask))))
+	for k > 0 {
+		c := min(k, cClassPer-w%cClassPer)
+		p := b.group(w / cClassPer)
+		mask := cClassesOf(c) << (w % cClassPer * 8)
+		want := uint64(cClassLows*cScalar) & mask
+		for {
+			old := atomic.Load64(p)
+			if old&mask&cClassHighs != 0 {
+				// A word that is claimed for a pointer.
+				return false
 			}
-			return true
+			if old&mask == want {
+				break
+			}
+			if atomic.Cas64(p, old, old|want) {
+				if cClaimCounting || debug.cclaims != 0 {
+					// Each word that nothing claimed is a claim.
+					cClaimStats.claims.Add(int64(c) - int64(sys.OnesCount64(old&mask)))
+				}
+				break
+			}
 		}
+		w += c
+		k -= c
 	}
+	return true
 }
 
 // cClaimWord claims the w'th word of s, at a, whose class is have, for
@@ -626,7 +633,7 @@ func cReclaim(s *mspan, b *cBits, w, a uintptr, have, want, old, id uint32, elem
 const cConvMax = 4096
 
 // What c23Header gives as the classes of what is not C's, where it has
-// a shift that is not 3: every word is then the first, and the uint32s
+// a shift that is not 3: every word is then the first, and the uint64s
 // are for what asks. The first is what a conversion looks at, where it
 // looks (a shift of 59): nothing claimed, so that the runtime is asked.
 // The second is for a store of a pointer to anything, which is let
@@ -635,13 +642,13 @@ const cConvMax = 4096
 // loaded.)
 var (
 	// What the runtime knows nothing of: a store is let through.
-	cStoreFree = [4]uint32{0, 0x55555555 * cUntyped, 0, 0}
+	cStoreFree = [4]uint64{0, cClassLows * cUntyped, 0, 0}
 	// An object of Go's without pointers, and a variable without:
 	// bytes are stored, and a pointer is the runtime's to refuse.
-	cStoreNoPtr = [4]uint32{0, 0x55555555 * cTyped, 0, 0}
+	cStoreNoPtr = [4]uint64{0, cClassLows * cTyped, 0, 0}
 	// An object of Go's with pointers, and a variable with: the
 	// runtime looks at its type.
-	cStoreTyped = [4]uint32{0, 0x55555555 * cTyped, 0x55555555 * cTyped, 0}
+	cStoreTyped = [4]uint64{0, cClassLows * cTyped, cClassLows * cTyped, 0}
 )
 
 // c23Header returns what does not change of where p points for as long
@@ -677,17 +684,17 @@ var (
 // its conversions are the runtime's.
 //
 // If p is in an object of C's, sh is 3, and the class of the word that
-// q is at (cClass: what the word was claimed for) is the two bits from
-// bit 2*(w%16) of the uint32 at bits + w/16*4, where
+// q is at (cClass: what the word was claimed for) is the low two bits
+// of the byte at bits + w, where
 //
 //	w = (off + b8) >> sh
 //
 // A conversion to a type of a few words needs no more than that the
 // words are claimed for what the type has there. For what is not C's,
-// sh is 63 or 59, w is 0, and bits is of uint32s that say what a store
+// sh is 63 or 59, w is 0, and bits is of uint64s that say what a store
 // is to do (cStoreFree): a store of a pointer to anything looks at the
-// class in the second, at bits + w/16*4 + (sh>>3)&4, and a store of
-// bytes at the one in the third, 4 further. A variable of the stack or
+// classes in the second, at bits + w + (sh>>2)&8, and a store of bytes
+// at those in the third, 8 further. A variable of the stack or
 // of the data is c23HeaderVar's to say.
 //
 //go:nosplit
@@ -826,11 +833,11 @@ const cVarWords = 8192
 // cVarScalar is the classes of cVarWords words that are claimed for no
 // pointer, and after them of words that nothing claimed: as many as the
 // compiled code loads the classes of at a time (cheaders.go).
-var cVarScalar [cVarWords/cClassPer + 4]uint32
+var cVarScalar [cVarWords/cClassPer + 4]uint64
 
 func init() {
 	for i := 0; i < cVarWords/cClassPer; i++ {
-		cVarScalar[i] = 0x55555555 * cScalar
+		cVarScalar[i] = cClassLows * cScalar
 	}
 }
 
@@ -1413,10 +1420,9 @@ func cMovePtrs(s *mspan, a, n uintptr) bool {
 	}
 	w, end := (alignDown(a, word)-s.base())/word, (alignUp(a+n, word)-s.base())/word
 	for w < end {
-		// The words of one uint32 of the classes.
+		// The words of one uint64 of the classes.
 		k := min(end-w, cClassPer-w%cClassPer)
-		all := uint32(uint64(1)<<(2*k) - 1)
-		if atomic.Load(b.word(w/cClassPer))>>(w%cClassPer*2)&all&0xaaaaaaaa != 0 {
+		if atomic.Load64(b.group(w/cClassPer))>>(w%cClassPer*8)&cClassesOf(k)&cClassHighs != 0 {
 			return true
 		}
 		w += k
@@ -1639,7 +1645,7 @@ func c23Memmove1(dst, src unsafe.Pointer, n uintptr, ds, ss *mspan) {
 	}
 	var ids *cBits
 	for done := uintptr(0); done < words; {
-		// The words of one uint32 of the destination's classes.
+		// The words of one uint64 of the destination's classes.
 		var i, k uintptr
 		if back {
 			end := words - done
@@ -1650,34 +1656,30 @@ func c23Memmove1(dst, src unsafe.Pointer, n uintptr, ds, ss *mspan) {
 			k = min(words-i, cClassPer-(w+i)%cClassPer)
 		}
 		done += k
-		all := uint32(uint64(1)<<(2*k) - 1)
-		have := atomic.Load(b.word((w+i)/cClassPer)) >> ((w + i) % cClassPer * 2) & all
+		all := cClassesOf(k)
+		have := atomic.Load64(b.group((w+i)/cClassPer)) >> ((w + i) % cClassPer * 8) & all
 		// free has both bits of the words that nothing claimed.
-		free := ^(have | have>>1) & 0x55555555 & all * 3
+		free := ^(have | have>>1) & cClassLows & all * 3
 		if free != 0 {
-			var from uint32      // the classes of the words copied from
-			var goids [16]uint32 // their ids, if they are of an object of Go's
+			var from uint64             // the classes of the words copied from
+			var goids [cClassPer]uint32 // their ids, if they are of an object of Go's
 			switch {
 			case typedSrc:
 				// What its type has there.
 				for j := uintptr(0); j < k; j++ {
 					if c, id := cWordOf(sw + (i+j)*word); c != cUnknown {
-						from |= c << (2 * j)
+						from |= uint64(c) << (8 * j)
 						goids[j] = id
 					}
 				}
 			case sb != nil:
-				v := uint64(atomic.Load(sb.word((sw0 + i) / cClassPer)))
-				if (sw0+i)%cClassPer+k > cClassPer {
-					v |= uint64(atomic.Load(sb.word((sw0+i)/cClassPer+1))) << 32
-				}
-				from = uint32(v>>((sw0+i)%cClassPer*2)) & all
+				from = cClassWindow(sb, sw0+i) & all
 			}
 			if take := from & free; take != 0 {
 				// The types of the pointers first, and what
 				// says where a union is (cunion.go).
 				for j := uintptr(0); j < k; j++ {
-					c := take >> (2 * j) & 3
+					c := uint32(take >> (8 * j) & 3)
 					if c == cUnclaimed || c != cTyped && sids == nil {
 						continue
 					}
@@ -1687,7 +1689,7 @@ func c23Memmove1(dst, src unsafe.Pointer, n uintptr, ds, ss *mspan) {
 					if ids == nil || sids == nil && goids[j] == 0 {
 						// (No ids to put it in, or none to take.)
 						if c == cTyped {
-							take &^= 1 << (2 * j) // cUntyped
+							take &^= 1 << (8 * j) // cUntyped
 						}
 						continue
 					}
@@ -1701,21 +1703,21 @@ func c23Memmove1(dst, src unsafe.Pointer, n uintptr, ds, ss *mspan) {
 				}
 				// (Only where nothing claimed the word
 				// meanwhile.)
-				p, sh := b.word((w+i)/cClassPer), (w+i)%cClassPer*2
+				p, sh := b.group((w+i)/cClassPer), (w+i)%cClassPer*8
 				for {
-					old := atomic.Load(p)
+					old := atomic.Load64(p)
 					now := old >> sh & all
-					t := take & (^(now | now>>1) & 0x55555555 & all * 3)
-					if t == 0 || atomic.Cas(p, old, old|t<<sh) {
+					t := take & (^(now | now>>1) & cClassLows & all * 3)
+					if t == 0 || atomic.Cas64(p, old, old|t<<sh) {
 						have = now | t
 						break
 					}
 				}
 			}
 		}
-		if writeBarrier.enabled && have != 0x55555555*cScalar&all {
+		if writeBarrier.enabled && have != cClassLows*cScalar&all {
 			for j := uintptr(0); j < k; j++ {
-				if have>>(2*j)&3 != cScalar {
+				if have>>(8*j)&3 != cScalar {
 					cShadeWord(*(*uintptr)(unsafe.Pointer(sw + (i+j)*word)))
 				}
 			}
@@ -1846,8 +1848,7 @@ func cHeaderOf(a uintptr) (h cHeaderEnt, base, size uintptr, ok bool) {
 func cNoPtrClasses(b *cBits, w, n uintptr) bool {
 	for end := w + n; w < end; {
 		k := min(end-w, cClassPer-w%cClassPer)
-		all := uint32(uint64(1)<<(2*k) - 1)
-		if atomic.Load(b.word(w/cClassPer))>>(w%cClassPer*2)&all&0xaaaaaaaa != 0 {
+		if atomic.Load64(b.group(w/cClassPer))>>(w%cClassPer*8)&cClassesOf(k)&cClassHighs != 0 {
 			return false
 		}
 		w += k
@@ -1909,25 +1910,21 @@ func cMoveFast(d, s, n uintptr) bool {
 		w, sw := (wlo-dh.base)/word, (s+(wlo-d)-sbase0)/word
 		for words := (whi - wlo) / word; words > 0; {
 			k := min(words, cClassPer-w%cClassPer)
-			all := uint32(uint64(1)<<(2*k) - 1)
-			v := uint64(atomic.Load(sb.word(sw / cClassPer)))
-			if sw%cClassPer+k > cClassPer {
-				v |= uint64(atomic.Load(sb.word(sw/cClassPer+1))) << 32
-			}
-			from := uint32(v>>(sw%cClassPer*2)) & all & 0x55555555
+			all := cClassesOf(k)
+			from := cClassWindow(sb, sw) & all & cClassLows
 			if from != 0 {
-				p := db.word(w / cClassPer)
-				shift := w % cClassPer * 2
+				p := db.group(w / cClassPer)
+				shift := w % cClassPer * 8
 				for {
-					old := atomic.Load(p)
+					old := atomic.Load64(p)
 					have := old >> shift & all
-					if have&0xaaaaaaaa != 0 {
+					if have&cClassHighs != 0 {
 						// Claimed for a pointer meanwhile, by
 						// another thread: the copy that asks.
 						return false
 					}
-					take := from &^ (have | have>>1&0x55555555)
-					if take == 0 || atomic.Cas(p, old, old|take<<shift) {
+					take := from &^ (have | have>>1&cClassLows)
+					if take == 0 || atomic.Cas64(p, old, old|take<<shift) {
 						break
 					}
 				}

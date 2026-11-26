@@ -370,7 +370,7 @@ func checkptrConvC1(p unsafe.Pointer, elem *_type, load bool) unsafe.Pointer {
 			const word = goarch.PtrSize
 			lo, hi := alignDown(a, word), alignUp(a+elem.Size_, word)
 			w, k := (lo-h.base)/word, (hi-lo)/word
-			if w%cClassPer+k <= cClassPer && cClaimScalars((*cBits)(unsafe.Pointer(h.bits)), w, k) {
+			if k <= 2*cClassPer && cClaimScalars((*cBits)(unsafe.Pointer(h.bits)), w, k) {
 				return p
 			}
 		}

@@ -32,7 +32,9 @@ const CStoreWords = 16
 // it knows what the pointers point into (cheaders), with a call only for
 // what it does not let through.
 func (c *Config) CHeaders() bool {
-	return c.PtrSize == 8 && c.gd.Flag.N == 0 && c.gd.Debug.CHeaders == 0
+	// (The classes of words are bytes that are loaded several at a
+	// time, wherever they are.)
+	return c.PtrSize == 8 && !c.BigEndian && c.unalignedOK && c.gd.Flag.N == 0 && c.gd.Debug.CHeaders == 0
 }
 
 // CClassScalar is the class of a word of C's that is claimed for no
@@ -428,34 +430,36 @@ func cheaders(f *Func) {
 					w.AuxInt = 1 // the shift is less than 64
 					in := b.NewValue2(pos, OpSub64, uintptrT, b.NewValue1(pos, OpZeroExt8to64, uintptrT, b.NewValue1(pos, OpCvtBoolToUint8, f.Config.Types.UInt8, out)), f.ConstInt64(uintptrT, 1))
 					w = b.NewValue2(pos, OpAnd64, uintptrT, w, in)
-					at := b.NewValue2(pos, OpAdd64, uintptrT, result(h, 5), b.NewValue2(pos, OpLsh64x64, uintptrT, b.NewValue2(pos, OpRsh64Ux64, uintptrT, w, f.ConstInt64(uintptrT, 4)), f.ConstInt64(uintptrT, 2)))
-					u32T, u64T := f.Config.Types.UInt32, f.Config.Types.UInt64
-					// The classes of the 16 words that w is one
-					// of, and of the 16 after them: a type of
-					// CConvWords words or less has all of its
-					// words there.
-					lo := b.NewValue2(pos, OpLoad, u32T, b.NewValue2(pos, OpConvert, u32T.PtrTo(), at, mem), mem)
-					hi := b.NewValue2(pos, OpLoad, u32T, b.NewValue2(pos, OpConvert, u32T.PtrTo(), b.NewValue2(pos, OpAdd64, uintptrT, at, f.ConstInt64(uintptrT, 4)), mem), mem)
-					both := b.NewValue2(pos, OpOr64, u64T, b.NewValue1(pos, OpZeroExt32to64, u64T, lo), b.NewValue2(pos, OpLsh64x64, u64T, b.NewValue1(pos, OpZeroExt32to64, u64T, hi), f.ConstInt64(uintptrT, 32)))
-					shift := b.NewValue2(pos, OpLsh64x64, uintptrT, b.NewValue2(pos, OpAnd64, uintptrT, w, f.ConstInt64(uintptrT, 15)), f.ConstInt64(uintptrT, 1))
-					class := b.NewValue2(pos, OpRsh64Ux64, u64T, both, shift)
-					class.AuxInt = 1
+					at := b.NewValue2(pos, OpAdd64, uintptrT, result(h, 5), w)
+					u64T := f.Config.Types.UInt64
 					// The bits of the classes that are to be as
 					// want has them: both for no pointer, in every
 					// word of the type, the high one for a pointer
-					// to anything.
+					// to anything. A class is a byte, and those
+					// of a type of CConvWords words or less are
+					// in two loads.
 					size := v.AuxInt >> 16
 					words := (size + 7) / 8
-					bits := int64(uint64(1)<<(2*words) - 1)
-					want := 0x5555555555555555 * CClassScalar & bits
+					unit := int64(CClassScalar)
 					if check == CSlowConvUntyped {
 						// (A word that is a pointer of a type
 						// may be one that a pointer to anything
 						// is over, or part of something else:
 						// the runtime's to say.)
-						bits, want = 3, 2
+						words, unit = 1, 2
 					}
-					class = b.NewValue2(pos, OpXor64, u64T, b.NewValue2(pos, OpAnd64, u64T, class, f.ConstInt64(u64T, bits)), f.ConstInt64(u64T, want))
+					var class *Value
+					for done := int64(0); done < words; done += 8 {
+						x := b.NewValue2(pos, OpLoad, u64T, b.NewValue2(pos, OpConvert, u64T.PtrTo(), b.NewValue2(pos, OpAdd64, uintptrT, at, f.ConstInt64(uintptrT, done)), mem), mem)
+						n := min(words-done, 8)
+						bits := cEach(3, n)
+						x = b.NewValue2(pos, OpXor64, u64T, b.NewValue2(pos, OpAnd64, u64T, x, f.ConstInt64(u64T, bits)), f.ConstInt64(u64T, cEach(unit, n)))
+						if class == nil {
+							class = x
+						} else {
+							class = b.NewValue2(pos, OpOr64, u64T, class, x)
+						}
+					}
 					class = b.NewValue2(pos, OpAnd64, u64T, class, c)
 					differ = b.NewValue2(pos, OpNeq64, boolT, class, f.ConstInt64(u64T, 0))
 					if check == CSlowConvScalar && size > 1 {
@@ -476,34 +480,25 @@ func cheaders(f *Func) {
 			// anything for one (runtime/cclaim.go's c23ByteStore).
 			size := v.AuxInt >> 16
 			out := b.NewValue2(pos, OpLeq64U, boolT, fit(h, size, true), off)
-			u32T, u64T := f.Config.Types.UInt32, f.Config.Types.UInt64
+			u8T, u64T := f.Config.Types.UInt8, f.Config.Types.UInt64
 			w := b.NewValue2(pos, OpRsh64Ux64, uintptrT, b.NewValue2(pos, OpAdd64, uintptrT, off, result(h, 3)), result(h, 4))
 			w.AuxInt = 1 // the shift is less than 64
 			in := b.NewValue2(pos, OpSub64, uintptrT, b.NewValue1(pos, OpZeroExt8to64, uintptrT, b.NewValue1(pos, OpCvtBoolToUint8, f.Config.Types.UInt8, out)), f.ConstInt64(uintptrT, 1))
 			w = b.NewValue2(pos, OpAnd64, uintptrT, w, in)
-			at := b.NewValue2(pos, OpAdd64, uintptrT, result(h, 5), b.NewValue2(pos, OpLsh64x64, uintptrT, b.NewValue2(pos, OpRsh64Ux64, uintptrT, w, f.ConstInt64(uintptrT, 4)), f.ConstInt64(uintptrT, 2)))
+			at := b.NewValue2(pos, OpAdd64, uintptrT, result(h, 5), w)
 			// (What is not C's has the classes for a store of a
-			// pointer in the uint32 after, and those for a store
+			// pointer in the uint64 after, and those for a store
 			// of bytes in the one after that: runtime's
 			// cStoreFree.)
-			other := b.NewValue2(pos, OpAnd64, uintptrT, b.NewValue2(pos, OpRsh64Ux64, uintptrT, result(h, 4), f.ConstInt64(uintptrT, 3)), f.ConstInt64(uintptrT, 4))
+			other := b.NewValue2(pos, OpAnd64, uintptrT, b.NewValue2(pos, OpRsh64Ux64, uintptrT, result(h, 4), f.ConstInt64(uintptrT, 2)), f.ConstInt64(uintptrT, 8))
 			if check == CSlowStoreByte {
 				other = b.NewValue2(pos, OpLsh64x64, uintptrT, other, f.ConstInt64(uintptrT, 1))
 			}
 			at = b.NewValue2(pos, OpAdd64, uintptrT, at, other)
-			lo := b.NewValue2(pos, OpLoad, u32T, b.NewValue2(pos, OpConvert, u32T.PtrTo(), at, mem), mem)
-			both := b.NewValue1(pos, OpZeroExt32to64, u64T, lo)
-			if check == CSlowStoreByte && size > 1 {
-				// (One word's class is in the one uint32.)
-				hi := b.NewValue2(pos, OpLoad, u32T, b.NewValue2(pos, OpConvert, u32T.PtrTo(), b.NewValue2(pos, OpAdd64, uintptrT, at, f.ConstInt64(uintptrT, 4)), mem), mem)
-				both = b.NewValue2(pos, OpOr64, u64T, both, b.NewValue2(pos, OpLsh64x64, u64T, b.NewValue1(pos, OpZeroExt32to64, u64T, hi), f.ConstInt64(uintptrT, 32)))
-			}
-			shift := b.NewValue2(pos, OpLsh64x64, uintptrT, b.NewValue2(pos, OpAnd64, uintptrT, w, f.ConstInt64(uintptrT, 15)), f.ConstInt64(uintptrT, 1))
-			class := b.NewValue2(pos, OpRsh64Ux64, u64T, both, shift)
-			class.AuxInt = 1
 			var bad *Value
 			if check == CSlowStorePtr {
-				bad = b.NewValue2(pos, OpNeq64, boolT, b.NewValue2(pos, OpAnd64, u64T, class, f.ConstInt64(u64T, 3)), f.ConstInt64(u64T, 2))
+				x := b.NewValue1(pos, OpZeroExt8to64, u64T, b.NewValue2(pos, OpLoad, u8T, b.NewValue2(pos, OpConvert, u8T.PtrTo(), at, mem), mem))
+				bad = b.NewValue2(pos, OpNeq64, boolT, b.NewValue2(pos, OpAnd64, u64T, x, f.ConstInt64(u64T, 3)), f.ConstInt64(u64T, 2))
 			} else {
 				// The words that the bytes are in: one more than
 				// their size has if they do not begin at a word.
@@ -511,8 +506,23 @@ func cheaders(f *Func) {
 				if size == 1 {
 					words = 1
 				}
-				ptrs := int64(-0x5555555555555556) & int64(uint64(1)<<(2*words)-1) // the high bit of each class
-				bad = b.NewValue2(pos, OpNeq64, boolT, b.NewValue2(pos, OpAnd64, u64T, class, f.ConstInt64(u64T, ptrs)), f.ConstInt64(u64T, 0))
+				var ptrs *Value
+				for done := int64(0); done < words; done += 8 {
+					var x *Value
+					if words == 1 {
+						x = b.NewValue1(pos, OpZeroExt8to64, u64T, b.NewValue2(pos, OpLoad, u8T, b.NewValue2(pos, OpConvert, u8T.PtrTo(), at, mem), mem))
+					} else {
+						x = b.NewValue2(pos, OpLoad, u64T, b.NewValue2(pos, OpConvert, u64T.PtrTo(), b.NewValue2(pos, OpAdd64, uintptrT, at, f.ConstInt64(uintptrT, done)), mem), mem)
+					}
+					// The high bit of each class.
+					x = b.NewValue2(pos, OpAnd64, u64T, x, f.ConstInt64(u64T, cEach(2, min(words-done, 8))))
+					if ptrs == nil {
+						ptrs = x
+					} else {
+						ptrs = b.NewValue2(pos, OpOr64, u64T, ptrs, x)
+					}
+				}
+				bad = b.NewValue2(pos, OpNeq64, boolT, ptrs, f.ConstInt64(u64T, 0))
 			}
 			v.copyOf(b.NewValue2(pos, OpOrB, boolT, out, bad))
 		default:
@@ -943,4 +953,13 @@ func cSameLoads(f *Func) map[*Value]*Value {
 		}
 	}
 	return same
+}
+
+// cEach returns x in each of the low n bytes.
+func cEach(x, n int64) int64 {
+	var r uint64
+	for i := int64(0); i < n; i++ {
+		r |= uint64(x) << (8 * i)
+	}
+	return int64(r)
 }
