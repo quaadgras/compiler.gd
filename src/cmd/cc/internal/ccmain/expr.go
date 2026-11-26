@@ -390,6 +390,9 @@ func (p *parser) binop(at pos, op string, x, y expr) expr {
 			if c, ok := p.ptrConstAdd(x, y, false); ok {
 				return c
 			}
+			if c, ok := ptrOffsets(x, y, false, at); ok {
+				return c
+			}
 			return &binary{node{xt.unqual(), at}, "+", x, y}
 		}
 	case "-":
@@ -397,6 +400,9 @@ func (p *parser) binop(at pos, op string, x, y expr) expr {
 			p.checkPtrArith(xt, at)
 			y = p.convert(y, tLong)
 			if c, ok := p.ptrConstAdd(x, y, true); ok {
+				return c
+			}
+			if c, ok := ptrOffsets(x, y, true, at); ok {
 				return c
 			}
 			return &binary{node{xt.unqual(), at}, "-", x, y}
@@ -1734,6 +1740,10 @@ func (p *parser) foldInt(e expr) (int64, bool) {
 		if e.t.isInteger() || e.t.kind == kNullptr {
 			return e.v, true
 		}
+	case *call:
+		if constFnBody(e) != nil {
+			return p.foldConstCall(e)
+		}
 	case *cast:
 		if e.t.isInteger() {
 			if v, ok := p.foldInt(e.x); ok {
@@ -2318,4 +2328,32 @@ func (p *parser) checkVaList(e expr, at pos) {
 	if !isLvalue(e) {
 		p.errorAt(at, "va_list is not an lvalue")
 	}
+}
+
+// ptrOffsets is x + y (x - y if sub), y a constant, as one offset from
+// the pointer that x is a constant offset from: p - 16 + 8 is p - 8, a
+// single step that is checked, the one that the program ends at.
+func ptrOffsets(x, y expr, sub bool, at pos) (expr, bool) {
+	b, ok := x.(*binary)
+	if !ok || b.op != "+" && b.op != "-" || !b.t.isPtr() {
+		return nil, false
+	}
+	c1, ok1 := b.y.(*intConst)
+	c2, ok2 := y.(*intConst)
+	if !ok1 || !ok2 || !c1.t.isInteger() || !c2.t.isInteger() {
+		return nil, false
+	}
+	v1, v2 := c1.v, c2.v
+	if b.op == "-" {
+		v1 = -v1
+	}
+	if sub {
+		v2 = -v2
+	}
+	v := v1 + v2
+	op := "+"
+	if v < 0 {
+		op, v = "-", -v
+	}
+	return &binary{node{b.t, at}, op, b.x, &intConst{node{tLong, at}, v}}, true
 }

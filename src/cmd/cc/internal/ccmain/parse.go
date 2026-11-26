@@ -2362,6 +2362,9 @@ func (p *parser) funcDef(name string, t *ctype, s specs, a attrs, at pos) {
 	if sym.defined {
 		p.errorAt(at, "redefinition of %q", name)
 	}
+	if s.constx && p.cxx {
+		sym.constFn = true
+	}
 	if p.cxx && (s.inline || s.constx || sym.comdat) && sym.src != "main" && p.fn == nil {
 		// An inline function is defined if it is used: its body is
 		// kept until then.
@@ -2481,6 +2484,11 @@ func (p *parser) constexprValue(sym *symbol, at pos) {
 		} else if v, ok := p.foldInt(sym.init.scalar); ok {
 			sym.val = v
 			sym.cval = &intConst{node{sym.t, at}, v}
+			if _, isCall := sym.init.scalar.(*call); isCall || hasCall(sym.init.scalar) {
+				// A constexpr function's value (consteval.go): the
+				// object is initialized with it, not by the call.
+				sym.init = &initializer{scalar: &intConst{node{sym.t.unqual(), at}, wrap(sym.t, v)}}
+			}
 		} else if f, ok := p.foldFloat(sym.init.scalar); ok {
 			sym.cval = &floatConst{node{sym.t, at}, f}
 		} else if sym.t.isPtr() || sym.t.kind == kNullptr {

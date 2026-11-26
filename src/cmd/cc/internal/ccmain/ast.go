@@ -217,6 +217,7 @@ type symbol struct {
 	init      *initializer
 	val       int64 // symEnumConst; a constexpr's value
 	constx    bool  // constexpr
+	constFn   bool  // C++: a constexpr function (consteval.go)
 	cval      expr  // a constexpr's (folded) value
 	defined   bool
 	fn        *funcDecl

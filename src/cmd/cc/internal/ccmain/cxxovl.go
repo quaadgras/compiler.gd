@@ -489,7 +489,8 @@ func (p *parser) passArg(a expr, pt *ctype, at pos) expr {
 // callFunc is the call of the function sym with args: on the object obj,
 // if sym is a non-static member function.
 func (p *parser) callFunc(sym *symbol, obj expr, args []expr, at pos) expr {
-	if sym.t.fn.ret.isAuto && sym.late != nil && !sym.defined {
+	if (sym.t.fn.ret.isAuto || sym.constFn && sym.t.fn.recv == nil) && sym.late != nil && !sym.defined {
+		// (A constexpr function's call may be a constant: consteval.go.)
 		// Its return type is its body's: parsed now.
 		lf := sym.late
 		sym.late = nil
