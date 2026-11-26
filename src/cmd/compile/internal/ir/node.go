@@ -451,6 +451,8 @@ const (
 	UintptrKeepAlive            // pointers converted to uintptr must be kept alive
 	UintptrEscapes              // pointers converted to uintptr escape
 	NoTear                      // gd: func has its own exclusion for the slices, strings and interfaces it loads and stores in shared memory (runtime/shared.go)
+	InlineHint                  // gd: func is one that its source asks to have inlined (C's inline): a bigger budget (inline.go)
+	AlwaysInline                // gd: func is inlined wherever it can be, whatever it costs (GCC's always_inline)
 	LocalArgs                   // gd: func lets no other goroutine reach what its arguments point to, whatever its body seems to do: the standard library's word for the runtime's own (escape/callbits.go)
 
 	// Runtime-only func pragmas.

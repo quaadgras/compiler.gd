@@ -760,3 +760,108 @@ func peekWord(p *Void) *Void { return *(**Void)(unsafe.Pointer(p)) }
 
 //go:nocheckptr
 func pokeWord(p, v *Void) { *(**Void)(unsafe.Pointer(p)) = v }
+
+// The atomic operations on C's integers of 4 and 8 bytes, which are the
+// machine's: each is a function small enough to be inlined where
+// cmd/cc calls it, as AtomicFetch and the others, which are for every
+// type and operation, are not. A reference count is one of these.
+
+type atomic32 interface{ ~int32 | ~uint32 }
+type atomic64 interface{ ~int64 | ~uint64 }
+
+//go:nocheckptr
+func AtomicLoad32[T atomic32](p *Void) T {
+	return T(atomic.LoadUint32((*uint32)(unsafe.Pointer(p))))
+}
+
+//go:nocheckptr
+func AtomicLoad64[T atomic64](p *Void) T {
+	return T(atomic.LoadUint64((*uint64)(unsafe.Pointer(p))))
+}
+
+//go:nocheckptr
+func AtomicStore32[T atomic32](p *Void, v T) {
+	atomic.StoreUint32((*uint32)(unsafe.Pointer(p)), uint32(v))
+}
+
+//go:nocheckptr
+func AtomicStore64[T atomic64](p *Void, v T) {
+	atomic.StoreUint64((*uint64)(unsafe.Pointer(p)), uint64(v))
+}
+
+//go:nocheckptr
+func AtomicCAS32[T atomic32](p *Void, old, new T) bool {
+	return atomic.CompareAndSwapUint32((*uint32)(unsafe.Pointer(p)), uint32(old), uint32(new))
+}
+
+//go:nocheckptr
+func AtomicCAS64[T atomic64](p *Void, old, new T) bool {
+	return atomic.CompareAndSwapUint64((*uint64)(unsafe.Pointer(p)), uint64(old), uint64(new))
+}
+
+// AtomicAdd32 adds v at p and returns what p held, as AtomicFetch does;
+// AtomicSub32 takes v from it, and AtomicSwap32 stores v.
+//
+//go:nocheckptr
+func AtomicAdd32[T atomic32](p *Void, v T) T {
+	return T(atomic.AddUint32((*uint32)(unsafe.Pointer(p)), uint32(v))) - v
+}
+
+//go:nocheckptr
+func AtomicAdd64[T atomic64](p *Void, v T) T {
+	return T(atomic.AddUint64((*uint64)(unsafe.Pointer(p)), uint64(v))) - v
+}
+
+//go:nocheckptr
+func AtomicSub32[T atomic32](p *Void, v T) T {
+	return T(atomic.AddUint32((*uint32)(unsafe.Pointer(p)), -uint32(v))) + v
+}
+
+//go:nocheckptr
+func AtomicSub64[T atomic64](p *Void, v T) T {
+	return T(atomic.AddUint64((*uint64)(unsafe.Pointer(p)), -uint64(v))) + v
+}
+
+//go:nocheckptr
+func AtomicSwap32[T atomic32](p *Void, v T) T {
+	return T(atomic.SwapUint32((*uint32)(unsafe.Pointer(p)), uint32(v)))
+}
+
+//go:nocheckptr
+func AtomicSwap64[T atomic64](p *Void, v T) T {
+	return T(atomic.SwapUint64((*uint64)(unsafe.Pointer(p)), uint64(v)))
+}
+
+// AtomicCmpXchg32 is AtomicCmpXchg for an integer of 4 bytes.
+//
+//go:nocheckptr
+func AtomicCmpXchg32[T atomic32](p, expected *Void, desired T) int32 {
+	e := (*uint32)(unsafe.Pointer(expected))
+	for {
+		old := *e
+		if atomic.CompareAndSwapUint32((*uint32)(unsafe.Pointer(p)), old, uint32(desired)) {
+			return 1
+		}
+		if cur := atomic.LoadUint32((*uint32)(unsafe.Pointer(p))); cur != old {
+			*e = cur
+			return 0
+		}
+	}
+}
+
+// AtomicCmpXchg64 is AtomicCmpXchg for an integer of 8 bytes.
+//
+//go:nocheckptr
+func AtomicCmpXchg64[T atomic64](p, expected *Void, desired T) int32 {
+	e := (*uint64)(unsafe.Pointer(expected))
+	for {
+		old := *e
+		if atomic.CompareAndSwapUint64((*uint64)(unsafe.Pointer(p)), old, uint64(desired)) {
+			return 1
+		}
+		if cur := atomic.LoadUint64((*uint64)(unsafe.Pointer(p))); cur != old {
+			*e = cur
+			return 0
+		}
+	}
+}

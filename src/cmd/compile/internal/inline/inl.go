@@ -58,6 +58,8 @@ const (
 	inlineBigFunctionNodes      = 5000                 // Functions with this many nodes are considered "big".
 	inlineBigFunctionMaxCost    = 20                   // Max cost of inlinee when inlining into a "big" function.
 	inlineC23MaxBudget          = 200                  // Max cost of an internal/c23 inlinee (isC23), into any function.
+	inlineHintMaxBudget         = 320                  // gd: Max cost of an inlinee marked go:inline, as C's inline functions are: GCC gives a function declared inline some four times what it gives one that is not.
+	inlineAlwaysMaxBudget       = 20000                // gd: Max cost of an inlinee marked go:alwaysinline.
 	inlineClosureCalledOnceCost = 10 * inlineMaxBudget // if a closure is just called once, inline it.
 )
 
@@ -228,6 +230,18 @@ func isC23(fn *ir.Func) bool {
 	return fn.Sym() != nil && fn.Sym().Pkg != nil && fn.Sym().Pkg.Path == "internal/c23"
 }
 
+// pragmaBudget returns the budget that fn's directives ask for: that of
+// go:alwaysinline or go:inline, or 0.
+func pragmaBudget(fn *ir.Func) int32 {
+	switch {
+	case fn.Pragma&ir.AlwaysInline != 0:
+		return inlineAlwaysMaxBudget
+	case fn.Pragma&ir.InlineHint != 0:
+		return inlineHintMaxBudget
+	}
+	return 0
+}
+
 // isPkgInit reports whether fn is a package's initialization: its
 // variables' ("init") or a func init ("init.N"). It runs once, so C's
 // accesses are not inlined into it more than Go's rules say, which would
@@ -277,6 +291,7 @@ func inlineBudget(gd *base.Invocation, fn *ir.Func, profile *pgoir.Profile, rela
 	if isC23(fn) {
 		budget = max(budget, inlineC23MaxBudget)
 	}
+	budget = max(budget, pragmaBudget(fn))
 
 	if IsPgoHotFunc(gd, fn, profile) {
 		budget = inlineHotMaxBudgetOf(gd)
@@ -1057,6 +1072,13 @@ func inlineCostOK(gd *base.Invocation, n *ir.CallExpr, caller, callee *ir.Func, 
 	maxCost = max(maxCost, simdMaxCost)
 	if isC23(callee) && !isPkgInit(caller) {
 		maxCost = max(maxCost, inlineC23MaxBudget)
+	}
+	if !isPkgInit(caller) {
+		if callee.Pragma&ir.AlwaysInline != 0 {
+			maxCost = max(maxCost, pragmaBudget(callee))
+		} else if !bigCaller {
+			maxCost = max(maxCost, pragmaBudget(callee))
+		}
 	}
 
 	metric := callee.Inl.Cost

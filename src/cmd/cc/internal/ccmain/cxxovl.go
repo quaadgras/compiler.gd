@@ -72,13 +72,14 @@ func (p *parser) cxxDeclareFunc(name string, t *ctype, s specs, at pos) *symbol 
 			if s.inline {
 				o.comdat = true
 			}
+			o.always = o.always || s.attrs.always
 			return o
 		}
 	}
 	if qualified {
 		p.errorAt(at, "no declaration matches %s::%s", sc.name, name)
 	}
-	sym := &symbol{name: name, src: name, kind: symFunc, t: t, global: true, linkage: 'e', p: at, sc: sc, cLink: clink, comdat: s.inline}
+	sym := &symbol{name: name, src: name, kind: symFunc, t: t, global: true, linkage: 'e', p: at, sc: sc, cLink: clink, comdat: s.inline, always: s.attrs.always}
 	if !clink {
 		sym.name = mangleFunc(sc, name, t.fn, p.tmplSuffix)
 	}

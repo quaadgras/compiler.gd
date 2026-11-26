@@ -218,6 +218,7 @@ type symbol struct {
 	val       int64 // symEnumConst; a constexpr's value
 	constx    bool  // constexpr
 	constFn   bool  // C++: a constexpr function (consteval.go)
+	always    bool  // __attribute__((always_inline)): Go's go:alwaysinline
 	cval      expr  // a constexpr's (folded) value
 	defined   bool
 	fn        *funcDecl

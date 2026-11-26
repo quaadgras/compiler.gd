@@ -122,12 +122,34 @@ func atomicLoad(addr string, t *ctype) string {
 	if goType(t) == "*c23.Void" {
 		return fmt.Sprintf("c23.AtomicLoadP(%s)", addr)
 	}
+	if n := atomicBits(t); n != 0 {
+		return fmt.Sprintf("c23.AtomicLoad%d[%s](%s)", n, goType(t), addr)
+	}
 	return fmt.Sprintf("c23.AtomicLoad[%s](%s)", goType(t), addr)
+}
+
+// atomicBits is 32 or 64 for an integer type of 4 or 8 bytes, whose
+// atomic operations are internal/c23's small ones of that size, and 0
+// for any other type.
+func atomicBits(t *ctype) int {
+	if !t.isInteger() || t.kind == kBool || t.isBitInt() || is128(t) || t.isCap() {
+		return 0
+	}
+	switch t.sizeof() {
+	case 4:
+		return 32
+	case 8:
+		return 64
+	}
+	return 0
 }
 
 func atomicCAS(addr string, t *ctype, old, new string) string {
 	if goType(t) == "*c23.Void" {
 		return fmt.Sprintf("c23.AtomicCASP(%s, %s, %s)", addr, old, new)
+	}
+	if n := atomicBits(t); n != 0 {
+		return fmt.Sprintf("c23.AtomicCAS%d(%s, %s(%s), %s(%s))", n, addr, goType(t), old, goType(t), new)
 	}
 	return fmt.Sprintf("c23.AtomicCAS(%s, %s, %s)", addr, old, new)
 }
@@ -259,7 +281,11 @@ func (g *gen) storeL(l lval, v string, c expr) {
 			if k, ok := c.(*intConst); ok {
 				v = constLit(l.t, k.v)
 			}
-			g.p("c23.AtomicStore(%s, %s(%s))", l.addr, goType(l.t), v)
+			if n := atomicBits(l.t); n != 0 {
+				g.p("c23.AtomicStore%d(%s, %s(%s))", n, l.addr, goType(l.t), v)
+			} else {
+				g.p("c23.AtomicStore(%s, %s(%s))", l.addr, goType(l.t), v)
+			}
 		}
 	default:
 		g.store(l.addr, l.t, v, c)
@@ -1274,6 +1300,11 @@ func (g *gen) builtinCode(e *builtinCall) string {
 			}
 			return fmt.Sprintf("c23.AtomicFetchP(%s, '+', %s, nil)", p, n)
 		}
+		if n := atomicBits(et); n != 0 {
+			if name := map[int64]string{'+': "Add", '-': "Sub", '=': "Swap"}[op]; name != "" {
+				return fmt.Sprintf("c23.Atomic%s%d(%s, %s(%s))", name, n, p, goType(et), v)
+			}
+		}
 		return fmt.Sprintf("c23.AtomicFetch(%s, %d, %s(%s))", p, op, goType(et), v)
 	case "atomic_cmpxchg":
 		p, ex, d := g.orv(e.args[0]), g.orv(e.args[1]), g.orv(e.args[2])
@@ -1283,6 +1314,9 @@ func (g *gen) builtinCode(e *builtinCall) string {
 		}
 		if goType(et) == "*c23.Void" {
 			return fmt.Sprintf("uint8(c23.AtomicCmpXchgP(%s, %s, %s))", p, ex, d)
+		}
+		if n := atomicBits(et); n != 0 {
+			return fmt.Sprintf("uint8(c23.AtomicCmpXchg%d(%s, %s, %s(%s)))", n, p, ex, goType(et), d)
 		}
 		return fmt.Sprintf("uint8(c23.AtomicCmpXchg(%s, %s, %s(%s)))", p, ex, goType(et), d)
 	case "atomic_fence":

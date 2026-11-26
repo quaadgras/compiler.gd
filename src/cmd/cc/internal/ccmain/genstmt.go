@@ -117,6 +117,16 @@ func (g *gen) function(f *funcDecl) {
 	g.tmpN = 0
 	g.localNames = nil
 	lit := g.funcLit(f)
+	// What the source asks to have inlined, Go is asked too: a
+	// function declared inline, or defined in its class, has a bigger
+	// budget in cmd/compile, and one that is always_inline has no
+	// budget.
+	switch {
+	case f.sym.always:
+		g.funcs.WriteString("//go:alwaysinline\n")
+	case f.inline || f.sym.comdat:
+		g.funcs.WriteString("//go:inline\n")
+	}
 	fmt.Fprintf(&g.funcs, "func %s%s\n\n", g.names[f.sym], strings.TrimPrefix(lit, "func"))
 	g.fn = nil
 }

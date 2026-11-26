@@ -230,6 +230,7 @@ type attrs struct {
 	aligned  int64
 	packed   bool
 	noreturn bool
+	always   bool // always_inline
 	cleanup  string
 	vector   int64
 	unused   bool
@@ -242,6 +243,7 @@ func (a *attrs) merge(b attrs) {
 	a.packed = a.packed || b.packed
 	a.weak = a.weak || b.weak
 	a.noreturn = a.noreturn || b.noreturn
+	a.always = a.always || b.always
 	if b.cleanup != "" {
 		a.cleanup = b.cleanup
 	}
@@ -375,6 +377,8 @@ func (p *parser) attr(a *attrs, name string) {
 		a.packed = true
 	case "noreturn", "_Noreturn":
 		a.noreturn = true
+	case "always_inline":
+		a.always = true
 	case "aligned":
 		if p.accept("(") {
 			a.aligned = max(a.aligned, p.constInt(p.conditional()))
@@ -2243,10 +2247,11 @@ func (p *parser) declareFunc(name string, t *ctype, s specs, at pos) *symbol {
 		if s.storage == sStatic {
 			old.linkage = 'i'
 		}
+		old.always = old.always || s.attrs.always
 		p.sc.vars[name] = old
 		return old
 	}
-	sym := &symbol{name: name, kind: symFunc, t: t, global: true, linkage: 'e', p: at}
+	sym := &symbol{name: name, kind: symFunc, t: t, global: true, linkage: 'e', p: at, always: s.attrs.always}
 	if s.storage == sStatic {
 		sym.linkage = 'i'
 	}
