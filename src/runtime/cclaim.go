@@ -255,8 +255,16 @@ func cClaim(s *mspan, i, p uintptr, elem *_type, n uintptr, load, c bool) {
 	}
 	aligned := p&(word-1) == 0 && elem.Pointers()
 	var mask *byte
+	var plan *cPlan
 	if aligned {
-		mask = getGCMask(elem)
+		// (Not for a type that does not fit: only the words in the
+		// object are looked at then.)
+		if p+size <= end {
+			plan = cPlanOf(elem, c)
+		}
+		if plan == nil {
+			mask = getGCMask(elem)
+		}
 	}
 	// direct: what is stored through the pointer is looked at where
 	// it is stored (c23PtrStore), or nothing is, so it may be over a
@@ -266,7 +274,19 @@ func cClaim(s *mspan, i, p uintptr, elem *_type, n uintptr, load, c bool) {
 	for a := lo; a < hi; a += word {
 		w := (a - sbase) / word
 		want, id := uint32(cScalar), uint32(0)
-		if aligned {
+		if plan != nil {
+			e := &plan.words[(a-p)%elem.Size_/word]
+			want, id = e.want, e.id
+			if e.union {
+				ids := s.cIDsOf()
+				if ids == nil {
+					ids = s.newCIDs()
+				}
+				if atomic.Load(ids.word(w)) != id {
+					atomic.Store(ids.word(w), id)
+				}
+			}
+		} else if aligned {
 			off := (a - p) % elem.Size_
 			if k, leaf, in := compatLeaf(elem, off); k != compatScalar && (compatMaskBit(elem, mask, off) || k >= compatString) {
 				want, id = cWant(k, leaf, in, c)
