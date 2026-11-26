@@ -834,7 +834,8 @@ func (g *gen) assign(e *assign, value bool) string {
 				x = convertUnder(cur, t.unqual(), e.ct, s)
 			}
 			y := g.rv(e.y)
-			if (op == "/" || op == "%") && isConstExpr(e.y) {
+			if (op == "/" || op == "%") && isConstExpr(e.y) && !nonzeroConst(e.y) {
+				// (A division by zero, which Go would reject.)
 				y = "c23.Val(" + y + ")"
 			}
 			switch r := fenvArith(op, x, y, e.ct, s); {
@@ -1363,4 +1364,16 @@ func capArith(op, x, y string, t *ctype) string {
 		return fmt.Sprintf("c23.CapShift('%c', %s, uint64(%s), %t)", op[0], x, y, signed)
 	}
 	return fmt.Sprintf("c23.CapArith('%s', %s, %s, %t)", op, x, y, signed)
+}
+
+// nonzeroConst reports whether e is an integer constant that is not 0,
+// or a floating constant that is not 0: a divisor Go takes as it is.
+func nonzeroConst(e expr) bool {
+	switch c := e.(type) {
+	case *intConst:
+		return c.v != 0
+	case *floatConst:
+		return c.v != 0
+	}
+	return false
 }
