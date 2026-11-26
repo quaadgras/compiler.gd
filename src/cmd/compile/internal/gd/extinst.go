@@ -261,11 +261,12 @@ func skipExtInstFunc(gd *base.Invocation, fn *ir.Func) bool {
 	return true
 }
 
-// dumpExtInst writes the __.GDINST member body: every instantiation
-// text symbol this package emitted, with its summary, plus every one
-// it relied on a direct import for, with that import's claim
-// (availability so propagates to importers, whose links always
-// include this package's dep closure).
+// dumpExtInst writes the __.GDINST member, if the package has
+// anything to say in it: every instantiation text symbol this package
+// emitted, with its summary, plus every one it relied on a direct
+// import for, with that import's claim (availability so propagates to
+// importers, whose links always include this package's dep closure).
+// An archive of a package that has none is what it always was.
 func dumpExtInst(gd *base.Invocation, bout *bio.Writer) {
 	local := make(map[string]*ir.Func)
 	for _, fn := range typecheck.Target(gd).Funcs {
@@ -273,30 +274,37 @@ func dumpExtInst(gd *base.Invocation, bout *bio.Writer) {
 			local[name] = fn
 		}
 	}
-	bout.WriteString(gdinstVersion)
-	bout.WriteString("\n")
+	var b strings.Builder
 	seen := make(map[string]bool)
 	for _, s := range gd.Ctxt.Text {
 		if strings.Contains(s.Name, "[") && !seen[s.Name] {
 			seen[s.Name] = true
-			bout.WriteString(s.Name)
+			b.WriteString(s.Name)
 			if fn := local[s.Name]; fn != nil {
-				bout.WriteString("\t")
-				bout.WriteString(encodeExtInst(gd, fn))
+				b.WriteString("\t")
+				b.WriteString(encodeExtInst(gd, fn))
 			}
-			bout.WriteString("\n")
+			b.WriteString("\n")
 		}
 	}
 	st := extInst(gd)
 	for _, name := range st.skipped {
 		if !seen[name] {
 			seen[name] = true
-			bout.WriteString(name)
+			b.WriteString(name)
 			if e := st.avail[name]; e != nil && e.line != "" {
-				bout.WriteString("\t")
-				bout.WriteString(e.line)
+				b.WriteString("\t")
+				b.WriteString(e.line)
 			}
-			bout.WriteString("\n")
+			b.WriteString("\n")
 		}
 	}
+	if b.Len() == 0 {
+		return
+	}
+	start := startArchiveEntry(bout)
+	bout.WriteString(gdinstVersion)
+	bout.WriteString("\n")
+	bout.WriteString(b.String())
+	finishArchiveEntry(bout, start, gdinstMember)
 }

@@ -358,6 +358,20 @@ func (r *objReader) parseArchive(verbose bool) error {
 				Data:  Data{r.offset, size},
 			})
 			r.skip(size)
+		case "__.GDINST":
+			// (gd: the compiler's list of the generic instantiations
+			// that the package and what it imports provide, which is
+			// no object: cmd/compile/internal/gd/extinst.go.)
+			r.a.Entries = append(r.a.Entries, Entry{
+				Name:  name,
+				Type:  EntrySentinelNonObj,
+				Mtime: mtime,
+				Uid:   uid,
+				Gid:   gid,
+				Mode:  mode,
+				Data:  Data{r.offset, size},
+			})
+			r.skip(size)
 		case "preferlinkext", "dynimportfail":
 			if size == 0 {
 				// These are not actual objects, but rather sentinel

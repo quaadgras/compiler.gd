@@ -199,6 +199,7 @@ func (gd *Invocation) ParseFlags(args []string) {
 	gd.Debug.ZeroCopy = 1
 	gd.Debug.RangeFuncCheck = 1
 	gd.Debug.MergeLocals = 1
+	gd.Debug.SkipExtInst = 3 // an instantiation that an import provides is imported: gd/extinst.go
 	gd.Sharing = buildcfg.Experiment.Sharing
 
 	gd.Debug.Checkptr = -1 // so we can tell whether it is set explicitly

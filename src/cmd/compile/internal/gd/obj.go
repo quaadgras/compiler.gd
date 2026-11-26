@@ -71,11 +71,9 @@ func dumpobj1(gd *base.Invocation, outfile string, mode int) {
 		finishArchiveEntry(bout, start, "_go_.o")
 	}
 	if mode&modeCompilerObj != 0 && gd.Debug.SkipExtInst != 0 {
-		// Experiment (-d=skipextinst): record which instantiation
-		// symbols importers may skip compiling. See gd/extinst.go.
-		start := startArchiveEntry(bout)
+		// (-d=skipextinst: which instantiations importers may rely
+		// on this package for. See gd/extinst.go.)
 		dumpExtInst(gd, bout)
-		finishArchiveEntry(bout, start, "__.GDINST")
 	}
 
 	if err := bout.Close(); err != nil {

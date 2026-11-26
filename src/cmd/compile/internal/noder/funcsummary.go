@@ -268,7 +268,10 @@ func readFuncSummary(r summaryReader, name *ir.Name) {
 }
 
 // textSummary writes a summary as words separated by spaces: numbers,
-// and strings quoted.
+// and strings, which start with an s and have %XX for every byte that
+// is not a letter, a digit or one of a few signs. (No word has a space,
+// a quote or a backslash: a line of them is a line of text to
+// anything that looks for one in the archive.)
 type textSummary struct {
 	b strings.Builder
 	n int
@@ -291,7 +294,22 @@ func (w *textSummary) Bool(b bool) bool {
 }
 func (w *textSummary) Len(x int)       { w.word(strconv.Itoa(x)) }
 func (w *textSummary) Uint64(x uint64) { w.word(strconv.FormatUint(x, 10)) }
-func (w *textSummary) String(s string) { w.word(strconv.Quote(s)) }
+func (w *textSummary) String(s string) {
+	const hex = "0123456789ABCDEF"
+	var b strings.Builder
+	b.WriteByte('s')
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || strings.IndexByte("_.:/-[]*(),{}", c) >= 0 {
+			b.WriteByte(c)
+		} else {
+			b.WriteByte('%')
+			b.WriteByte(hex[c>>4])
+			b.WriteByte(hex[c&15])
+		}
+	}
+	w.word(b.String())
+}
 
 // summaryText is a summary that was read from text: its words, which
 // are read in the order that they were written in. bad is set by a
@@ -327,38 +345,40 @@ func (r *summaryText) Uint64() uint64 {
 	return n
 }
 func (r *summaryText) String() string {
-	s, err := strconv.Unquote(r.next())
-	if err != nil {
+	w := r.next()
+	if w == "" || w[0] != 's' {
 		r.bad = true
+		return ""
 	}
-	return s
+	w = w[1:]
+	if strings.IndexByte(w, '%') < 0 {
+		return w
+	}
+	var b strings.Builder
+	for i := 0; i < len(w); i++ {
+		if w[i] != '%' {
+			b.WriteByte(w[i])
+			continue
+		}
+		if i+2 >= len(w) {
+			r.bad = true
+			return ""
+		}
+		c, err := strconv.ParseUint(w[i+1:i+3], 16, 8)
+		if err != nil {
+			r.bad = true
+			return ""
+		}
+		b.WriteByte(byte(c))
+		i += 2
+	}
+	return b.String()
 }
 
-// splitSummary returns the words of a summary's text, or nil if it is
-// not one.
+// splitSummary returns the words of a summary's text.
 func splitSummary(line string) []string {
-	var words []string
-	for line != "" {
-		var w string
-		if line[0] == '"' {
-			q, err := strconv.QuotedPrefix(line)
-			if err != nil {
-				return nil
-			}
-			w = q
-		} else if i := strings.IndexByte(line, ' '); i >= 0 {
-			w = line[:i]
-		} else {
-			w = line
-		}
-		words = append(words, w)
-		line = line[len(w):]
-		if line != "" {
-			if line[0] != ' ' {
-				return nil
-			}
-			line = line[1:]
-		}
+	if line == "" {
+		return nil
 	}
-	return words
+	return strings.Split(line, " ")
 }

@@ -178,6 +178,11 @@ func TestParseGoobj(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// (gd: a package that has generic instantiations has the
+	// compiler's list of them too.)
+	if n := len(a.Entries); n > 0 && a.Entries[n-1].Type == EntrySentinelNonObj {
+		a.Entries = a.Entries[:n-1]
+	}
 	if len(a.Entries) != 2 {
 		t.Errorf("expect 2 entry, found %d", len(a.Entries))
 	}
@@ -277,6 +282,8 @@ func TestParseCGOArchive(t *testing.T) {
 			t.Errorf("unknown object type")
 		case EntryPkgDef:
 			continue
+		case EntrySentinelNonObj:
+			continue // (gd: the compiler's list of generic instantiations)
 		case EntryGoObj:
 			foundgo = true
 			if !bytes.Contains(e.Obj.TextHeader, []byte(runtime.GOARCH)) {

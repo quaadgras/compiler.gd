@@ -332,6 +332,14 @@ func (ar *Archive) extractContents1(e *archive.Entry, out io.Writer) {
 // by the Go compiler, which is an archive file with exactly one entry
 // of __.PKGDEF, or _go_.o, or both entries.
 func isGoCompilerObjFile(a *archive.Archive) bool {
+	// (gd: the compiler's list of generic instantiations, which a
+	// package that has any carries after the two, is no part of what
+	// is asked here.)
+	entries := a.Entries
+	if n := len(entries); n > 0 && entries[n-1].Type == archive.EntrySentinelNonObj && entries[n-1].Name == "__.GDINST" {
+		entries = entries[:n-1]
+		a = &archive.Archive{Entries: entries}
+	}
 	switch len(a.Entries) {
 	case 1:
 		return (a.Entries[0].Type == archive.EntryGoObj && a.Entries[0].Name == "_go_.o") ||
