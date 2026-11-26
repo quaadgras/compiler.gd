@@ -15,21 +15,41 @@ import (
 
 func out() *c23.File { return c23.FileOf(c23.Stdio(1)) }
 
-func Printf(format *c23.Void, va ...any) int32 { return Vprintf(format, c23.VaStart(va)) }
+func Printf(format *c23.Void, va ...any) int32 {
+	v := c23.VaArgs(va)
+	return vfprintf(c23.Stdio(1), format, &v)
+}
 
 func Fprintf(f, format *c23.Void, va ...any) int32 {
-	return Vfprintf(f, format, c23.VaStart(va))
+	v := c23.VaArgs(va)
+	return vfprintf(f, format, &v)
 }
 
-func Sprintf(s, format *c23.Void, va ...any) int32 { return Vsprintf(s, format, c23.VaStart(va)) }
+func Sprintf(s, format *c23.Void, va ...any) int32 {
+	v := c23.VaArgs(va)
+	return vsprintf(s, format, &v)
+}
 
 func Snprintf(s *c23.Void, n uint64, format *c23.Void, va ...any) int32 {
-	return Vsnprintf(s, n, format, c23.VaStart(va))
+	v := c23.VaArgs(va)
+	return vsnprintf(s, n, format, &v)
 }
 
-func Vprintf(format, ap *c23.Void) int32 { return Vfprintf(c23.Stdio(1), format, ap) }
+func Vprintf(format, ap *c23.Void) int32 { return vfprintf(c23.Stdio(1), format, c23.VaOf(ap)) }
 
-func Vfprintf(f, format, ap *c23.Void) int32 {
+func Vfprintf(f, format, ap *c23.Void) int32 { return vfprintf(f, format, c23.VaOf(ap)) }
+
+func Vsprintf(s, format, ap *c23.Void) int32 { return vsprintf(s, format, c23.VaOf(ap)) }
+
+func Vsnprintf(s *c23.Void, n uint64, format, ap *c23.Void) int32 {
+	return vsnprintf(s, n, format, c23.VaOf(ap))
+}
+
+// The functions that format: the format is read where it is
+// (c23.StringView), and the arguments are the caller's, which for
+// printf itself are no va_list that was allocated.
+
+func vfprintf(f, format *c23.Void, ap *c23.VaList) int32 {
 	fl := c23.FileOf(f)
 	var dst []byte
 	if fl.W != nil && fl.Wr {
@@ -37,22 +57,23 @@ func Vfprintf(f, format, ap *c23.Void) int32 {
 		// then finds in place.
 		dst = fl.W.AvailableBuffer()
 	}
-	b := c23.AppendFormatC(dst, c23.GoString(format), c23.VaOf(ap))
+	b := c23.AppendFormatC(dst, c23.StringView(format), ap)
 	if !fl.Write(b) {
 		return -1
 	}
 	return int32(len(b))
 }
 
-func Vsprintf(s, format, ap *c23.Void) int32 {
-	b := c23.FormatC(c23.GoString(format), c23.VaOf(ap))
+func vsprintf(s, format *c23.Void, ap *c23.VaList) int32 {
+	var buf [256]byte
+	b := c23.AppendFormatC(buf[:0], c23.StringView(format), ap)
 	copy(c23.Writable(s, uintptr(len(b)+1)), append(b, 0))
 	return int32(len(b))
 }
 
-func Vsnprintf(s *c23.Void, n uint64, format, ap *c23.Void) int32 {
+func vsnprintf(s *c23.Void, n uint64, format *c23.Void, ap *c23.VaList) int32 {
 	var buf [256]byte
-	b := c23.AppendFormatC(buf[:0], c23.GoString(format), c23.VaOf(ap))
+	b := c23.AppendFormatC(buf[:0], c23.StringView(format), ap)
 	if n > 0 {
 		k := min(uint64(len(b)), n-1)
 		copy(c23.Writable(s, uintptr(k+1)), append(b[:k:k], 0))

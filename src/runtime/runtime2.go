@@ -988,8 +988,8 @@ type p struct {
 	// The variables of the stack and of the data that the checks of
 	// unsafe pointers looked up last (stackvar.go).
 	varCache     [4]varCacheEnt
-	cHeaders     [64]cHeaderEnt   // gd: the spans of C's small objects that c23Header looked up, by page (cclaim.go)
-	dataCache    [64]dataCacheEnt // gd: the variables of the data that were looked up, by address (stackvar.go)
+	cHeaders     [64]cHeaderEnt    // gd: the spans of C's small objects that c23Header looked up, by page (cclaim.go)
+	dataCache    [256]dataCacheEnt // gd: the variables of the data that were looked up, by address (stackvar.go)
 	varCacheNext uint8
 }
 

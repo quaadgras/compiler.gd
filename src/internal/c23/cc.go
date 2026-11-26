@@ -257,6 +257,12 @@ func VaStart(va []any) *Void {
 	return seal(unsafe.Pointer(v))
 }
 
+// VaArgs is the variable arguments va as a VaList of the caller's own,
+// which no va_list of C's points to: for a function of the library that
+// formats its arguments itself, as printf does, and gives them to no
+// one.
+func VaArgs(va []any) VaList { return VaList{args: va} }
+
 // VaOf returns the VaList that ap points to: one that VaStart or VaCopy
 // made.
 //

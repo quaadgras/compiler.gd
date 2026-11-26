@@ -713,7 +713,7 @@ func c23Header(p unsafe.Pointer) (d, n, m, b8, sh, bits uintptr) {
 	epoch := cHeaderEpoch.Load()
 	if pp := gp.m.p.ptr(); pp != nil {
 		he = &pp.cHeaders[la/pageSize%uintptr(len(pp.cHeaders))]
-		if he.page == la/pageSize && he.epoch == epoch && la < he.limit {
+		if he.page == la/pageSize && he.epoch == epoch && la < he.limit && !he.large {
 			i := uintptr(uint64(la-he.base) * uint64(he.divMul) >> 32)
 			base := he.base + i*he.elemsize
 			size := uintptr(*(*uint16)(unsafe.Pointer(he.sizes + i*2)))
@@ -770,8 +770,9 @@ type cHeaderEnt struct {
 	limit    uintptr
 	elemsize uintptr
 	bits     uintptr // *cBits
-	sizes    uintptr // the uint16s after the classes
+	sizes    uintptr // the uint16s after the classes; of a large span, the address of its csize
 	divMul   uint32
+	large    bool // a span of one large object: c23Header does not use it
 }
 
 var cHeaderEpoch atomic.Uint64
@@ -1544,6 +1545,9 @@ func c23Memmove(dst, src unsafe.Pointer, n uintptr) {
 		return
 	}
 	dst, src = cRevive(dst), cRevive(src)
+	if cMoveFast(uintptr(dst), uintptr(src), n) {
+		return
+	}
 	ds := cMoveBounds(uintptr(dst), n)
 	ss := cMoveBounds(uintptr(src), n)
 	// (Nothing to ask where no word that is copied to holds a
@@ -1791,4 +1795,143 @@ func c23Memset1(dst unsafe.Pointer, c byte, n uintptr) {
 			k += m
 		}
 	}
+}
+
+// cHeaderOf returns what the P remembers of the span of C's small
+// objects that a is in (cHeaderEnt), which it looks up if it does not
+// remember it, with where a's object begins and the size it was asked
+// for; ok is false if a is in no span of C's.
+//
+//go:nosplit
+func cHeaderOf(a uintptr) (h cHeaderEnt, base, size uintptr, ok bool) {
+	pp := getg().m.p.ptr()
+	if pp == nil {
+		return
+	}
+	he := &pp.cHeaders[a/pageSize%uintptr(len(pp.cHeaders))]
+	epoch := cHeaderEpoch.Load()
+	if he.page != a/pageSize || a >= he.limit || he.epoch != epoch {
+		s := spanOfHeap(a)
+		if s == nil || !s.spanclass.c() || s.isUserArenaChunk {
+			return
+		}
+		b := s.cBitsOf()
+		if b == nil {
+			return
+		}
+		*he = cHeaderEnt{
+			page: a / pageSize, epoch: epoch, base: s.base(), limit: s.limit, elemsize: s.elemsize, divMul: s.divMul,
+			bits: uintptr(unsafe.Pointer(b)), sizes: uintptr(unsafe.Pointer(b)) + s.cBitsWords()*4,
+		}
+		if s.spanclass.sizeclass() == 0 {
+			// One object, whose size is the span's to say.
+			he.large, he.sizes = true, uintptr(unsafe.Pointer(&s.csize))
+		}
+	}
+	h = *he // (another lookup may take its place)
+	if h.large {
+		return h, h.base, atomic.Loaduintptr((*uintptr)(unsafe.Pointer(h.sizes))), true
+	}
+	i := uintptr(uint64(a-h.base) * uint64(h.divMul) >> 32)
+	return h, h.base + i*h.elemsize, uintptr(*(*uint16)(unsafe.Pointer(h.sizes + i*2))), true
+}
+
+// cNoPtrClasses reports whether none of the n words from the w'th of b
+// is claimed for a pointer.
+//
+//go:nosplit
+func cNoPtrClasses(b *cBits, w, n uintptr) bool {
+	for end := w + n; w < end; {
+		k := min(end-w, cClassPer-w%cClassPer)
+		all := uint32(uint64(1)<<(2*k) - 1)
+		if atomic.Load(b.word(w/cClassPer))>>(w%cClassPer*2)&all&0xaaaaaaaa != 0 {
+			return false
+		}
+		w += k
+	}
+	return true
+}
+
+// cMoveFast is c23Memmove for the copy that most are: bytes that hold
+// no pointer, into a small object of C's that the P remembers, from
+// another such object or from a variable of the program's data that has
+// no pointer (a string of C's that is a constant). It reports whether it
+// made the copy; if not, nothing was done.
+//
+// No word that is written over is claimed for a pointer, and none that
+// is read: so nothing is to be shown to the collector, and nothing is
+// to be asked of the words (cMoveCheck). The words that arrive whole in
+// words that nothing claimed are claimed for no pointer if those they
+// are copied from are, as the copy of c23Memmove1 does, so that what is
+// copied is what it was. That is only done while the collector is not
+// marking: it then looks at no word that it looked at before.
+func cMoveFast(d, s, n uintptr) bool {
+	const word = goarch.PtrSize
+	if writeBarrier.enabled || d+n < d || s+n < s {
+		return false
+	}
+	if gp := getg(); gp.stack.lo <= s && s < gp.stack.hi || gp.stack.lo <= d && d < gp.stack.hi {
+		return false // a variable of a frame: found another way
+	}
+	dh, dbase, dsize, ok := cHeaderOf(d)
+	if !ok || d-dbase > dsize || n > dsize-(d-dbase) {
+		return false // (past the end: the program is stopped there)
+	}
+	db := (*cBits)(unsafe.Pointer(dh.bits))
+	lo, hi := alignDown(d, word), alignUp(d+n, word)
+	if !cNoPtrClasses(db, (lo-dh.base)/word, (hi-lo)/word) {
+		return false
+	}
+	var sb *cBits
+	var sbase0 uintptr
+	if sh, sbase, ssize, ok := cHeaderOf(s); ok {
+		if s-sbase > ssize || n > ssize-(s-sbase) {
+			return false
+		}
+		sb, sbase0 = (*cBits)(unsafe.Pointer(sh.bits)), sh.base
+		slo, shi := alignDown(s, word), alignUp(s+n, word)
+		if !cNoPtrClasses(sb, (slo-sbase0)/word, (shi-slo)/word) {
+			return false
+		}
+	} else if cInData(s) {
+		base, size, typ, typed, state := checkptrVar(s)
+		if state != varFound || n > size-(s-base) || !typed || typ != nil && typ.Pointers() {
+			return false
+		}
+	} else {
+		return false
+	}
+	// The classes of the words that arrive whole.
+	if wlo, whi := alignUp(d, word), alignDown(d+n, word); sb != nil && (d^s)&(word-1) == 0 && wlo < whi && !getg().m.cprobe {
+		w, sw := (wlo-dh.base)/word, (s+(wlo-d)-sbase0)/word
+		for words := (whi - wlo) / word; words > 0; {
+			k := min(words, cClassPer-w%cClassPer)
+			all := uint32(uint64(1)<<(2*k) - 1)
+			v := uint64(atomic.Load(sb.word(sw / cClassPer)))
+			if sw%cClassPer+k > cClassPer {
+				v |= uint64(atomic.Load(sb.word(sw/cClassPer+1))) << 32
+			}
+			from := uint32(v>>(sw%cClassPer*2)) & all & 0x55555555
+			if from != 0 {
+				p := db.word(w / cClassPer)
+				shift := w % cClassPer * 2
+				for {
+					old := atomic.Load(p)
+					have := old >> shift & all
+					if have&0xaaaaaaaa != 0 {
+						// Claimed for a pointer meanwhile, by
+						// another thread: the copy that asks.
+						return false
+					}
+					take := from &^ (have | have>>1&0x55555555)
+					if take == 0 || atomic.Cas(p, old, old|take<<shift) {
+						break
+					}
+				}
+			}
+			w, sw, words = w+k, sw+k, words-k
+		}
+	}
+	memmove(unsafe.Pointer(d), unsafe.Pointer(s), n)
+	return true
 }

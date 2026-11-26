@@ -30,6 +30,15 @@ func CString(s string) *Void {
 // GoString reads the C string at p, which ends in what p points into.
 func GoString(p *Void) string { return string(StringAt(p)) }
 
+// StringView is GoString without the copy: the string is C's own bytes,
+// for a caller that reads it and does not keep it, as printf reads its
+// format. (A program that changes the bytes meanwhile changes what is
+// read, and nothing else: the length is the one that was found.)
+func StringView(p *Void) string {
+	b := StringAt(p)
+	return unsafe.String(unsafe.SliceData(b), len(b))
+}
+
 // string.h
 
 // Memcmp is memcmp: of bytes that are in what a and b point into, as
@@ -619,9 +628,14 @@ func AppendFormatC(out []byte, f string, ap *VaList) []byte {
 				}
 				s = string(b)
 			default:
-				s = GoString(p)
+				// The string's own bytes, which are copied to
+				// out and not kept.
+				body = StringAt(p)
+				s = ""
 			}
-			body = []byte(s)
+			if s != "" {
+				body = []byte(s)
+			}
 		case 'p':
 			p, _ := ap.Next().(*Void)
 			if Addr(p) == 0 {

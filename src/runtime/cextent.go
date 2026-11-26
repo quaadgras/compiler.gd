@@ -53,6 +53,13 @@ func c23Extent(p unsafe.Pointer) (before, after uintptr, ok bool) {
 		}
 		return 0, 0, false
 	}
+	if _, base, size, ok := cHeaderOf(a); ok {
+		// An object of C's, of a span that the P remembers.
+		if a-base > size {
+			return 0, 0, false
+		}
+		return a - base, size - (a - base), true
+	}
 	if s := spanOfHeap(a); s != nil {
 		if s.isUserArenaChunk {
 			return 0, 0, false
