@@ -686,7 +686,7 @@ func cRoots(f *Func) func(*Value) *Value {
 				// to check, as any that a comparison stops.)
 				if c := v.Args[0]; v.AuxInt == 0 && c.Op == OpStaticLECall {
 					switch c.Aux.(*AuxCall).Fn {
-					case f.fe.Syslook("checkptrArithmeticC"), f.fe.Syslook("checkptrConvC"), f.fe.Syslook("checkptrConvCLoad"):
+					case f.fe.Syslook("checkptrArithmeticC"), f.fe.Syslook("checkptrArithmeticC1"), f.fe.Syslook("checkptrConvC"), f.fe.Syslook("checkptrConvCLoad"):
 						v = c.Args[0]
 						continue
 					}
@@ -822,7 +822,7 @@ func cSameLoads(f *Func) map[*Value]*Value {
 		return nil
 	}
 	checks := map[*obj.LSym]bool{}
-	for _, name := range []string{"checkptrArithmeticC", "checkptrConvC", "checkptrConvCLoad"} {
+	for _, name := range []string{"checkptrArithmeticC", "checkptrArithmeticC1", "checkptrConvC", "checkptrConvCLoad"} {
 		checks[f.fe.Syslook(name)] = true
 	}
 	// temp reports whether p is the address of a temporary of the

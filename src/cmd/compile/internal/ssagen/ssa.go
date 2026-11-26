@@ -156,6 +156,8 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).
 		CheckPtrArithmeticC = typecheck.LookupRuntimeFunc(gd, "checkptrArithmeticC")
 	ir.Syms(gd).
+		CheckPtrArithmeticC1 = typecheck.LookupRuntimeFunc(gd, "checkptrArithmeticC1")
+	ir.Syms(gd).
 		CheckPtrConvCLoad = typecheck.LookupRuntimeFunc(gd, "checkptrConvCLoad")
 	ir.Syms(gd).
 		C23ByteStore = typecheck.LookupRuntimeFunc(gd, "c23ByteStore")
@@ -10272,6 +10274,8 @@ func (e *ssafn) Syslook(name string) *obj.LSym {
 		return ir.Syms(e.gd).C23Header
 	case "checkptrArithmeticC":
 		return ir.Syms(e.gd).CheckPtrArithmeticC
+	case "checkptrArithmeticC1":
+		return ir.Syms(e.gd).CheckPtrArithmeticC1
 	case "checkptrConvC":
 		return ir.Syms(e.gd).CheckPtrConvC
 	case "checkptrConvCLoad":

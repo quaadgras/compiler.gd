@@ -309,6 +309,7 @@ func checkptrAlignment(unsafe.Pointer, *byte, uintptr)
 func checkptrAlignmentLoad(unsafe.Pointer, *byte, uintptr)
 func checkptrArithmetic(unsafe.Pointer, []unsafe.Pointer)
 func checkptrArithmeticC(unsafe.Pointer, []unsafe.Pointer) unsafe.Pointer
+func checkptrArithmeticC1(unsafe.Pointer, unsafe.Pointer) unsafe.Pointer
 func c23slow(unsafe.Pointer, unsafe.Pointer) bool
 func checkptrPartial(unsafe.Pointer)
 func checkptrIncompat(unsafe.Pointer, int)

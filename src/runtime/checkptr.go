@@ -275,6 +275,14 @@ func checkptrArithmeticC(p unsafe.Pointer, originals []unsafe.Pointer) unsafe.Po
 	return nil
 }
 
+// checkptrArithmeticC1 is checkptrArithmeticC for a p that is made of
+// one pointer, as most are: the compiled code has nothing to put
+// anywhere for the call.
+func checkptrArithmeticC1(p, original unsafe.Pointer) unsafe.Pointer {
+	o := [1]unsafe.Pointer{original}
+	return checkptrArithmeticC(p, o[:])
+}
+
 // checkptrAlignmentC is checkptrAlignment for unsafe.Slice and the like
 // in a package that is C translated by cmd/cc: the n values of elem at p
 // are in one object, each of them whole, and an object of C's is claimed

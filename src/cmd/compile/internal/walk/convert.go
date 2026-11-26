@@ -662,6 +662,10 @@ func walkCheckPtrArithmetic(gd *base.Invocation, n *ir.ConvExpr, init *ir.Nodes)
 		slice.SetEsc(ir.EscNone)
 		var body ir.Nodes
 		call := mkcall(gd, "checkptrArithmeticC", types.Types[types.TUNSAFEPTR], &body, typecheck.ConvNop(gd, tmp, types.Types[types.TUNSAFEPTR]), slice)
+		if len(originals) == 1 {
+			body = nil
+			call = mkcall(gd, "checkptrArithmeticC1", types.Types[types.TUNSAFEPTR], &body, typecheck.ConvNop(gd, tmp, types.Types[types.TUNSAFEPTR]), originals[0])
+		}
 		body.Append(typecheck.Stmt(gd, ir.NewAssignStmt(gd, gd.Pos, tmp, typecheck.ConvNop(gd, call, n.Type()))))
 		if gd.Flag.N != 0 || gd.Debug.CHeaders != 0 || types.PtrSize != 8 {
 			init.Append(body...)

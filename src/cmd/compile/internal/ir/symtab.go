@@ -41,6 +41,7 @@ type SymsStruct struct {
 	CheckPtrAlignmentC        *obj.LSym
 	CheckPtrConvC             *obj.LSym
 	CheckPtrArithmeticC       *obj.LSym
+	CheckPtrArithmeticC1      *obj.LSym
 	CheckPtrConvCLoad         *obj.LSym
 	C23ByteStore              *obj.LSym
 	C23PtrStore               *obj.LSym
