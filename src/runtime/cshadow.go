@@ -4,7 +4,10 @@
 
 package runtime
 
-import "unsafe"
+import (
+	"internal/runtime/atomic"
+	"unsafe"
+)
 
 // The shadow of C's memory (doc/gd/cc.md).
 //
@@ -129,4 +132,39 @@ func cShadowStackVar(a uintptr) (base, size uintptr, ok bool) {
 		}
 	}
 	return 0, 0, false
+}
+
+// cShadowClaimScalars claims for no pointer the words that the size
+// bytes at a are over, as cClaimScalars does, if the shadow says that
+// each of them is whole in an object, may be stored in, and is claimed
+// so or by nothing, and reports whether it did: the first conversion of
+// what malloc gave to integers, which is most of the conversions that
+// the compiled code leaves to the runtime. The words' bytes are in one
+// uint64 of the shadow, which is swapped for one that has the claims
+// if nothing changed it meanwhile. Not while the collector is marking
+// or the runtime is only asking what a conversion would do,
+// and not for a pointer that has a bit that no address has: those are
+// checkptrConvC1's.
+//
+//go:nosplit
+func cShadowClaimScalars(a, size uintptr) bool {
+	if a>>47 != 0 || a < minLegalPointer || writeBarrier.enabled || size == 0 || getg().m.cprobe {
+		return false
+	}
+	p := uintptr(unsafe.Pointer(cShadowOf(a)))
+	words := (a&7 + size + 7) / 8
+	if p&7+words > 8 {
+		return false
+	}
+	shift := p & 7 * 8
+	mask := uint64(1)<<(8*words) - 1
+	if words == 8 {
+		mask = ^uint64(0)
+	}
+	g := (*uint64)(unsafe.Pointer(p &^ 7))
+	old := atomic.Load64(g)
+	if old>>shift&(cClassLows*(cWordIn|cWordRO|cUntyped))&mask != cClassLows*cWordIn&mask {
+		return false
+	}
+	return atomic.Cas64(g, old, old|cClassLows*cScalar&mask<<shift)
 }

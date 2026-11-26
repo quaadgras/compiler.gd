@@ -345,6 +345,9 @@ func checkptrAlignmentC(p unsafe.Pointer, elem *_type, n uintptr) {
 // compatible with it (cclaim.go); in an object of Go's the object's type
 // is (checkptr_compat.go).
 func checkptrConvC(p unsafe.Pointer, elem *_type, n uintptr) unsafe.Pointer {
+	if cShadowOn && !elem.Pointers() && elem.Align_ > 1 && cShadowClaimScalars(uintptr(p), elem.Size_) {
+		return p
+	}
 	return checkptrConvC1(p, elem, false)
 }
 
