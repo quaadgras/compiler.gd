@@ -11,6 +11,7 @@ import (
 	"os"
 	"sync"
 	"unicode/utf8"
+	"unsafe"
 )
 
 func Mblen(s *c23.Void, n uint64) int32 { return Mbtowc((*c23.Void)(nil), s, n) }
@@ -108,11 +109,11 @@ func Wcstombs(dst, src *c23.Void, n uint64) uint64 {
 // Strfromd is strfromd: snprintf of one double, of a format of a
 // precision and a conversion.
 func Strfromd(s *c23.Void, n uint64, format *c23.Void, fp float64) int32 {
-	return c23_stdio.Snprintf(s, n, format, fp)
+	return c23_stdio.Snprintf((*c23.Char)(unsafe.Pointer(s)), n, (*c23.Char)(unsafe.Pointer(format)), fp)
 }
 
 func Strfromf(s *c23.Void, n uint64, format *c23.Void, fp float32) int32 {
-	return c23_stdio.Snprintf(s, n, format, float64(fp))
+	return c23_stdio.Snprintf((*c23.Char)(unsafe.Pointer(s)), n, (*c23.Char)(unsafe.Pointer(format)), float64(fp))
 }
 
 // FreeSized and FreeAlignedSized are free_sized and free_aligned_sized:

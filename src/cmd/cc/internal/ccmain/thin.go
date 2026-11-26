@@ -1525,6 +1525,9 @@ func (g *gen) tcall(c *call) string {
 		case at.kind == kStruct && i >= len(callee.params):
 			// By value, in variable arguments: a copy.
 			v = fmt.Sprintf("c23.ByValue{P: c23.Copy(%s, %d)}", g.vptr(v, at), at.sizeof())
+		case libGo && isP && isLib && libcTyped[lib] && i < len(callee.params) && at.kind != kStruct:
+			// The library's, with the type that C gives it.
+			v = g.retype(v, g.gt(at), g.libcPtr(callee.params[i]))
 		case libGo && isP:
 			// The library's: any pointer.
 			v = g.vptr(v, at)
@@ -1559,6 +1562,8 @@ func (g *gen) tcall(c *call) string {
 		return sret
 	case rt.kind == kVoid:
 		return code
+	case libGo && isLib && libcTyped[lib] && rt.isPtr():
+		return g.retype(code, g.libcPtr(callee.ret), g.gt(rt))
 	case libGo && (rt.isPtr() || rt.kind == kNullptr):
 		return g.retype(code, voidPtr, g.gt(rt))
 	case libGo:

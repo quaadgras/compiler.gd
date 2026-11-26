@@ -179,6 +179,17 @@ func markWholeView(gd *base.Invocation, fn *ir.Func, ro *ir.ReassignOracle, n *i
 		if !gd.CObjects && !fn.Wrapper() {
 			switch why := types.CompatView(gd, src, off, n.Type().Elem(), size, n.LoadOnly); {
 			case why == types.ViewOK:
+				if elem := n.Type().Elem(); viewOfVar(n.X) && elem.Alignment() <= src.Alignment() && off%elem.Alignment() == 0 {
+					// The address of a variable, or of a part of
+					// one, which is what its type says and
+					// where its type says: the view is in it,
+					// is aligned, and is compatible with it.
+					// Nothing is left for the runtime to look
+					// at, which would have to find the
+					// variable first (math.Float64bits of a
+					// local walked the stack's frames).
+					n.CUnchecked = true
+				}
 			case gd.Debug.UnsafeWhole != 0:
 				gd.WarnfAt(n.Pos(), "unsafewhole: incompatible view (%d): %v at offset %d of %v", why, n.Type(), off, src)
 			default:
@@ -306,4 +317,45 @@ func cAddInside(gd *base.Invocation, n *ir.BinaryExpr) bool {
 	}
 	types.CalcSize(gd, src)
 	return src.Size() > 0 && off+c >= 0 && off+c < src.Size()
+}
+
+// viewOfVar reports whether n, which is converted to a pointer, is the
+// address of a variable, or of a field or an element at a constant index
+// of one, with nothing between but conversions of the pointer: not what
+// a pointer points to, which may be less than its type says (one that C
+// gave, to the end of its object).
+func viewOfVar(n ir.Node) bool {
+	for {
+		switch n.Op() {
+		case ir.OPAREN:
+			n = n.(*ir.ParenExpr).X
+			continue
+		case ir.OCONVNOP:
+			n = n.(*ir.ConvExpr).X
+			continue
+		}
+		break
+	}
+	if n.Op() != ir.OADDR {
+		return false
+	}
+	x := n.(*ir.AddrExpr).X
+	for {
+		switch x.Op() {
+		case ir.OPAREN:
+			x = x.(*ir.ParenExpr).X
+			continue
+		case ir.ODOT:
+			x = x.(*ir.SelectorExpr).X
+			continue
+		case ir.OINDEX:
+			ix := x.(*ir.IndexExpr)
+			if _, ok := viewConst(ix.Index); ok && ix.X.Type().IsArray() {
+				x = ix.X
+				continue
+			}
+		}
+		break
+	}
+	return x.Op() == ir.ONAME && x.(*ir.Name).Class != ir.PFUNC
 }

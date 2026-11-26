@@ -11,28 +11,33 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 )
+
+// void is s as the library's own functions take a string: a pointer to
+// anything, whose end they look for.
+func void(s *c23.Char) *c23.Void { return (*c23.Void)(unsafe.Pointer(s)) }
 
 func out() *c23.File { return c23.FileOf(c23.Stdio(1)) }
 
-func Printf(format *c23.Void, va ...any) int32 {
+func Printf(format *c23.Char, va ...any) int32 {
 	v := c23.VaArgs(va)
-	return vfprintf(c23.Stdio(1), format, &v)
+	return vfprintf(c23.Stdio(1), void(format), &v)
 }
 
-func Fprintf(f, format *c23.Void, va ...any) int32 {
+func Fprintf(f *c23.Void, format *c23.Char, va ...any) int32 {
 	v := c23.VaArgs(va)
-	return vfprintf(f, format, &v)
+	return vfprintf(f, void(format), &v)
 }
 
-func Sprintf(s, format *c23.Void, va ...any) int32 {
+func Sprintf(s, format *c23.Char, va ...any) int32 {
 	v := c23.VaArgs(va)
-	return vsprintf(s, format, &v)
+	return vsprintf(void(s), void(format), &v)
 }
 
-func Snprintf(s *c23.Void, n uint64, format *c23.Void, va ...any) int32 {
+func Snprintf(s *c23.Char, n uint64, format *c23.Char, va ...any) int32 {
 	v := c23.VaArgs(va)
-	return vsnprintf(s, n, format, &v)
+	return vsnprintf(void(s), n, void(format), &v)
 }
 
 func Vprintf(format, ap *c23.Void) int32 { return vfprintf(c23.Stdio(1), format, c23.VaOf(ap)) }
@@ -81,15 +86,16 @@ func vsnprintf(s *c23.Void, n uint64, format *c23.Void, ap *c23.VaList) int32 {
 	return int32(len(b))
 }
 
-func Puts(s *c23.Void) int32 {
-	if !out().Write(append([]byte(c23.GoString(s)), '\n')) {
+func Puts(s *c23.Char) int32 {
+	o := out()
+	if !o.Write(c23.StringAt(void(s))) || !o.Write([]byte{'\n'}) {
 		return -1
 	}
 	return 0
 }
 
-func Fputs(s, f *c23.Void) int32 {
-	if !c23.FileOf(f).Write([]byte(c23.GoString(s))) {
+func Fputs(s *c23.Char, f *c23.Void) int32 {
+	if !c23.FileOf(f).Write(c23.StringAt(void(s))) {
 		return -1
 	}
 	return 0

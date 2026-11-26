@@ -53,3 +53,10 @@ _testmain.go
 # use alternative ways to exclude files from git.
 # For example, set up .git/info/exclude or use a global .gitignore.
 /.claude
+
+# gd: what `go build cmd/x` leaves in src when it is run there.
+/src/cc
+/src/compile
+/src/link
+/src/asm
+/src/gofmt

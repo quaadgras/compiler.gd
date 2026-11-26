@@ -15,10 +15,10 @@ import (
 var start = c23.MonoStart
 
 // Time is time: the seconds since the epoch, also stored at t if not null.
-func Time(t *c23.Void) int64 {
+func Time(t *c23.Long) int64 {
 	now := time.Now().Unix()
-	if c23.Addr(t) != 0 {
-		c23.Store64(t, uint64(now))
+	if t != nil {
+		*t = c23.Long(now)
 	}
 	return now
 }

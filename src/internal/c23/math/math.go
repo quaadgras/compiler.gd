@@ -355,22 +355,22 @@ func Scalbln(x float64, e int64) float64 {
 	return ranged(math.Ldexp(x, int(e)), x)
 }
 
-func Frexp(x float64, e *c23.Void) float64 {
+func Frexp(x float64, e *c23.Int) float64 {
 	f, n := math.Frexp(x)
 	if math.IsInf(x, 0) || math.IsNaN(x) {
 		f, n = x, 0
 	}
-	c23.Store32(e, uint32(int32(n)))
+	*e = c23.Int(n)
 	return f
 }
 
-func Modf(x float64, ip *c23.Void) float64 {
+func Modf(x float64, ip *float64) float64 {
 	if math.IsInf(x, 0) {
-		c23.StoreF64(ip, x)
+		*ip = x
 		return math.Copysign(0, x)
 	}
 	i, f := math.Modf(x)
-	c23.StoreF64(ip, i)
+	*ip = i
 	return f
 }
 
@@ -613,15 +613,15 @@ func Scalblnf(x float32, e int64) float32 {
 	return rangedf(math.Ldexp(float64(x), int(max(min(e, 1000), -1000))), x)
 }
 
-func Frexpf(x float32, e *c23.Void) float32 { return float32(Frexp(float64(x), e)) }
+func Frexpf(x float32, e *c23.Int) float32 { return float32(Frexp(float64(x), e)) }
 
-func Modff(x float32, ip *c23.Void) float32 {
+func Modff(x float32, ip *float32) float32 {
 	if math.IsInf(float64(x), 0) {
-		c23.StoreF32(ip, x)
+		*ip = x
 		return float32(math.Copysign(0, float64(x)))
 	}
 	i, f := math.Modf(float64(x))
-	c23.StoreF32(ip, float32(i))
+	*ip = float32(i)
 	return float32(f)
 }
 

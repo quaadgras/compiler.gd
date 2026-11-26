@@ -382,7 +382,9 @@ type ConvExpr struct {
 	// stored through, kept, or passed on (gd: walk's markWholeViews).
 	LoadOnly bool
 
-	// CUnchecked is set for a conversion in a package of C's that is
+	// CUnchecked is set for a conversion that needs no check: in a
+	// package of Go's, a view of a variable that walk knows to be in
+	// it, aligned and compatible; in a package of C's, one that is
 	// a view without pointers of a part of what the pointer is known
 	// to point to that has none: it needs no check (walk's
 	// markWholeView).

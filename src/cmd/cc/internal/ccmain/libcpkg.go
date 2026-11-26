@@ -72,3 +72,32 @@ func LibcPackages() []string {
 func isLibcGo(fn string) bool {
 	return strings.HasPrefix(fn, "c23.") || strings.HasPrefix(fn, "c23_")
 }
+
+// libcTyped is the functions of the library, by their names in C, whose
+// Go takes and returns pointers of the types that C gives them, where
+// the others take any pointer (*c23.Void): a pointer to a scalar or to
+// a pointer has that type, int * is *c23.Int and char ** is **c23.Char
+// (libcPtr). Such a function loads and stores through its pointer as Go
+// does, with nothing looked up: what the pointer points to is what its
+// type says, as it is for the C that calls it. A string is still looked
+// for the end of, in what its pointer points into.
+var libcTyped = map[string]bool{
+	"frexp": true, "frexpf": true, "frexpl": true, "modf": true, "modff": true, "modfl": true,
+	"remquo": true, "remquof": true, "remquol": true, "time": true,
+	"printf": true, "fprintf": true, "sprintf": true, "snprintf": true, "puts": true, "fputs": true,
+}
+
+// libcPtr is the Go type of a pointer of C type t in the signature of a
+// function of libcTyped.
+func (g *gen) libcPtr(t *ctype) string {
+	if !t.isPtr() {
+		return voidPtr
+	}
+	switch e := t.elem; {
+	case e.isPtr():
+		return "*" + g.libcPtr(e)
+	case (e.isInteger() || e.kind == kFloat || e.kind == kDouble || e.kind == kLDouble) && !e.isCap() && !is128(e) && !e.isBitInt():
+		return "*" + goType(e.unqual())
+	}
+	return voidPtr
+}

@@ -192,7 +192,7 @@ func Compoundn(x float64, n int64) float64 {
 
 // Remquo is remquo: remainder, and in *quo the low bits of the quotient
 // with its sign.
-func Remquo(x, y float64, quo *c23.Void) float64 {
+func Remquo(x, y float64, quo *c23.Int) float64 {
 	r := Remainder(x, y)
 	q := int64(0)
 	if !math.IsNaN(r) && !math.IsInf(x, 0) && y != 0 {
@@ -202,7 +202,7 @@ func Remquo(x, y float64, quo *c23.Void) float64 {
 			q = -q
 		}
 	}
-	c23.Store32(quo, uint32(int32(q)))
+	*quo = c23.Int(q)
 	return r
 }
 
@@ -607,7 +607,7 @@ func Nexttowardf(x float32, y float64) float32 {
 	return float32(y)
 }
 
-func Remquof(x, y float32, quo *c23.Void) float32 {
+func Remquof(x, y float32, quo *c23.Int) float32 {
 	return float32(Remquo(float64(x), float64(y), quo))
 }
 

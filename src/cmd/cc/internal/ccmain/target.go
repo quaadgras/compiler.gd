@@ -302,6 +302,9 @@ func ilp32IntLit(t *ctype, v uint64, suffix string, decimal bool) *ctype {
 // takes or returns one, a closure that converts as a call does (libcConv).
 func (g *gen) libcAdapter(name string, s *symbol) string {
 	ct := g.calleeType(s)
+	if libcTyped[s.name] && isLibcGo(name) && ct != nil {
+		return g.libcErased(name, ct.fn)
+	}
 	if !target.ilp32() || !isLibcGo(name) || ct == nil {
 		return name
 	}
@@ -328,6 +331,35 @@ func (g *gen) libcAdapter(name string, s *symbol) string {
 		return fmt.Sprintf("%s { %s }", g.funcSig(ft, params), call)
 	}
 	return fmt.Sprintf("%s { return %s }", g.funcSig(ft, params), libcConv(call, ft.ret, false))
+}
+
+// libcErased is the Go function literal that calls name, a function of
+// libcTyped of type ft, as a pointer to a function calls it: with any
+// pointer for each of its pointers (erasedSig).
+func (g *gen) libcErased(name string, ft *funcType) string {
+	var ps, args []string
+	for i, pt := range ft.params {
+		a := fmt.Sprintf("a%d", i)
+		ps = append(ps, a+" "+g.et(pt))
+		if pt.isPtr() {
+			a = g.retype(a, voidPtr, g.libcPtr(pt))
+		} else {
+			a = libcConv(a, pt, true)
+		}
+		args = append(args, a)
+	}
+	if ft.variadic || !ft.proto && len(ft.params) == 0 {
+		ps = append(ps, "va ...any")
+		args = append(args, "va...")
+	}
+	call := fmt.Sprintf("%s(%s)", name, strings.Join(args, ", "))
+	switch {
+	case ft.ret.kind == kVoid:
+		return fmt.Sprintf("func(%s) { %s }", strings.Join(ps, ", "), call)
+	case ft.ret.isPtr():
+		return fmt.Sprintf("func(%s) %s { return %s }", strings.Join(ps, ", "), voidPtr, g.retype(call, g.libcPtr(ft.ret), voidPtr))
+	}
+	return fmt.Sprintf("func(%s) %s { return %s }", strings.Join(ps, ", "), g.et(ft.ret), libcConv(call, ft.ret, false))
 }
 
 // addrOff is a constant offset of pointer arithmetic, as the target's
