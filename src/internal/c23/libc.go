@@ -457,6 +457,7 @@ func FormatC(f string, ap *VaList) []byte { return AppendFormatC(nil, f, ap) }
 // AppendFormatC is FormatC that appends to out: printf formats into a
 // buffer of its frame.
 func AppendFormatC(out []byte, f string, ap *VaList) []byte {
+	var fbuf [72]byte // where a number's digits are written
 	for i := 0; i < len(f); i++ {
 		if f[i] != '%' {
 			out = append(out, f[i])
@@ -546,9 +547,9 @@ func AppendFormatC(out []byte, f string, ap *VaList) []byte {
 			numeric = true
 			if v < 0 {
 				sign = "-"
-				body = strconv.AppendUint(nil, uint64(-v), 10)
+				body = strconv.AppendUint(fbuf[:0], uint64(-v), 10)
 			} else {
-				body = strconv.AppendUint(nil, uint64(v), 10)
+				body = strconv.AppendUint(fbuf[:0], uint64(v), 10)
 				if plus {
 					sign = "+"
 				} else if space {
@@ -568,7 +569,7 @@ func AppendFormatC(out []byte, f string, ap *VaList) []byte {
 			case 'b', 'B':
 				base = 2
 			}
-			body = strconv.AppendUint(nil, v, base)
+			body = strconv.AppendUint(fbuf[:0], v, base)
 			if conv == 'X' {
 				body = []byte(strings.ToUpper(string(body)))
 			}
@@ -658,7 +659,7 @@ func AppendFormatC(out []byte, f string, ap *VaList) []byte {
 			} else if space {
 				sign = " "
 			}
-			body = formatFloat(v, conv, prec, alt, sign == "-")
+			body = appendFloat(fbuf[:0], v, conv, prec, alt, sign == "-")
 			if math.IsInf(v, 0) || math.IsNaN(v) {
 				zero = false
 			}
@@ -749,6 +750,132 @@ func precDigits(b []byte, prec int) []byte {
 		return append([]byte(strings.Repeat("0", prec-len(b))), b...)
 	}
 	return b
+}
+
+// appendFloat is formatFloat, appended to dst: the conversions that most
+// are, of a number that is finite with the rounding to nearest that a
+// thread has unless it changed it, are made once, by strconv, with
+// nothing allocated if dst has the room. %g is C's: with P the
+// precision (1 for 0) and X the exponent that %e would write with P-1
+// digits after the point, it is %f with P-1-X digits if P > X >= -4, and
+// %e otherwise, without the zeros that end the fraction unless the flag
+// # is given. The digits of the two are the same P digits, rounded at
+// the same place, so they are converted once, as %e, and the point is
+// put where %f has it.
+func appendFloat(dst []byte, v float64, conv byte, prec int, alt, neg bool) []byte {
+	lower := conv | 0x20
+	if math.IsInf(v, 0) || math.IsNaN(v) || lower == 'a' || CurRound() != FeToNearest {
+		return append(dst, formatFloat(v, conv, prec, alt, neg)...)
+	}
+	if prec < 0 {
+		prec = 6
+	}
+	start := len(dst)
+	switch lower {
+	case 'f':
+		dst = strconv.AppendFloat(dst, v, 'f', prec, 64)
+		if alt && prec == 0 {
+			dst = append(dst, '.')
+		}
+	case 'e':
+		dst = strconv.AppendFloat(dst, v, 'e', prec, 64)
+		if alt && prec == 0 {
+			return append(dst[:start], formatFloat(v, conv, prec, alt, neg)...)
+		}
+	case 'g':
+		if alt {
+			// (Rare: as it was.)
+			return append(dst, formatFloat(v, conv, prec, alt, neg)...)
+		}
+		p := prec
+		if p == 0 {
+			p = 1
+		}
+		var ebuf [40]byte
+		var e []byte
+		if p <= 17 {
+			e = strconv.AppendFloat(ebuf[:0], v, 'e', p-1, 64)
+		} else {
+			e = strconv.AppendFloat(nil, v, 'e', p-1, 64)
+		}
+		// e is d[.ddd]e±xx: its digits, and its exponent.
+		i := bytes.IndexByte(e, 'e')
+		x := 0
+		for _, c := range e[i+2:] {
+			x = x*10 + int(c-'0')
+		}
+		if e[i+1] == '-' {
+			x = -x
+		}
+		if v == 0 {
+			x = 0
+		}
+		mant := e[:i] // d or d.ddd
+		if p > x && x >= -4 {
+			// As %f: the same digits, with the point after x+1 of
+			// them, or after a 0 and -x-1 more of them.
+			digit := func(k int) byte { // the k'th of the p digits
+				if k == 0 {
+					return mant[0]
+				}
+				return mant[k+1]
+			}
+			if x >= 0 {
+				for k := 0; k <= x; k++ {
+					dst = append(dst, digit(k))
+				}
+				if x+1 < p || alt {
+					dst = append(dst, '.')
+				}
+				for k := x + 1; k < p; k++ {
+					dst = append(dst, digit(k))
+				}
+			} else {
+				dst = append(dst, '0', '.')
+				for k := -1; k > x; k-- {
+					dst = append(dst, '0')
+				}
+				for k := 0; k < p; k++ {
+					dst = append(dst, digit(k))
+				}
+			}
+			if !alt {
+				// Without the zeros that end the fraction, and
+				// without the point if nothing is left after it.
+				if bytes.IndexByte(dst[start:], '.') >= 0 {
+					for dst[len(dst)-1] == '0' {
+						dst = dst[:len(dst)-1]
+					}
+					if dst[len(dst)-1] == '.' {
+						dst = dst[:len(dst)-1]
+					}
+				}
+			}
+		} else {
+			if !alt && len(mant) > 1 {
+				for mant[len(mant)-1] == '0' {
+					mant = mant[:len(mant)-1]
+				}
+				if mant[len(mant)-1] == '.' {
+					mant = mant[:len(mant)-1]
+				}
+			} else if alt && len(mant) == 1 {
+				return append(dst[:start], formatFloat(v, conv, prec, alt, neg)...)
+			}
+			dst = append(dst, mant...)
+			dst = append(dst, e[i:]...)
+		}
+	default:
+		return append(dst, formatFloat(v, conv, prec, alt, neg)...)
+	}
+	if conv < 'a' {
+		for k := start; k < len(dst); k++ {
+			if c := dst[k]; c >= 'a' && c <= 'z' {
+				dst[k] = c - 0x20
+			}
+		}
+	}
+	return dst
 }
 
 // formatFloat formats v, not negative, as C's %f, %e, %g or %a do.

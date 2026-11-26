@@ -743,6 +743,7 @@ func c23Header(p unsafe.Pointer) (d, n, m, b8, sh, bits uintptr) {
 			// if it was freed since, this is not found again.)
 			*he = cHeaderEnt{
 				page: la / pageSize, epoch: epoch, base: s.base(), limit: s.limit, elemsize: s.elemsize, divMul: s.divMul,
+				span: uintptr(unsafe.Pointer(s)),
 				bits: uintptr(unsafe.Pointer(b)), sizes: uintptr(unsafe.Pointer(b)) + s.cBitsWords()*4,
 			}
 		}
@@ -770,6 +771,7 @@ type cHeaderEnt struct {
 	limit    uintptr
 	elemsize uintptr
 	bits     uintptr // *cBits
+	span     uintptr // *mspan
 	sizes    uintptr // the uint16s after the classes; of a large span, the address of its csize
 	divMul   uint32
 	large    bool // a span of one large object: c23Header does not use it
@@ -1821,6 +1823,7 @@ func cHeaderOf(a uintptr) (h cHeaderEnt, base, size uintptr, ok bool) {
 		}
 		*he = cHeaderEnt{
 			page: a / pageSize, epoch: epoch, base: s.base(), limit: s.limit, elemsize: s.elemsize, divMul: s.divMul,
+			span: uintptr(unsafe.Pointer(s)),
 			bits: uintptr(unsafe.Pointer(b)), sizes: uintptr(unsafe.Pointer(b)) + s.cBitsWords()*4,
 		}
 		if s.spanclass.sizeclass() == 0 {

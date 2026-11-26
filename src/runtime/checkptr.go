@@ -348,25 +348,22 @@ func checkptrConvC1(p unsafe.Pointer, elem *_type, load bool) unsafe.Pointer {
 			return p
 		}
 	}
+	tagged := a&cPtrBits != 0
 	a &^= cPtrBits
 	p = unsafe.Pointer(a)
+	if !tagged && elem.Pointers() && cConvFast(a, elem, load) {
+		return p
+	}
 	if !elem.Pointers() && elem.Align_ > 1 && !load {
 		// The usual conversion that comes here: to integers, in
 		// words of an object of C's that nothing claimed yet, the
 		// first use of what malloc gave. They are claimed at once.
-		if s := spanOfHeap(a); s != nil && s.spanclass.c() && !s.isUserArenaChunk {
-			if b := s.cBitsOf(); b != nil {
-				const word = goarch.PtrSize
-				i := s.objIndex(a)
-				sbase := s.base()
-				limit := sbase + i*s.elemsize + s.cSizeOf(i)
-				if a < limit && elem.Size_ <= limit-a && !s.isFree(i) {
-					lo, hi := alignDown(a, word), alignUp(a+elem.Size_, word)
-					w, k := (lo-sbase)/word, (hi-lo)/word
-					if w%cClassPer+k <= cClassPer && cClaimScalars(b, w, k) {
-						return p
-					}
-				}
+		if h, base, size, ok := cHeaderOf(a); ok && a-base < size && elem.Size_ <= size-(a-base) {
+			const word = goarch.PtrSize
+			lo, hi := alignDown(a, word), alignUp(a+elem.Size_, word)
+			w, k := (lo-h.base)/word, (hi-lo)/word
+			if w%cClassPer+k <= cClassPer && cClaimScalars((*cBits)(unsafe.Pointer(h.bits)), w, k) {
+				return p
 			}
 		}
 	}

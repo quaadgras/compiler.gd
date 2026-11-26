@@ -20,7 +20,13 @@ type cPlan struct {
 	elem   *_type
 	c      bool // the conversion is C's (cWant)
 	unions bool // cUnionRefType was set when it was made
-	words  [cPlanMaxWords]cPlanWord
+	// For cConvFast: whether a word of it is a union's, and, if it
+	// has cClassPer words or less, the classes of all of them as
+	// they are in a span's bits.
+	hasUnion bool
+	small    bool
+	cls      uint32
+	words    [cPlanMaxWords]cPlanWord
 }
 
 type cPlanWord struct {
@@ -65,8 +71,13 @@ func cPlanOf(elem *_type, c bool) *cPlan {
 		}
 		if class, uid := cUnionID(elem, off); uid != 0 {
 			e.want, e.id, e.union = class, uid, true
+			pl.hasUnion = true
+		}
+		if k < cClassPer {
+			pl.cls |= e.want << (2 * k)
 		}
 	}
+	pl.small = words <= cClassPer
 	atomicstorep(unsafe.Pointer(slot), unsafe.Pointer(pl))
 	return pl
 }
@@ -151,5 +162,61 @@ func cClaimFresh(s *mspan, b *cBits, w, a uintptr, plan *cPlan) bool {
 		cClaimStats.claims.Add(int64(k))
 	}
 	releasem(mp)
+	return true
+}
+
+// cConvFast is the conversion of a, the address of a pointer of C's
+// with none of the bits that say more of it, to a pointer to elem, for
+// the two cases that most conversions to a type with pointers are, and
+// reports whether it was one of them; if not, nothing was done, and
+// checkptrConvC1 goes on.
+//
+// The words that the value is over, in a small or large object of C's
+// that the P remembers (cHeaderOf), are either claimed for just what
+// elem has there, the same classes and the same types of pointers: then
+// the conversion claims nothing and changes nothing, as each one after
+// the first of a pointer to an element of an array of C++'s does. Or
+// nothing claimed any of them: then they are claimed at once
+// (cClaimFresh), the first conversion of what malloc gave.
+//
+// No union is in it: elem has none, the word at a is not one that says
+// where a union begins or has its pointer, and a is not where the value
+// of a union would begin in its object (cUnionConv).
+func cConvFast(a uintptr, elem *_type, load bool) bool {
+	const word = goarch.PtrSize
+	if a&(word-1) != 0 || getg().m.cprobe {
+		return false
+	}
+	plan := cPlanOf(elem, true)
+	if plan == nil || plan.hasUnion || !plan.small {
+		return false
+	}
+	h, base, size, ok := cHeaderOf(a)
+	if !ok || a-base > size || elem.Size_ > size-(a-base) || a-base == cUnionHeader {
+		return false
+	}
+	b := (*cBits)(unsafe.Pointer(h.bits))
+	w, k := (a-h.base)/word, elem.Size_/word
+	v := uint64(atomic.Load(b.word(w / cClassPer)))
+	if w%cClassPer+k > cClassPer {
+		v |= uint64(atomic.Load(b.word(w/cClassPer+1))) << 32
+	}
+	have := uint32(v>>(w%cClassPer*2)) & uint32(uint64(1)<<(2*k)-1)
+	s := (*mspan)(unsafe.Pointer(h.span))
+	if have == 0 {
+		return !load && cClaimFresh(s, b, w, a, plan)
+	}
+	if have != plan.cls {
+		return false
+	}
+	ids := s.cIDsOf()
+	for j := uintptr(0); j < k; j++ {
+		if e := &plan.words[j]; e.want == cTyped && (ids == nil || atomic.Load(ids.word(w+j)) != e.id) {
+			return false
+		}
+	}
+	if plan.words[0].want != cTyped && ids != nil && atomic.Load(ids.word(w)) >= cUnionStartID {
+		return false
+	}
 	return true
 }
