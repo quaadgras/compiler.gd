@@ -1707,6 +1707,10 @@ func (lv *Liveness) emitStackVars(gd *base.Invocation) *obj.LSym {
 	return x
 }
 
+// StackVarType reports whether t is a type that the table of a frame's
+// variables may have a variable of.
+func StackVarType(t *types.Type) bool { return stackVarType(t) }
+
 // stackVarType reports whether t is a type that the runtime has a
 // descriptor for: not one of the compiler's own, which no variable that
 // a pointer is to has.

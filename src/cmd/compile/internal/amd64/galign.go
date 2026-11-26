@@ -17,6 +17,7 @@ func Init(arch *ssagen.ArchInfo) {
 	arch.MAXWIDTH = 1 << 50
 
 	arch.ZeroRange = zerorange
+	arch.CShadowRange = cshadowrange
 	arch.Ginsnop = ginsnop
 
 	arch.SSAMarkMoves = ssaMarkMoves

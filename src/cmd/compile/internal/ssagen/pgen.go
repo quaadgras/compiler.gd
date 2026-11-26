@@ -257,6 +257,11 @@ func (s *ssafn) AllocFrame(gd *base.Invocation, f *ssa.Func) {
 			s.stksize++
 		}
 		s.stksize += w
+		if n.Addrtaken() && f.Config.CShadow() {
+			// The words of the variable are words of the
+			// shadow of C's memory (cShadowFrame).
+			s.stksize = types.RoundUp(s.stksize, 8)
+		}
 		s.stksize = types.RoundUp(s.stksize, types.StackAlignment(n.Type()))
 		if a := types.StackAlignment(n.Type()); a > int64(types.RegSize) {
 			s.stkalign = a

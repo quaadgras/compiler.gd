@@ -136,6 +136,9 @@ func dataVarLookup(addr uintptr) (base, size uintptr, typ *_type, typed bool, st
 				}
 			}
 			if off-uintptr(e.off) < n {
+				if cShadowOn && known {
+					cShadowVar(start+uintptr(e.off), n, t, i == dataVarRodata || i == dataVarRelro)
+				}
 				return start + uintptr(e.off), n, t, known, varFound, mod, lo
 			}
 			// Between two symbols of the section.

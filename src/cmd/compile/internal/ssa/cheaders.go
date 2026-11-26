@@ -8,6 +8,7 @@ import (
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/types"
 	"cmd/internal/obj"
+	"cmd/internal/objabi"
 	"cmd/internal/src"
 	"sort"
 )
@@ -106,6 +107,30 @@ func cheaders(f *Func) {
 	}
 
 	root := cRoots(f)
+
+	if f.Config.CShadow() {
+		// A root is asked of the shadow if every check of it can
+		// be: one that still needs what c23Header says keeps all
+		// of its checks, which cost little after the call.
+		not := map[*Value]bool{}
+		for _, v := range sites {
+			r := root(v.Args[1])
+			if r == nil {
+				continue
+			}
+			if r.Op == OpLocalAddr || !cShadowSite(f, v, true) {
+				not[r] = true
+			}
+		}
+		rest := sites[:0]
+		for _, v := range sites {
+			r := root(v.Args[1])
+			if r != nil && not[r] || !cShadowSite(f, v, false) {
+				rest = append(rest, v)
+			}
+		}
+		sites = rest
+	}
 
 	sdom := f.Sdom()
 	ln := f.loopnest()
@@ -962,4 +987,213 @@ func cEach(x, n int64) int64 {
 		r |= uint64(x) << (8 * i)
 	}
 	return int64(r)
+}
+
+// The shadow of C's memory (runtime/cshadow.go), and what the byte of a
+// word says beside its class (runtime's cWordIn, cWordStart).
+const (
+	CShadowBase  = 0x1000_0000_0000
+	CShadowIn    = 0x80
+	CShadowStart = 0x40
+	CShadowRO    = 0x20
+)
+
+// CShadow reports whether the compiled code asks the shadow of C's
+// memory what a word is: where the runtime has one (its cShadowOn).
+func (c *Config) CShadow() bool {
+	return c.CHeaders() && c.arch == "amd64" && c.ctxt.Headtype == objabi.Hlinux && !c.ctxt.Flag_linkshared && c.gd.Debug.NoCShadow == 0
+}
+
+// cConstOff returns k if q is p and a constant number of bytes more.
+func cConstOff(q, p *Value) (int64, bool) {
+	var k int64
+	for depth := 0; depth < 16; depth++ {
+		if q == p {
+			return k, true
+		}
+		switch q.Op {
+		case OpOffPtr:
+			k += q.AuxInt
+			q = q.Args[0]
+		case OpAddPtr, OpAdd64:
+			if c := q.Args[1]; c.Op == OpConst64 {
+				k += c.AuxInt
+				q = q.Args[0]
+			} else if c := q.Args[0]; c.Op == OpConst64 && q.Op == OpAdd64 {
+				k += c.AuxInt
+				q = q.Args[1]
+			} else {
+				return 0, false
+			}
+		case OpSub64:
+			if c := q.Args[1]; c.Op == OpConst64 {
+				k -= c.AuxInt
+				q = q.Args[0]
+			} else {
+				return 0, false
+			}
+		case OpAnd64:
+			if c := q.Args[1]; c.Op == OpConst64 && c.AuxInt == ^CEnd {
+				q = q.Args[0]
+			} else {
+				return 0, false
+			}
+		case OpConvert, OpCopy:
+			q = q.Args[0]
+		default:
+			return 0, false
+		}
+	}
+	return 0, false
+}
+
+// cShadowSite makes v, a C23Slow, a comparison with the shadow of the
+// words it is about, if what they are there says all that the check
+// asks: it reports whether it did. What is true of v then is for the
+// runtime, which may still let it through.
+func cShadowSite(f *Func, v *Value, dry bool) bool {
+	b, pos, mem := v.Block, v.Pos, v.Args[2]
+	check, mask, size := v.AuxInt&0xff, v.AuxInt>>8&0xff, v.AuxInt>>16
+	uintptrT, u64T, boolT := f.Config.Types.Uintptr, f.Config.Types.UInt64, f.Config.Types.Bool
+	c := func(x int64) *Value { return f.ConstInt64(uintptrT, x) }
+	// window returns the n shadow bytes from the one of the word that
+	// is back words before the word of a.
+	window := func(a *Value, back, n int64) *Value {
+		sh := b.NewValue2(pos, OpLsh64x64, uintptrT, a, c(17))
+		sh.AuxInt = 1
+		idx := b.NewValue2(pos, OpRsh64Ux64, uintptrT, sh, c(20))
+		idx.AuxInt = 1
+		at := b.NewValue2(pos, OpAdd64, uintptrT, idx, c(CShadowBase-back))
+		t := f.Config.Types.UInt8
+		switch {
+		case n > 4:
+			t = u64T
+		case n > 2:
+			t = f.Config.Types.UInt32
+		case n > 1:
+			t = f.Config.Types.UInt16
+		}
+		x := b.NewValue2(pos, OpLoad, t, b.NewValue2(pos, OpConvert, t.PtrTo(), at, mem), mem)
+		switch t.Size() {
+		case 1:
+			x = b.NewValue1(pos, OpZeroExt8to64, u64T, x)
+		case 2:
+			x = b.NewValue1(pos, OpZeroExt16to64, u64T, x)
+		case 4:
+			x = b.NewValue1(pos, OpZeroExt32to64, u64T, x)
+		}
+		return x
+	}
+	each := func(x uint64, n int64) int64 {
+		var r uint64
+		for i := int64(0); i < n; i++ {
+			r |= x << (8 * i)
+		}
+		return int64(r)
+	}
+	words := (size + 7) / 8
+	switch check {
+	case CSlowArith:
+		if k, ok := cConstOff(v.Args[0], v.Args[1]); !ok || k == 0 || k%8 != 0 || k < -56 || k > 56 {
+			return false
+		}
+	case CSlowConvScalar, CSlowConv, CSlowStoreByte:
+		if size == 0 || words > 8 {
+			return false
+		}
+	case CSlowConvUntyped:
+	case CSlowStorePtr:
+		if size != 8 {
+			return false
+		}
+	default:
+		return false
+	}
+	if dry {
+		return true
+	}
+	q := b.NewValue2(pos, OpConvert, uintptrT, v.Args[0], mem)
+	// differ is not 0 if the words' bytes, under m, are not want.
+	differ := func(x *Value, m, want int64) *Value {
+		return b.NewValue2(pos, OpXor64, u64T, b.NewValue2(pos, OpAnd64, u64T, x, f.ConstInt64(u64T, m)), f.ConstInt64(u64T, want))
+	}
+	// finish makes v what d says, for a pointer q that has none of the
+	// bits that no address has, is aligned as mask says, and has what
+	// is converted or stored in the words that were looked at.
+	finish := func(d *Value) {
+		d = b.NewValue2(pos, OpOr64, u64T, d, b.NewValue2(pos, OpRsh64Ux64, u64T, q, c(47)))
+		if mask != 0 {
+			d = b.NewValue2(pos, OpOr64, u64T, d, b.NewValue2(pos, OpAnd64, u64T, q, c(mask)))
+		}
+		if size > 1 && mask&7 != 7 {
+			// What begins in the word so far that it ends
+			// in one more than were looked at.
+			last := b.NewValue2(pos, OpRsh64Ux64, u64T, b.NewValue2(pos, OpAdd64, u64T, b.NewValue2(pos, OpAnd64, u64T, q, c(7)), c(size-1)), c(3))
+			last.AuxInt = 1
+			d = b.NewValue2(pos, OpOr64, u64T, d, b.NewValue2(pos, OpXor64, u64T, last, c(words-1)))
+		}
+		slow := b.NewValue2(pos, OpNeq64, boolT, d, f.ConstInt64(u64T, 0))
+		v.copyOf(slow)
+	}
+	switch check {
+	case CSlowArith:
+		k, ok := cConstOff(v.Args[0], v.Args[1])
+		if !ok || k == 0 || k%8 != 0 || k < -56 || k > 56 {
+			return false
+		}
+		// q is in the object that the pointer was in if no word
+		// from the one after the lower of the two to the upper is
+		// the first of an object, and q's is in one.
+		var m, want int64
+		var x *Value
+		if k < 0 {
+			n := -k / 8
+			m = CShadowIn | each(CShadowStart, n)<<8
+			want = CShadowIn
+			x = window(q, 0, n+1)
+		} else {
+			n := k / 8
+			m = each(CShadowStart, n)<<8 | CShadowIn<<(8*n)
+			want = CShadowIn << (8 * n)
+			x = window(q, n, n+1)
+		}
+		// A pointer with the bit of an object's end, or any of
+		// the others, is the runtime's: what it is the end of is
+		// not what is at its address.
+		r := b.NewValue2(pos, OpRsh64Ux64, u64T, b.NewValue2(pos, OpConvert, uintptrT, v.Args[1], mem), c(54))
+		r.AuxInt = 1
+		d := b.NewValue2(pos, OpXor64, u64T, b.NewValue2(pos, OpAnd64, u64T, x, f.ConstInt64(u64T, m)), f.ConstInt64(u64T, want))
+		v.reset(OpNeq64)
+		v.AddArg2(b.NewValue2(pos, OpOr64, u64T, d, r), f.ConstInt64(u64T, 0))
+		return true
+	case CSlowConvScalar:
+		if size == 0 || words > 8 {
+			return false
+		}
+		finish(differ(window(q, 0, words), each(CShadowIn|3, words), each(CShadowIn|CClassScalar, words)))
+		return true
+	case CSlowConvUntyped:
+		finish(differ(window(q, 0, 1), CShadowIn|3, CShadowIn|2))
+		return true
+	case CSlowConv:
+		if size == 0 || words > 8 {
+			return false
+		}
+		finish(differ(window(q, 0, words), each(CShadowIn, words), each(CShadowIn, words)))
+		return true
+	case CSlowStorePtr:
+		if size != 8 {
+			return false
+		}
+		mask = 7
+		finish(differ(window(q, 0, 1), CShadowIn|CShadowRO|3, CShadowIn|2))
+		return true
+	case CSlowStoreByte:
+		if size == 0 || words > 8 {
+			return false
+		}
+		finish(differ(window(q, 0, words), each(CShadowIn|CShadowRO|2, words), each(CShadowIn, words)))
+		return true
+	}
+	return false
 }

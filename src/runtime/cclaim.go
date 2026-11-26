@@ -751,7 +751,7 @@ func c23Header(p unsafe.Pointer) (d, n, m, b8, sh, bits uintptr) {
 			*he = cHeaderEnt{
 				page: la / pageSize, epoch: epoch, base: s.base(), limit: s.limit, elemsize: s.elemsize, divMul: s.divMul,
 				span: uintptr(unsafe.Pointer(s)),
-				bits: uintptr(unsafe.Pointer(b)), sizes: uintptr(unsafe.Pointer(b)) + s.cBitsWords()*4,
+				bits: uintptr(unsafe.Pointer(b)), sizes: uintptr(s.cSizesOf()),
 			}
 		}
 		return a - base, size, size, base - s.base(), 3, uintptr(unsafe.Pointer(b))
@@ -1826,7 +1826,7 @@ func cHeaderOf(a uintptr) (h cHeaderEnt, base, size uintptr, ok bool) {
 		*he = cHeaderEnt{
 			page: a / pageSize, epoch: epoch, base: s.base(), limit: s.limit, elemsize: s.elemsize, divMul: s.divMul,
 			span: uintptr(unsafe.Pointer(s)),
-			bits: uintptr(unsafe.Pointer(b)), sizes: uintptr(unsafe.Pointer(b)) + s.cBitsWords()*4,
+			bits: uintptr(unsafe.Pointer(b)), sizes: uintptr(s.cSizesOf()),
 		}
 		if s.spanclass.sizeclass() == 0 {
 			// One object, whose size is the span's to say.

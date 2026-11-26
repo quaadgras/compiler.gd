@@ -21,6 +21,7 @@ import (
 
 	"cmd/compile/internal/abi"
 	"cmd/compile/internal/base"
+	"cmd/compile/internal/bitvec"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/liveness"
 	"cmd/compile/internal/objw"
@@ -28,6 +29,7 @@ import (
 	"cmd/compile/internal/rttype"
 	"cmd/compile/internal/ssa"
 	"cmd/compile/internal/staticdata"
+	"cmd/compile/internal/typebits"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
 	"cmd/internal/obj"
@@ -9794,7 +9796,95 @@ func defframe(s *State, e *ssafn, f *ssa.Func) {
 	}
 
 	// Zero final range.
-	Arch.ZeroRange(e.gd, pp, p, frame+lo, hi-lo, &state)
+	p = Arch.ZeroRange(e.gd, pp, p, frame+lo, hi-lo, &state)
+
+	if f.Config.CShadow() && Arch.CShadowRange != nil {
+		cShadowFrame(e, pp, p)
+	}
+}
+
+// cShadowFrame writes, where the function is entered, the shadow of the
+// variables of its frame that a pointer can be to: the words that are
+// whole in a variable with what they hold, no pointer or a pointer of
+// its type, the first of them as the first of an object, and the word
+// after them as the first of another, so that nothing made of a pointer
+// to the variable by a step that the shadow is asked of is let out of
+// it. A variable that the frame's table does not have (liveness's
+// emitStackVars), or that does not begin at a word, has no word that
+// is in it for the shadow: the runtime is asked.
+//
+// Nothing is written when the function returns: no pointer is left to
+// its frame then, and the function whose frame is there next writes its
+// own. (The runtime writes those of a stack that it copies:
+// cShadowStack.)
+func cShadowFrame(e *ssafn, pp *objw.Progs, p *obj.Prog) *obj.Prog {
+	fn := e.curfn
+	if ir.StackVars(e.gd, fn) <= 0 {
+		return p
+	}
+	const in, start = ssa.CShadowIn, ssa.CShadowStart
+	// fill makes the bytes of n, from the at'th of bytes and set,
+	// which it returns as long as n needs them.
+	fill := func(n *ir.Name, bytes []byte, set []bool, at int) ([]byte, []bool) {
+		t := n.Type()
+		whole := int(t.Size() / 8)
+		count := whole + 1
+		ok := n.FrameOffset()%8 == 0 && liveness.StackVarType(t)
+		if !ok {
+			count = int((n.FrameOffset()&7 + t.Size() + 7) / 8)
+		}
+		for len(bytes) < at+count {
+			bytes, set = append(bytes, start), append(set, false)
+		}
+		for i := 0; i < count; i++ {
+			bytes[at+i], set[at+i] = start, true
+		}
+		if !ok {
+			return bytes, set
+		}
+		var bv bitvec.BitVec
+		if t.HasPointers() {
+			bv = bitvec.New(e.gd, int32((t.Size()+7)/8))
+			typebits.SetNoCheck(t, 0, bv)
+		}
+		for i := 0; i < whole; i++ {
+			bytes[at+i] = in | ssa.CClassScalar
+			if t.HasPointers() && bv.Get(int32(i)) {
+				bytes[at+i] = in | 3
+			}
+		}
+		bytes[at] |= start
+		return bytes, set
+	}
+	var autos []*ir.Name
+	for _, n := range fn.Dcl {
+		if n.Op() != ir.ONAME || !n.Addrtaken() || n.Type() == nil || n.Type().Size() <= 0 || n.Esc() == ir.EscHeap {
+			continue
+		}
+		switch {
+		case n.Class == ir.PAUTO && n.Used(), n.Class == ir.PPARAMOUT && n.IsOutputParamInRegisters():
+			autos = append(autos, n)
+		case n.Class == ir.PPARAM, n.Class == ir.PPARAMOUT:
+			bytes, set := fill(n, nil, nil, 0)
+			p = Arch.CShadowRange(e.gd, pp, p, n, bytes, set)
+		}
+	}
+	if len(autos) == 0 {
+		return p
+	}
+	slices.SortStableFunc(autos, func(a, b *ir.Name) int { return cmp.Compare(a.FrameOffset(), b.FrameOffset()) })
+	lo := autos[0].FrameOffset() &^ 7
+	var bytes []byte
+	var set []bool
+	// From the highest to the lowest: the word after a variable may
+	// be the first of the next one, which says what it is.
+	for i := len(autos) - 1; i >= 0; i-- {
+		v := autos[i]
+		bytes, set = fill(v, bytes, set, int((v.FrameOffset()&^7-lo)/8))
+	}
+	// (A variable that begins in the word that the lowest begins in
+	// is at its address or after.)
+	return Arch.CShadowRange(e.gd, pp, p, autos[0], bytes, set)
 }
 
 // For generating consecutive jump instructions to model a specific branching

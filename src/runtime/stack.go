@@ -472,6 +472,10 @@ func stackfree(stk stack) {
 	if stk.lo+n < stk.hi {
 		throw("bad stack size")
 	}
+	if cShadowOn {
+		// No variable is there any more.
+		memclrNoHeapPointers(unsafe.Pointer(cShadowOf(stk.lo)), n/goarch.PtrSize)
+	}
 	if stackDebug >= 1 {
 		println("stackfree", v, n)
 		memclrNoHeapPointers(v, n) // for testing, clobber stack data
@@ -1005,6 +1009,12 @@ func copystack(gp *g, newsize uintptr) {
 	adjustpanics(gp, &adjinfo)
 	if adjinfo.sghi != 0 {
 		adjinfo.sghi += adjinfo.delta
+	}
+
+	if cShadowOn {
+		// The variables of the frames are what they were, where
+		// they are now.
+		memmove(unsafe.Pointer(cShadowOf(new.hi-ncopy)), unsafe.Pointer(cShadowOf(old.hi-ncopy)), ncopy/goarch.PtrSize)
 	}
 
 	// Swap out old stack for new one

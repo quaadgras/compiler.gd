@@ -111,9 +111,13 @@ func (s *mspan) cIDsOf() *cBits {
 	return (*cBits)(atomic.Loadp(unsafe.Pointer(&s.cids)))
 }
 
-// cBitsBytes returns the size of the cBits of s.
+// cBitsBytes returns the size of what s.cbits is: the classes, unless
+// they are in the shadow (cshadow.go), and the sizes.
 func (s *mspan) cBitsBytes() uintptr {
-	n := s.cBitsWords() * 4
+	n := uintptr(8)
+	if !cShadowOn {
+		n = s.cBitsWords() * 4
+	}
 	if s.spanclass.sizeclass() != 0 {
 		n += uintptr(s.nelems) * 2
 	}
@@ -125,7 +129,23 @@ func (s *mspan) cBitsBytes() uintptr {
 //
 //go:nosplit
 func (s *mspan) cBitsOf() *cBits {
-	return (*cBits)(atomic.Loadp(unsafe.Pointer(&s.cbits)))
+	b := (*cBits)(atomic.Loadp(unsafe.Pointer(&s.cbits)))
+	if cShadowOn && b != nil {
+		return (*cBits)(unsafe.Pointer(cShadowOf(s.base())))
+	}
+	return b
+}
+
+// cSizesOf returns the uint16 sizes of the objects of s, a span of small
+// objects of C's that has cBits.
+//
+//go:nosplit
+func (s *mspan) cSizesOf() unsafe.Pointer {
+	b := atomic.Loadp(unsafe.Pointer(&s.cbits))
+	if cShadowOn {
+		return add(b, 8)
+	}
+	return add(b, s.cBitsWords()*4)
 }
 
 // word returns the i'th uint32 of the ids.
@@ -200,11 +220,10 @@ func (s *mspan) cSizeOf(i uintptr) uintptr {
 	if s.spanclass.sizeclass() == 0 {
 		return atomic.Loaduintptr(&s.csize)
 	}
-	b := s.cBitsOf()
-	if b == nil {
+	if s.cBitsOf() == nil {
 		return 0
 	}
-	return uintptr(*(*uint16)(add(unsafe.Pointer(b), s.cBitsWords()*4+i*2)))
+	return uintptr(*(*uint16)(add(s.cSizesOf(), i*2)))
 }
 
 // The cBits that were freed, by the power of two that their size was
@@ -269,7 +288,7 @@ func cMetaFree(b *cBits, n uintptr) {
 func (s *mspan) newCBits() *cBits {
 	b := cMetaAlloc(s.cBitsBytes())
 	atomic.StorepNoWB(unsafe.Pointer(&s.cbits), unsafe.Pointer(b))
-	return b
+	return s.cBitsOf()
 }
 
 // newCIDs gives s its ids, or returns the ones that it was given
@@ -293,12 +312,16 @@ func (s *mspan) newCIDs() *cBits {
 //
 // mheap_.lock must be held.
 func (s *mspan) freeCBits() {
-	if b := s.cBitsOf(); b != nil {
+	if b := (*cBits)(atomic.Loadp(unsafe.Pointer(&s.cbits))); b != nil {
 		n := s.cBitsBytes()
 		// (What the Ps remember of the span is no longer so.)
 		cHeaderEpoch.Add(1)
 		atomic.StorepNoWB(unsafe.Pointer(&s.cbits), nil)
 		cMetaFree(b, n)
+		if cShadowOn {
+			// The memory is in no object of C's any more.
+			memclrNoHeapPointers(unsafe.Pointer(cShadowOf(s.base())), s.npages*pageSize/goarch.PtrSize)
+		}
 	}
 	if b := s.cIDsOf(); b != nil {
 		n := s.cIDsBytes()
@@ -318,9 +341,61 @@ func (s *mspan) cInitObject(x, size uintptr) {
 	if s.spanclass.sizeclass() == 0 {
 		atomic.Storeuintptr(&s.csize, size)
 	} else {
-		*(*uint16)(add(unsafe.Pointer(b), s.cBitsWords()*4+s.objIndex(x)*2)) = uint16(size)
+		*(*uint16)(add(s.cSizesOf(), s.objIndex(x)*2)) = uint16(size)
 	}
-	cClassSet(b, (x-s.base())/goarch.PtrSize, s.elemsize/goarch.PtrSize, cUnclaimed)
+	cObjectBytes(b, (x-s.base())/goarch.PtrSize, s.elemsize/goarch.PtrSize, size, false)
+}
+
+// What the byte of a word of C's says beside its class.
+const (
+	cWordIn    = 0x80 // the whole word is in what its object was asked for
+	cWordStart = 0x40 // the word is the first of its object's slot
+	cWordRO    = 0x20 // nothing is stored in the word: a constant of the program
+)
+
+// cObjectBytes writes the bytes of the n words of a slot, from the
+// w'th of b, for an object that was asked for size bytes: which of the
+// words are whole in it, and that the first is the first. The words'
+// classes are as they were if keep is set, and nothing's otherwise. The
+// bytes are the slot's own: nothing else writes them now, though the
+// uint64s that they are in may be changed for the bytes of other
+// objects (cClassSet), which leaves these as they are.
+//
+//go:nosplit
+func cObjectBytes(b *cBits, w, n, size uintptr, keep bool) {
+	whole := size / goarch.PtrSize
+	p := add(unsafe.Pointer(b), w)
+	if keep {
+		for i := uintptr(0); i < n; i++ {
+			q := (*uint8)(add(p, i))
+			v := *q & 3
+			if i < whole {
+				v |= cWordIn
+			}
+			if i == 0 {
+				v |= cWordStart
+			}
+			*q = v
+		}
+		return
+	}
+	i := uintptr(0)
+	for ; i+8 <= whole; i += 8 {
+		*(*uint64)(add(p, i)) = cClassLows * cWordIn
+	}
+	for ; i < whole; i++ {
+		*(*uint8)(add(p, i)) = cWordIn
+	}
+	for ; i < n && i%8 != 0; i++ {
+		*(*uint8)(add(p, i)) = 0
+	}
+	for ; i+8 <= n; i += 8 {
+		*(*uint64)(add(p, i)) = 0
+	}
+	for ; i < n; i++ {
+		*(*uint8)(add(p, i)) = 0
+	}
+	*(*uint8)(p) |= cWordStart
 }
 
 // mallocC allocates size bytes for C, zeroed: malloc. The object is one
@@ -635,8 +710,9 @@ func c23Trim(x unsafe.Pointer, size uintptr) unsafe.Pointer {
 	if s.spanclass.sizeclass() == 0 {
 		atomic.Storeuintptr(&s.csize, size)
 	} else {
-		*(*uint16)(add(unsafe.Pointer(s.cBitsOf()), s.cBitsWords()*4+i*2)) = uint16(size)
+		*(*uint16)(add(s.cSizesOf(), i*2)) = uint16(size)
 	}
+	cObjectBytes(s.cBitsOf(), (uintptr(x)-s.base())/goarch.PtrSize, s.elemsize/goarch.PtrSize, size, true)
 	return x
 }
 

@@ -512,6 +512,7 @@ func mallocinit() {
 
 	// Initialize the heap.
 	mheap_.init()
+	cShadowInit()
 	mcache0 = allocmcache()
 	lockInit(&gcBitsArenas.lock, lockRankGcBitsArenas)
 	lockInit(&profInsertLock, lockRankProfInsert)

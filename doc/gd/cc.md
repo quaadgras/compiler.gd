@@ -409,12 +409,47 @@ memory-safe `unsafe` (`unsafe.md`, "Compatible types", is the first):
     pointer that nothing is loaded through if what it points to is not
     what the type says.
 
-  The look is at the class of the word, the low two bits of a byte that the compiled code
-  loads where it has the header of what the pointer points into, with
-  the call for what that does not let through. A store to a member
-  through a pointer to a struct is not looked at: the struct's
-  conversion claimed the member's word, and a `void *` member is not
-  compatible with a word that is a pointer of a type.
+  The look is at the class of the word, the low two bits of a byte
+  that the compiled code loads where it has the header of what the
+  pointer points into, with the call for what that does not let
+  through. A store to a member through a pointer to a struct is not
+  looked at: the struct's conversion claimed the member's word, and a
+  `void *` member is not compatible with a word that is a pointer of a
+  type.
+- **The shadow.** A word's byte says more than its class: whether the
+  word is whole in what its object was asked for, whether it is the
+  first word of an object, and whether nothing may be stored in it. On
+  linux/amd64 the bytes are not in what a span keeps but at an address
+  that is the word's own, shifted, in a part of the address space that
+  the program has no other use for (`runtime/cshadow.go`: sixteen
+  terabytes that are reserved, of which only what is written is
+  memory). The compiled code then asks what a word is with one load and
+  no call that finds its object first (`ssa`'s `cShadowSite`), where
+  that says all the check asks:
+  - a conversion to a type without pointers of a few words, a load or
+    a store of bytes, a store of a `void *`: the bytes of the words are
+    compared with what they are to be, whole in an object and of the
+    class;
+  - a step by a constant of a few words: the result's word is in an
+    object, and no word from the one after the lower of the two
+    addresses to the upper is the first of an object. A pointer that
+    has the bit of an object's end is the runtime's, since what is at
+    its address is the next object.
+
+  A step by a number that is not constant still asks for the header,
+  and a pointer that has such a step among its checks keeps all of them
+  there. The variables are in the shadow too. A function writes the
+  bytes of the variables of its frame that a pointer can be to where it
+  is entered (`ssagen`'s `cShadowFrame`), and nothing where it returns:
+  no pointer is left to the frame of a function that returned
+  (`escape-bits.md`), and the function whose frame is there next writes
+  its own, with the word after each variable as the first of another. A
+  stack that is copied takes its bytes with it and one that is freed
+  leaves none. A variable of the program's data is written the first
+  time that the runtime looks it up. A word that is only partly in its
+  object, as the last of an object of 12 bytes, is in none for the
+  shadow, and the runtime is asked. `-d=nocshadow=1` compiles a package
+  without the shadow's checks.
 - **`memcpy`, `memmove` and `memset` stay in the objects they are
   given**, both of them for a copy, or the program stops (`checkptr:
   memory copied or set past the end of its object`), and what they
