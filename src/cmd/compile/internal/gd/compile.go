@@ -9,7 +9,6 @@ import (
 	"internal/race"
 	"math/rand"
 	"slices"
-	"strings"
 	"sync"
 
 	"cmd/compile/internal/base"
@@ -51,21 +50,10 @@ func enqueueFunc(gd *base.Invocation, fn *ir.Func, symABIs *ssagen.SymABIs) {
 		return // we'll get this as part of its enclosing function
 	}
 
-	// Experiment (-d=skipextinst): skip codegen for generic
-	// instantiations that a dependency's object file already provides.
-	// These are DUPOK symbols; the linker keeps only one copy anyway.
-	// See gd/extinst.go and golang.org/issue/56718.
-	if gd.Debug.SkipExtInst != 0 && len(fn.Body) != 0 {
-		if s := fn.Sym(); s != nil && s.Linkname == "" && strings.Contains(s.Name, "[") {
-			name := s.Pkg.Prefix + "." + s.Name
-			if from := extInstAvail(gd)[name]; from != "" {
-				gd.ExtInstSkipped = append(gd.ExtInstSkipped, name)
-				if gd.Debug.SkipExtInst > 1 {
-					gd.WarnfAt(fn.Pos(), "skipextinst: skipping %v (from %s)", fn, from)
-				}
-				return
-			}
-		}
+	// (-d=skipextinst: an imported package provides it. See
+	// gd/extinst.go and golang.org/issue/56718.)
+	if skipExtInstFunc(gd, fn) {
+		return
 	}
 
 	if ssagen.CreateWasmImportWrapper(gd, fn) {

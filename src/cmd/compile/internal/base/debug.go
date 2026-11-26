@@ -90,7 +90,7 @@ type DebugFlags struct {
 	Reshape               int    `help:"print information about expression reshaping"`
 	Shapify               int    `help:"print information about shaping recursive types"`
 	Simd                  int    `help:"print information about simd analysis and code transformation" concurrent:"ok"`
-	SkipExtInst           int    `help:"skip compiling generic instantiations owned by imported packages (1 skip, 2 skip+log)" concurrent:"ok"`
+	SkipExtInst           int    `help:"rely on imported packages for their generic instantiations (1 skip codegen, 3 treat as imported; 2 and 4 log)" concurrent:"ok"`
 	Slice                 int    `help:"print information about slice compilation"`
 	SoftFloat             int    `help:"force compiler to emit soft-float code" concurrent:"ok"`
 	StackVars             int    `help:"record the variables of each frame for the checks of unsafe pointers\n0: none\n1: those whose address is taken\n2: and those that have pointers (default)" concurrent:"ok"`

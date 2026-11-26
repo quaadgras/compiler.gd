@@ -8,7 +8,6 @@ import (
 	"internal/buildcfg"
 	"internal/pkgbits"
 	"io"
-	"slices"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
@@ -289,112 +288,7 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 	// Relocated extension data.
 	w.Bool(true)
 
-	// Record definition ABI so cross-ABI calls can be direct.
-	// This is important for the performance of calling some
-	// common functions implemented in assembly (e.g., bytealg).
-	w.Uint64(uint64(name.Func.ABI))
-
-	// Escape analysis.
-	for _, f := range name.Type().RecvParams() {
-		w.String(f.Note)
-	}
-	w.Bool(name.Func.TakesLocalBits) // gd: see escape/callbits.go
-	w.Len(len(name.Func.ParamShares))
-	for _, ps := range name.Func.ParamShares {
-		w.Len(int(ps.Share))
-		if w.Bool(ps.ShareTyped) {
-			w.Len(len(ps.ShareField))
-			for _, i := range ps.ShareField {
-				w.Len(int(i))
-			}
-		}
-		w.Len(int(ps.Via))
-		w.Len(int(ps.ViaDerefs))
-		w.Bool(ps.ViaDirect)
-		w.Len(int(ps.Results))
-		w.Len(int(ps.Heap))
-		w.Len(int(ps.Deep))
-		w.Len(int(ps.DeepDerefs))
-		w.Len(len(ps.MixLinks))
-		for _, l := range ps.MixLinks {
-			w.String(l.Key)
-			w.Len(int(l.Arg))
-			w.Len(int(l.Into))
-			w.Bool(l.Bad)
-		}
-		w.Len(len(ps.MixGroups))
-		for _, l := range ps.MixGroups {
-			w.String(l.Key)
-			w.Len(int(l.Arg))
-			w.Len(int(l.Into))
-			w.Bool(l.Bad)
-		}
-		w.Len(len(ps.StoreLinks))
-		for _, l := range ps.StoreLinks {
-			w.String(l.Key)
-			w.Len(int(l.Arg))
-		}
-		w.Len(len(ps.Links))
-		for _, l := range ps.Links {
-			w.String(l.Key)
-			w.Len(int(l.Arg))
-			w.Len(int(l.Derefs))
-		}
-	}
-	// The store types, as paths from the parameters' types (export
-	// data cannot name a type here).
-	for i, ps := range name.Func.ParamShares {
-		params := name.Type().RecvParams()
-		paths, ok := [][]uint8(nil), ps.StoreKnown && i < len(params)
-		for _, t := range ps.StoreTypes {
-			if !ok {
-				break
-			}
-			var p []uint8
-			p, ok = ir.TypePath(params[i].Type, t)
-			paths = append(paths, p)
-		}
-		if w.Bool(ok) {
-			slices.SortFunc(paths, slices.Compare)
-			paths = slices.CompactFunc(paths, slices.Equal)
-			w.Len(len(paths))
-			for _, p := range paths {
-				w.Len(len(p))
-				for _, s := range p {
-					w.Len(int(s))
-				}
-			}
-		}
-	}
-	w.Len(int(name.Func.Consumes)) // gd: see escape/move.go
-	w.Bool(name.Func.OwnedResult)
-	w.Bool(name.Func.PoolResult)
-	w.Len(int(name.Func.KeptChecked))
-	w.Len(int(name.Func.KeptByRecv))
-	w.Len(int(name.Func.KeptByAny))
-	w.Len(int(name.Func.KeptCalls))
-	w.Len(int(name.Func.DeepBits))
-	w.Len(int(name.Func.DirtyInto))
-	w.Bool(name.Func.ResultExact)
-	w.Len(int(name.Func.ResultDeep))
-	w.Len(int(name.Func.ResultFrom))
-	for _, ls := range [][]ir.ShareLink{name.Func.ResultLinks, name.Func.ResultStores} {
-		w.Len(len(ls))
-		for _, l := range ls {
-			w.String(l.Key)
-			w.Len(int(l.Arg))
-		}
-	}
-	w.Bool(name.Func.ShareOpaque)
-	w.Len(int(name.Func.StoresInto))
-
-	if inl := name.Func.Inl; w.Bool(inl != nil) {
-		w.Len(int(inl.Cost))
-		w.Bool(inl.CanDelayResults)
-		if buildcfg.Experiment.NewInliner {
-			w.String(inl.Properties)
-		}
-	}
+	writeFuncSummary(w, name)
 
 	w.Sync(pkgbits.SyncEOF)
 }

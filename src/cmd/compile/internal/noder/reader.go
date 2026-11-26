@@ -1271,123 +1271,8 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 	if r.Bool() {
 		assert(r.gd, name.Defn == nil)
 
-		fn.ABI = obj.ABI(r.Uint64())
-
-		// Escape analysis. One note per RecvParam. If the
-		// GdReturnOutBuf pragma was set above, RecvParams() already
-		// has the outBufs appended — the writer wrote matching
-		// N+outBufs notes. If the pragma is clear, RecvParams() is
-		// stock and the writer wrote N notes.
-		for _, f := range name.Type().RecvParams() {
-			f.Note = r.String()
-		}
-		fn.TakesLocalBits = r.Bool()
-		if n := r.Len(); n != 0 {
-			fn.ParamShares = make([]ir.ParamShare, n)
-			for i := range fn.ParamShares {
-				ps := &fn.ParamShares[i]
-				ps.Share = uint8(r.Len())
-				if r.Bool() {
-					ps.ShareTyped = true
-					ps.ShareField = make([]uint8, r.Len())
-					for i := range ps.ShareField {
-						ps.ShareField[i] = uint8(r.Len())
-					}
-				}
-				ps.Via = uint16(r.Len())
-				ps.ViaDerefs = uint8(r.Len())
-				ps.ViaDirect = r.Bool()
-				ps.Results = uint8(r.Len())
-				ps.Heap = uint8(r.Len())
-				ps.Deep = uint16(r.Len())
-				ps.DeepDerefs = uint8(r.Len())
-				if n := r.Len(); n != 0 {
-					ps.MixLinks = make([]ir.MixLink, n)
-					for j := range ps.MixLinks {
-						ps.MixLinks[j] = ir.MixLink{Key: r.String(), Arg: uint8(r.Len()), Into: uint16(r.Len()), Bad: r.Bool()}
-					}
-				}
-				if n := r.Len(); n != 0 {
-					ps.MixGroups = make([]ir.MixLink, n)
-					for j := range ps.MixGroups {
-						ps.MixGroups[j] = ir.MixLink{Key: r.String(), Arg: uint8(r.Len()), Into: uint16(r.Len()), Bad: r.Bool()}
-					}
-				}
-				if n := r.Len(); n != 0 {
-					ps.StoreLinks = make([]ir.ShareLink, n)
-					for j := range ps.StoreLinks {
-						ps.StoreLinks[j] = ir.ShareLink{Key: r.String(), Arg: uint8(r.Len())}
-					}
-				}
-				if n := r.Len(); n != 0 {
-					ps.Links = make([]ir.ShareLink, n)
-					for j := range ps.Links {
-						ps.Links[j] = ir.ShareLink{Key: r.String(), Arg: uint8(r.Len()), Derefs: uint8(r.Len())}
-					}
-				}
-			}
-			params := name.Type().RecvParams()
-			for i := range fn.ParamShares {
-				ps := &fn.ParamShares[i]
-				if !r.Bool() {
-					continue
-				}
-				ok := i < len(params)
-				n := r.Len()
-				for j := 0; j < n; j++ {
-					p := make([]uint8, r.Len())
-					for k := range p {
-						p[k] = uint8(r.Len())
-					}
-					if !ok {
-						continue
-					}
-					t := ir.TypeAtPath(params[i].Type, p)
-					if t == nil {
-						ok = false
-						continue
-					}
-					ps.StoreTypes = append(ps.StoreTypes, t)
-				}
-				ps.StoreKnown = ok
-				if !ok {
-					ps.StoreTypes = nil
-				}
-			}
-		}
-		fn.Consumes = uint16(r.Len())
-		fn.OwnedResult = r.Bool()
-		fn.PoolResult = r.Bool()
-		fn.KeptChecked = uint16(r.Len())
-		fn.KeptByRecv = uint16(r.Len())
-		fn.KeptByAny = uint16(r.Len())
-		fn.KeptCalls = uint16(r.Len())
-		fn.DeepBits = uint16(r.Len())
-		fn.DirtyInto = uint16(r.Len())
-		fn.ResultExact = r.Bool()
-		fn.ResultDeep = uint16(r.Len())
-		fn.ResultFrom = uint16(r.Len())
-		for _, ls := range []*[]ir.ShareLink{&fn.ResultLinks, &fn.ResultStores} {
-			if n := r.Len(); n != 0 {
-				*ls = make([]ir.ShareLink, n)
-				for j := range *ls {
-					(*ls)[j] = ir.ShareLink{Key: r.String(), Arg: uint8(r.Len())}
-				}
-			}
-		}
-		fn.ShareOpaque = r.Bool()
-		fn.StoresInto = uint16(r.Len())
-
-		if r.Bool() {
-			fn.Inl = &ir.Inline{
-				Cost:            int32(r.Len()),
-				CanDelayResults: r.Bool(),
-			}
-			if buildcfg.Experiment.NewInliner {
-				fn.Inl.Properties = r.String()
-			}
-		}
-	} else {
+		readFuncSummary(r, name)
+	} else if !r.hasTypeParams() || !r.importExtInst(name, method) {
 		r.addBody(name.Func, method)
 	}
 	r.Sync(pkgbits.SyncEOF)
@@ -4382,7 +4267,8 @@ func methodWrapper(gd *base.Invocation, derefs int, tbase *types.Type, method *t
 	wrappee := method.Type.Recv().Type
 	if types.Identical(wrapper, wrappee) ||
 		!types.IsMethodApplicable(wrapper, method) ||
-		!reflectdata.NeedEmit(gd, tbase) {
+		!reflectdata.NeedEmit(gd, tbase) ||
+		extInstWrapper(gd, sym) {
 		return
 	}
 
@@ -4519,7 +4405,7 @@ func wrapMethodValue(gd *base.Invocation, recvType *types.Type, method *types.Fi
 	// Declare and initialize variable holding receiver.
 	recv := ir.NewHiddenParam(gd, pos, fn, typecheck.Lookup(gd, ".this"), recvType)
 
-	if !needed {
+	if !needed || extInstWrapper(gd, sym) {
 		return
 	}
 
