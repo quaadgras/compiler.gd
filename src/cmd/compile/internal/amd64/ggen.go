@@ -39,25 +39,28 @@ func cshadowrange(gd *base.Invocation, pp *objw.Progs, p *obj.Prog, n *ir.Name, 
 	}
 	p = pp.Append(gd, p, x86.ASHRQ, obj.TYPE_CONST, 0, 3, obj.TYPE_REG, x86.REG_R12, 0)
 	p = pp.Append(gd, p, x86.ABTSQ, obj.TYPE_CONST, 0, 44, obj.TYPE_REG, x86.REG_R12, 0)
-	for i := 0; i < len(bytes); {
-		if !set[i] {
-			i++
-			continue
-		}
-		switch left := len(bytes) - i; {
-		case left >= 4:
-			v := uint32(bytes[i]) | uint32(bytes[i+1])<<8 | uint32(bytes[i+2])<<16 | uint32(bytes[i+3])<<24
-			p = pp.Append(gd, p, x86.AMOVL, obj.TYPE_CONST, 0, int64(int32(v)), obj.TYPE_MEM, x86.REG_R12, int64(i))
-			i += 4
-		case left >= 2:
-			v := uint16(bytes[i]) | uint16(bytes[i+1])<<8
-			p = pp.Append(gd, p, x86.AMOVW, obj.TYPE_CONST, 0, int64(int16(v)), obj.TYPE_MEM, x86.REG_R12, int64(i))
-			i += 2
-		default:
-			p = pp.Append(gd, p, x86.AMOVB, obj.TYPE_CONST, 0, int64(int8(bytes[i])), obj.TYPE_MEM, x86.REG_R12, int64(i))
-			i++
+	store := func(bytes []byte, set func(int) bool) {
+		for i := 0; i < len(bytes); {
+			if !set(i) {
+				i++
+				continue
+			}
+			switch left := len(bytes) - i; {
+			case left >= 4:
+				v := uint32(bytes[i]) | uint32(bytes[i+1])<<8 | uint32(bytes[i+2])<<16 | uint32(bytes[i+3])<<24
+				p = pp.Append(gd, p, x86.AMOVL, obj.TYPE_CONST, 0, int64(int32(v)), obj.TYPE_MEM, x86.REG_R12, int64(i))
+				i += 4
+			case left >= 2:
+				v := uint16(bytes[i]) | uint16(bytes[i+1])<<8
+				p = pp.Append(gd, p, x86.AMOVW, obj.TYPE_CONST, 0, int64(int16(v)), obj.TYPE_MEM, x86.REG_R12, int64(i))
+				i += 2
+			default:
+				p = pp.Append(gd, p, x86.AMOVB, obj.TYPE_CONST, 0, int64(int8(bytes[i])), obj.TYPE_MEM, x86.REG_R12, int64(i))
+				i++
+			}
 		}
 	}
+	store(bytes, func(i int) bool { return set[i] })
 	return p
 }
 

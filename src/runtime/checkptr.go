@@ -138,6 +138,9 @@ func cObjectOf(a uintptr) (base, size uintptr, kind int) {
 	if gp := getg(); gp.stack.lo <= a && a < gp.stack.hi {
 		// A variable of a frame (stackvar.go). What is in none
 		// that is known is that address and nothing more.
+		if base, size, ok := cShadowStackVar(a); ok {
+			return base, size, cObjStack
+		}
 		if base, size, _, _, state := checkptrVar(a); state == varFound {
 			return base, size, cObjStack
 		}
@@ -279,6 +282,17 @@ func checkptrArithmeticC(p unsafe.Pointer, originals []unsafe.Pointer) unsafe.Po
 // one pointer, as most are: the compiled code has nothing to put
 // anywhere for the call.
 func checkptrArithmeticC1(p, original unsafe.Pointer) unsafe.Pointer {
+	// The usual one that comes here is in an object of C's that the
+	// compiled code could not say for itself, as a large one: the P
+	// remembers its span (cHeaderOf).
+	if r, a := uintptr(p), uintptr(original); (r|a)&(cPtrBits|cPoison) == 0 && a >= minLegalPointer {
+		if _, base, size, ok := cHeaderOf(a); ok && r-base <= size {
+			if r-base == size {
+				return unsafe.Pointer(r | cEnd)
+			}
+			return p
+		}
+	}
 	o := [1]unsafe.Pointer{original}
 	return checkptrArithmeticC(p, o[:])
 }

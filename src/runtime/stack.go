@@ -474,7 +474,7 @@ func stackfree(stk stack) {
 	}
 	if cShadowOn {
 		// No variable is there any more.
-		memclrNoHeapPointers(unsafe.Pointer(cShadowOf(stk.lo)), n/goarch.PtrSize)
+		cShadowClear(stk.lo, n)
 	}
 	if stackDebug >= 1 {
 		println("stackfree", v, n)

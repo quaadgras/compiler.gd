@@ -807,6 +807,15 @@ var cHeaderEpoch atomic.Uint64
 //
 //go:nosplit
 func c23HeaderVar(a, la uintptr) (d, n, m, b8, sh, bits uintptr) {
+	if gp := getg(); cShadowOn && gp.stack.lo <= la && la < gp.stack.hi {
+		// A variable that the shadow has: its words' bytes are
+		// there as an object of C's has them, those that hold a
+		// pointer as pointers of a type, which the compiled code
+		// lets nothing through for.
+		if base, size, ok := cShadowStackVar(la); ok {
+			return a - base, size, size, 0, 3, uintptr(unsafe.Pointer(cShadowOf(base)))
+		}
+	}
 	base, size, typ, typed, state := checkptrVar(la)
 	if state != varFound {
 		return 0, 0, 0, 0, 63, uintptr(unsafe.Pointer(&cStoreFree))

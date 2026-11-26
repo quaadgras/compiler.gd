@@ -320,7 +320,7 @@ func (s *mspan) freeCBits() {
 		cMetaFree(b, n)
 		if cShadowOn {
 			// The memory is in no object of C's any more.
-			memclrNoHeapPointers(unsafe.Pointer(cShadowOf(s.base())), s.npages*pageSize/goarch.PtrSize)
+			cShadowClear(s.base(), s.npages*pageSize)
 		}
 	}
 	if b := s.cIDsOf(); b != nil {
@@ -351,6 +351,10 @@ const (
 	cWordIn    = 0x80 // the whole word is in what its object was asked for
 	cWordStart = 0x40 // the word is the first of its object's slot
 	cWordRO    = 0x20 // nothing is stored in the word: a constant of the program
+	// The number of bytes of a word that are in its object, if not
+	// all of them are and the object ends in the word.
+	cWordPart      = 0x1c
+	cWordPartShift = 2
 )
 
 // cObjectBytes writes the bytes of the n words of a slot, from the
@@ -371,6 +375,8 @@ func cObjectBytes(b *cBits, w, n, size uintptr, keep bool) {
 			v := *q & 3
 			if i < whole {
 				v |= cWordIn
+			} else if i == whole {
+				v |= uint8(size%goarch.PtrSize) << cWordPartShift
 			}
 			if i == 0 {
 				v |= cWordStart
@@ -396,6 +402,9 @@ func cObjectBytes(b *cBits, w, n, size uintptr, keep bool) {
 		*(*uint8)(add(p, i)) = 0
 	}
 	*(*uint8)(p) |= cWordStart
+	if whole < n {
+		*(*uint8)(add(p, whole)) |= uint8(size%goarch.PtrSize) << cWordPartShift
+	}
 }
 
 // mallocC allocates size bytes for C, zeroed: malloc. The object is one

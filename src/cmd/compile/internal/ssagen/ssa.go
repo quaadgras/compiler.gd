@@ -9854,6 +9854,8 @@ func cShadowFrame(e *ssafn, pp *objw.Progs, p *obj.Prog) *obj.Prog {
 			}
 		}
 		bytes[at] |= start
+		// (The bytes of the last word that are the variable's.)
+		bytes[at+whole] |= byte(t.Size()%8) << 2
 		return bytes, set
 	}
 	var autos []*ir.Name

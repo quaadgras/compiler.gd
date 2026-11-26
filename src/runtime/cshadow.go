@@ -30,6 +30,14 @@ func cShadowOf(a uintptr) *uint8 {
 	return (*uint8)(unsafe.Pointer(uintptr(cShadowBase) + a>>3))
 }
 
+// cShadowClear makes the n bytes at a memory that the shadow says
+// nothing of.
+//
+//go:nosplit
+func cShadowClear(a, n uintptr) {
+	memclrNoHeapPointers(unsafe.Pointer(cShadowOf(a)), n/8)
+}
+
 // The variables of a goroutine's stack are in the shadow too: a function
 // writes the bytes of those of its frame that a pointer can be to when
 // it is entered (cmd/compile/internal/ssagen's cShadowFrame), and
@@ -58,6 +66,13 @@ func cShadowVar(base, n uintptr, t *_type, ro bool) {
 	if t != nil && t.Pointers() {
 		ptrs = base + t.PtrBytes
 	}
+	if part := (base + n) & 7; part != 0 {
+		// The word that the variable ends in, with as many
+		// bytes of it as are the variable's.
+		if p := cShadowOf(hi); *p == 0 {
+			*p = uint8(part) << cWordPartShift
+		}
+	}
 	for a := hi - 8; ; a -= 8 {
 		v := uint8(cWordIn | cScalar)
 		if a < ptrs {
@@ -73,4 +88,45 @@ func cShadowVar(base, n uintptr, t *_type, ro bool) {
 		}
 		*cShadowOf(a) = v
 	}
+}
+
+// cShadowScan is the most words of a variable that cShadowStackVar
+// looks at to find where it begins, and where it ends.
+const cShadowScan = 1024
+
+// cShadowStackVar returns the variable of a goroutine's stack that the
+// address a is in, as the shadow has it: where it begins and its size.
+// ok is false if the shadow does not say: the word at a is not whole in
+// a variable that a function wrote when it was entered, or is far from
+// where the variable begins or ends. The stack walk is what says then
+// (checkptrVar).
+//
+//go:nosplit
+func cShadowStackVar(a uintptr) (base, size uintptr, ok bool) {
+	if !cShadowOn {
+		return
+	}
+	base = a &^ 7
+	for n := 0; ; n++ {
+		f := *cShadowOf(base)
+		if f&cWordIn == 0 || n == cShadowScan {
+			return 0, 0, false
+		}
+		if f&cWordStart != 0 {
+			break
+		}
+		base -= 8
+	}
+	for e, n := a&^7+8, 0; n < cShadowScan; e, n = e+8, n+1 {
+		f := *cShadowOf(e)
+		if f&cWordIn == 0 {
+			// The word after the variable, or the one that it
+			// ends in.
+			return base, e - base + uintptr(f&cWordPart)>>cWordPartShift, true
+		}
+		if f&cWordStart != 0 {
+			return base, e - base, true
+		}
+	}
+	return 0, 0, false
 }

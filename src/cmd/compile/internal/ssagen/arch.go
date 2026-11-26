@@ -39,8 +39,8 @@ type ArchInfo struct {
 	// (runtime/cshadow.go), from the byte of the word that the
 	// variable n of the frame begins in on: those that set has, and
 	// any that it writes with them. Only called at function entry,
-	// as ZeroRange. nil where the compiled code does not ask the
-	// shadow (ssa's CShadow).
+	// as ZeroRange. nil where the compiled code
+	// does not ask the shadow (ssa's CShadow).
 	CShadowRange func(gd *base.Invocation, pp *objw.Progs, p *obj.Prog, n *ir.Name, bytes []byte, set []bool) *obj.Prog
 
 	Ginsnop func(*base.Invocation, *objw.Progs) *obj.Prog
