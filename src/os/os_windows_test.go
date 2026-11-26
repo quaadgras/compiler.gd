@@ -434,6 +434,11 @@ func mustHaveWorkstation(t *testing.T) {
 	}
 }
 
+// (gd: the structure that NetShareAdd is given, which has pointers, is
+// given as bytes, which a program is not let look at pointers as:
+// doc/gd/unsafe.md.)
+//
+//go:nocheckptr
 func TestNetworkSymbolicLink(t *testing.T) {
 	testenv.MustHaveSymlink(t)
 

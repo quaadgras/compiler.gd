@@ -200,6 +200,9 @@ type TOKEN_GROUPS struct {
 	Groups     [1]SID_AND_ATTRIBUTES
 }
 
+// (gd: of the bytes that the system filled: see GetTokenGroups.)
+//
+//go:nocheckptr
 func (g *TOKEN_GROUPS) AllGroups() []SID_AND_ATTRIBUTES {
 	return (*[(1 << 28) - 1]SID_AND_ATTRIBUTES)(unsafe.Pointer(&g.Groups[0]))[:g.GroupCount:g.GroupCount]
 }

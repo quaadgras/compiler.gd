@@ -160,6 +160,9 @@ func TestEnumWindows(t *testing.T) {
 	}
 }
 
+// (gd: the function comes back from the system as an integer.)
+//
+//go:nocheckptr
 func callback(timeFormatString unsafe.Pointer, lparam uintptr) uintptr {
 	(*(*func())(unsafe.Pointer(&lparam)))()
 	return 0 // stop enumeration

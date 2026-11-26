@@ -29,6 +29,10 @@ import (
 // addUserAccount creates a local user account.
 // It returns the name and password of the new account.
 // Multiple programs or goroutines calling addUserAccount simultaneously will not choose the same directory.
+// (gd: the structure that NetUserAdd is given, which has pointers, is
+// given as bytes: doc/gd/unsafe.md.)
+//
+//go:nocheckptr
 func addUserAccount(t *testing.T) (name, password string) {
 	t.TempDir()
 	pattern := t.Name()
