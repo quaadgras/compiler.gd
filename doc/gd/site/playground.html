@@ -27,16 +27,37 @@
   .progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; }
   .progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
   .progress[hidden] { display: none; }
+  :root { --hl-kw: #b93a0a; --hl-type: #1f6391; --hl-str: #2f7d4a; --hl-num: #7b4aa6; --hl-com: #6f6a63; }
+  @media (prefers-color-scheme: dark) {
+    :root { --hl-kw: #fb923c; --hl-type: #7fc1ea; --hl-str: #6fcf8e; --hl-num: #c9a5f5; --hl-com: #9a948c; }
+  }
   .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .86rem; line-height: 1.55; tab-size: 4; }
   .editor { display: flex; }
   .gutter {
     flex: none; overflow: hidden; padding: 1rem .6rem 1rem .9rem; text-align: right; color: var(--muted); opacity: .6;
     user-select: none; white-space: pre; border-right: 1px solid var(--line); min-width: 2.6rem;
   }
-  textarea {
-    flex: 1; min-width: 0; min-height: 22rem; margin: 0; padding: 1rem; border: 0; border-radius: 0; resize: vertical;
-    background: transparent; color: var(--fg); white-space: pre; overflow: auto; caret-color: var(--accent);
+  /* The text is drawn twice: coloured, in a pre that takes no input, and
+     under the caret in the textarea over it, whose own text is not
+     seen. The two have one font and one padding, and the pre is moved
+     as the textarea is scrolled. */
+  .code { position: relative; flex: 1; min-width: 0; display: flex; overflow: hidden; }
+  .hl {
+    position: absolute; top: 0; left: 0; min-width: 100%; margin: 0; padding: 1rem; border: 0; border-radius: 0; overflow: visible;
+    background: transparent; color: var(--fg); white-space: pre; pointer-events: none;
   }
+  .hl .k { color: var(--hl-kw); }
+  .hl .t { color: var(--hl-type); }
+  .hl .s { color: var(--hl-str); }
+  .hl .n { color: var(--hl-num); }
+  .hl .c { color: var(--hl-com); font-style: italic; }
+  textarea {
+    position: relative; flex: 1; min-width: 0; min-height: 22rem; margin: 0; padding: 1rem; border: 0; border-radius: 0; resize: vertical;
+    background: transparent; color: transparent; white-space: pre; overflow: auto; caret-color: var(--accent);
+  }
+  textarea::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); color: transparent; }
+  /* (Where the colours are forced, the textarea's own text is the one to read.) */
+  @media (forced-colors: active) { textarea { color: CanvasText; } .hl { visibility: hidden; } }
   textarea:focus { outline: none; }
   .editor:focus-within { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
   .pbar.mid { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--bg); padding: .4rem 1rem; font-size: .8rem; min-height: 2.1rem; }
@@ -85,8 +106,11 @@
       <div class="progress" id="progress" hidden><i></i></div>
     </div>
     <div class="editor">
-      <div class="gutter mono" id="gutter" aria-hidden="true">1</div>
-      <textarea id="src" class="mono" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="Source (Go, or C)"></textarea>
+      <div class="gutter mono" aria-hidden="true"><div id="gutter">1</div></div>
+      <div class="code">
+        <pre class="hl mono" id="hl" aria-hidden="true"></pre>
+        <textarea id="src" class="mono" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="Source (Go, or C)"></textarea>
+      </div>
     </div>
     <div class="pbar mid"><span class="label">Output</span><div class="build" id="build" aria-live="polite"></div></div>
     <pre class="out mono" id="out" aria-live="polite"></pre>
@@ -349,8 +373,62 @@ const numberLines = () => {
   shownLines = n;
   gutter.textContent = Array.from({ length: n }, (_, i) => i + 1).join('\n') + '\n';
 };
-src.addEventListener('input', numberLines);
-src.addEventListener('scroll', () => { gutter.scrollTop = src.scrollTop; });
+// Colours, for Go and for C: the words of the language, the types and
+// functions that every program has, strings, numbers and comments. One
+// pass over the text, which is short; what it does not know is plain.
+const words = (s) => new Set(s.split(' '));
+const langs = {
+  go: {
+    k: words('break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var'),
+    t: words('any bool byte comparable complex64 complex128 error float32 float64 int int8 int16 int32 int64 rune string uint uint8 uint16 uint32 uint64 uintptr ' +
+      'true false nil iota append cap clear close complex copy delete imag len make max min new panic print println real recover'),
+  },
+  c: {
+    k: words('alignas alignof auto break case const constexpr continue default do else enum extern for goto if inline nullptr register restrict return sizeof static static_assert struct switch thread_local typedef typeof union volatile while ' +
+      '_Alignas _Alignof _Atomic _Generic _Noreturn _Static_assert _Thread_local'),
+    t: words('bool char double float int long short signed unsigned void size_t ssize_t ptrdiff_t intptr_t uintptr_t int8_t int16_t int32_t int64_t uint8_t uint16_t uint32_t uint64_t wchar_t FILE NULL true false _Bool _Complex'),
+  },
+};
+// (As the worker tells them apart: a Go file's first line of code is its package clause.)
+const isGo = (text) => /^\s*package\b/.test(text.replace(/\/\*[^]*?\*\/|\/\/[^\n]*/g, ''));
+const token = /\/\/[^\n]*|\/\*[^]*?(?:\*\/|(?![^]))|"(?:[^"\\\n]|\\.)*"?|`[^`]*`?|'(?:[^'\\\n]|\\.)*'?|\b(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(?:\.[\d_]*)?(?:[eE][+-]?\d+)?)[a-zA-Z]*|\.\d[\d_]*(?:[eE][+-]?\d+)?|[A-Za-z_]\w*|^[ \t]*#[ \t]*\w+/gm;
+const escapeHTML = (s) => s.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'));
+const hl = $('hl');
+function colour(text) {
+  const go = isGo(text), lang = go ? langs.go : langs.c;
+  let html = '', at = 0;
+  for (const m of text.matchAll(token)) {
+    const w = m[0], c = w[0];
+    let cls = '';
+    if (c === '/' && (w[1] === '/' || w[1] === '*')) cls = 'c';
+    else if (c === '"' || c === "'" || (c === '`' && go)) cls = 's';
+    else if (c === '`') continue;
+    else if ((c >= '0' && c <= '9') || c === '.') cls = 'n';
+    else if (/^[ \t]*#/.test(w)) { if (go) continue; cls = 'k'; }
+    else if (lang.k.has(w)) cls = 'k';
+    else if (lang.t.has(w)) cls = 't';
+    else continue;
+    html += escapeHTML(text.slice(at, m.index)) + `<span class="${cls}">${escapeHTML(w)}</span>`;
+    at = m.index + w.length;
+  }
+  // (A last line that is empty has its height in a pre only if something follows it.)
+  return html + escapeHTML(text.slice(at)) + '\n';
+}
+let painted = null;
+const paint = () => {
+  if (src.value === painted) return;
+  painted = src.value;
+  hl.innerHTML = colour(painted);
+};
+// (Moved, not scrolled: the textarea scrolls further than its text is
+// long, by the height of its scroll bar, which the others have none of.)
+const follow = () => {
+  gutter.style.transform = `translateY(${-src.scrollTop}px)`;
+  hl.style.transform = `translate(${-src.scrollLeft}px, ${-src.scrollTop}px)`;
+};
+src.addEventListener('input', () => { paint(); numberLines(); follow(); });
+src.addEventListener('scroll', follow);
+paint();
 numberLines();
 if (/Mac|iPhone|iPad/.test(navigator.platform)) {
   $('hint').textContent = '⌘ ↵';
@@ -374,6 +452,7 @@ async function loadShared() {
   if (!m) return;
   try {
     src.value = await decode(m[1]);
+    paint();
     numberLines();
     $('example').value = '';
   } catch {
@@ -506,6 +585,7 @@ stop.onclick = () => {
 $('example').onchange = (e) => {
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
   src.value = examples[e.target.value];
+  paint();
   numberLines();
   clear();
 };
