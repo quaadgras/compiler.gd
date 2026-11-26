@@ -387,6 +387,11 @@ type ConvExpr struct {
 	// to point to that has none: it needs no check (walk's
 	// markWholeView).
 	CUnchecked bool
+
+	// CRecheck is set for a conversion of a pointer of C's to its own
+	// type that walk put where a pointer whose claims waited is used
+	// for more than a load (walk's deferClaims): it is checked whole.
+	CRecheck bool
 }
 
 // A ViewKind says whether a conversion to a pointer views a string, a

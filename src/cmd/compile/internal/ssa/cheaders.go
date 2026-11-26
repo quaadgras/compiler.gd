@@ -7,6 +7,7 @@ package ssa
 import (
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/types"
+	"cmd/internal/obj"
 	"cmd/internal/src"
 	"sort"
 )
@@ -132,7 +133,19 @@ func cheaders(f *Func) {
 	}
 	headers := map[*Value][]*header{}
 	var aux *AuxCall
+	// lastMems is what findLastMems says, until a call is put
+	// somewhere (endMem).
+	var lastMems []*Value
+	defer func() {
+		if lastMems != nil {
+			f.Cache.freeValueSlice(lastMems)
+		}
+	}()
 	lookup := func(b *Block, pos src.XPos, r, mem *Value) (*header, *Value) {
+		if lastMems != nil {
+			f.Cache.freeValueSlice(lastMems)
+			lastMems = nil
+		}
 		if aux == nil {
 			results := make([]*types.Type, 6)
 			for i := range results {
@@ -228,7 +241,25 @@ func cheaders(f *Func) {
 	// anchor looks r up in the block of the C23Slow v, in the memory
 	// that v is in: everything that the block leads to uses the
 	// call's memory after.
+	var anchorAt func(b *Block, mem *Value, pos src.XPos, r *Value) *header
 	anchor := func(v, r *Value) *header {
+		return anchorAt(v.Block, v.Args[2], v.Pos, r)
+	}
+	// endMem returns the memory at the end of b: lastMems is what
+	// findLastMems says, until a call is put somewhere.
+	idom := f.Idom()
+	endMem := func(b *Block) *Value {
+		if lastMems == nil {
+			lastMems = findLastMems(f)
+		}
+		for x := b; x != nil; x = idom[x.ID] {
+			if m := lastMems[x.ID]; m != nil {
+				return m
+			}
+		}
+		return nil
+	}
+	anchorAt = func(b *Block, mem *Value, pos src.XPos, r *Value) *header {
 		if users == nil {
 			users = map[*Value][]use{}
 			for _, b := range f.Blocks {
@@ -241,7 +272,6 @@ func cheaders(f *Func) {
 				}
 			}
 		}
-		b, mem := v.Block, v.Args[2]
 		// What r is made of in this block stays where it is.
 		deps := map[*Value]bool{}
 		var mark func(x *Value)
@@ -255,9 +285,14 @@ func cheaders(f *Func) {
 			}
 		}
 		mark(r)
-		h, after := lookup(b, v.Pos, r, mem)
+		h, after := lookup(b, pos, r, mem)
 		var stay []use
 		for _, u := range users[mem] {
+			if u.i >= len(u.v.Args) || u.v.Args[u.i] != mem {
+				// A check that was made a comparison since: it
+				// is in no memory now.
+				continue
+			}
 			at := u.v.Block
 			if u.v.Op == OpPhi {
 				at = at.Preds[u.i].b
@@ -273,20 +308,20 @@ func cheaders(f *Func) {
 		return h
 	}
 
-	for _, v := range sites {
+	process := func(v *Value) {
 		b := v.Block
 		r := root(v.Args[1])
 		if r == nil || !r.Type.IsPtrShaped() || r.Op == OpConstNil {
 			cSlowAlways(v)
-			continue
+			return
 		}
 		if r.Op == OpLocalAddr {
 			cSlowVariable(f, v, r)
-			continue
+			return
 		}
 		if !sdom.IsAncestorEq(r.Block, b) {
 			cSlowAlways(v)
-			continue
+			return
 		}
 		var h *header
 		for _, x := range headers[r] {
@@ -306,6 +341,43 @@ func cheaders(f *Func) {
 				}
 			}
 		}
+		if h == nil && len(byRoot[r]) > 1 && r.Op == OpLoad {
+			// Checks of r that none of them comes before, as
+			// those of a member that is used on two ways of an
+			// if: r is looked up where all of them are after,
+			// if that is not in a loop that one of them is out
+			// of. Only for a pointer that was loaded, which
+			// is used where it was loaded for: one that a loop
+			// steps is checked in the few places where it is
+			// stored through, and a lookup for each step would
+			// cost more than those.
+			l := b
+			for _, o := range byRoot[r] {
+				for !sdom.IsAncestorEq(l, o.Block) {
+					l = idom[l.ID]
+				}
+			}
+			// The call is put after the memory that l ends in,
+			// in the block that makes that memory: everything
+			// that uses it is after that block, so nothing is
+			// left to use it beside the call's.
+			if l != b {
+				if mem := endMem(l); mem != nil {
+					l = mem.Block
+				}
+			}
+			ok := l != b && sdom.IsAncestorEq(r.Block, l)
+			for _, o := range byRoot[r] {
+				if ll := ln.b2l[l.ID]; ll != nil && !inLoop(o.Block, ll) {
+					ok = false
+				}
+			}
+			if ok {
+				if mem := endMem(l); mem != nil {
+					h = anchorAt(l, mem, v.Pos, r)
+				}
+			}
+		}
 		if h == nil {
 			// Worth a call here if another check follows.
 			for _, o := range byRoot[r] {
@@ -317,7 +389,7 @@ func cheaders(f *Func) {
 		}
 		if h == nil {
 			cSlowAlways(v)
-			continue
+			return
 		}
 
 		pos, mem := v.Pos, v.Args[2]
@@ -447,6 +519,23 @@ func cheaders(f *Func) {
 			f.Fatalf("bad C23Slow %s", v.LongString())
 		}
 	}
+	for _, v := range sites {
+		b := v.Block
+		n := len(b.Values)
+		process(v)
+		if users != nil {
+			// What was made in the block for the check, in the
+			// memory that the check was in, is after a call
+			// that is put before the block later.
+			for _, x := range b.Values[n:] {
+				for i, a := range x.Args {
+					if a.Type.IsMemory() {
+						users[a] = append(users[a], use{x, i})
+					}
+				}
+			}
+		}
+	}
 }
 
 // cAddend returns the pointer that the integer v is made of by adding
@@ -563,8 +652,16 @@ func cSlowVariable(f *Func, v, r *Value) {
 // is one when its arguments' roots differ, and the others are found
 // again with that known, until none differ.
 func cRoots(f *Func) func(*Value) *Value {
+	same := cSameLoads(f)
 	base := func(v *Value) *Value {
 		for {
+			if v.Op == OpLoad {
+				// (One that loaded the same before is the root.)
+				if l := same[v]; l != nil {
+					return l
+				}
+				return v
+			}
 			switch v.Op {
 			case OpOffPtr, OpAddPtr, OpPtrIndex, OpCopy, OpNilCheck:
 				v = v.Args[0]
@@ -699,4 +796,151 @@ func cRoots(f *Func) func(*Value) *Value {
 		}
 	}
 	return root
+}
+
+// cSameLoads returns, for the loads of pointers of f that load what a
+// load before them loaded, that load: the same address in the same
+// memory, with nothing between the two but the checks of C's pointers.
+//
+// C++ reads a member again each time it is used, s.size() ? s.size() - 1
+// : 0, and each use is a pointer that is checked: the check may call the
+// runtime, so the memory after it is not the memory before it, and the
+// two loads are two values, each looked up by itself (c23Header). But a
+// check stores nothing that the program loads: what the runtime's
+// functions change in a pointer that is in memory is the bits that no
+// address has, and the object that the pointer points into is the same.
+// So the two loads have one root.
+//
+// The memory of a load is taken back through what a check leaves in it:
+// the calls of the checks, the stores to the compiler's own temporaries
+// that are made for a call (the pointers that arithmetic was on), and
+// the phis that join a check's two ways. Two loads are the same if their
+// addresses are the same offset from one value, and their memories go
+// back to the same one; the first must be where the second can use it.
+func cSameLoads(f *Func) map[*Value]*Value {
+	if !f.Config.gd.CObjects {
+		return nil
+	}
+	checks := map[*obj.LSym]bool{}
+	for _, name := range []string{"checkptrArithmeticC", "checkptrConvC", "checkptrConvCLoad"} {
+		checks[f.fe.Syslook(name)] = true
+	}
+	// temp reports whether p is the address of a temporary of the
+	// compiler's, or in one: nothing of the program's points there.
+	temp := func(p *Value) bool {
+		for p.Op == OpOffPtr || p.Op == OpCopy || p.Op == OpPtrIndex || p.Op == OpNilCheck {
+			p = p.Args[0]
+		}
+		if p.Op != OpLocalAddr {
+			return false
+		}
+		n, ok := p.Aux.(*ir.Name)
+		return ok && n.AutoTemp()
+	}
+	// canon is what was found for a memory, if it was found without
+	// meeting one that was being looked at (a loop, where the memory
+	// is taken for its own): loops counts those, and steps bounds
+	// the work for one load.
+	canon := map[*Value]*Value{}
+	doing := map[*Value]bool{}
+	loops, steps := 0, 0
+	var back func(m *Value, depth int) *Value
+	back = func(m *Value, depth int) *Value {
+		if depth == 0 {
+			steps = 0
+		}
+		if c, ok := canon[m]; ok {
+			return c
+		}
+		steps++
+		if doing[m] || depth > 64 || steps > 2000 {
+			loops++
+			return m
+		}
+		doing[m] = true
+		was := loops
+		defer func() {
+			delete(doing, m)
+		}()
+		c := m
+		switch m.Op {
+		case OpPhi:
+			var first *Value
+			for _, a := range m.Args {
+				x := back(a, depth+1)
+				if first == nil {
+					first = x
+				} else if first != x {
+					first = nil
+					break
+				}
+			}
+			if first != nil {
+				c = first
+			}
+		case OpSelectN:
+			if call := m.Args[0]; call.Op == OpStaticLECall {
+				fn := call.Aux.(*AuxCall).Fn
+				if checks[fn] || (fn == f.fe.Syslook("c23PtrStore") || fn == f.fe.Syslook("c23ByteStore")) && temp(call.Args[0]) {
+					c = back(call.Args[len(call.Args)-1], depth+1)
+				}
+			}
+		case OpStore, OpZero:
+			if temp(m.Args[0]) {
+				c = back(m.MemoryArg(), depth+1)
+			}
+		case OpVarDef, OpVarLive:
+			if n, ok := m.Aux.(*ir.Name); ok && n.AutoTemp() {
+				c = back(m.MemoryArg(), depth+1)
+			}
+		case OpInlMark:
+			// (Where a call that was inlined begins.)
+			c = back(m.MemoryArg(), depth+1)
+		}
+		if loops == was {
+			canon[m] = c
+		}
+		return c
+	}
+	type key struct {
+		p   *Value
+		off int64
+		mem *Value
+		t   *types.Type
+	}
+	sdom := f.Sdom()
+	first := map[key][]*Value{}
+	same := map[*Value]*Value{}
+	for _, b := range f.Blocks {
+		for _, v := range b.Values {
+			if v.Op != OpLoad || !v.Type.IsPtrShaped() {
+				continue
+			}
+			p, off := v.Args[0], int64(0)
+			for p.Op == OpOffPtr || p.Op == OpCopy || p.Op == OpNilCheck {
+				if p.Op == OpOffPtr {
+					off += p.AuxInt
+				}
+				p = p.Args[0]
+			}
+			if temp(p) {
+				continue
+			}
+			k := key{p, off, back(v.Args[1], 0), v.Type}
+			first[k] = append(first[k], v)
+		}
+	}
+	for _, loads := range first {
+		for _, v := range loads {
+			for _, l := range loads {
+				// l is before v: in a block that v's is after, or
+				// in the very memory that v is in.
+				if l != v && same[l] == nil && (l.Block != v.Block && sdom.IsAncestorEq(l.Block, v.Block) || l.Block == v.Block && l.Args[1] == v.Args[1] && l.ID < v.ID) {
+					same[v] = l
+					break
+				}
+			}
+		}
+	}
+	return same
 }

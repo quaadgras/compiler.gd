@@ -1328,6 +1328,11 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 			check = ssa.CSlowConv
 		case !elem.HasPointers() && size <= ssa.CConvWords*int64(s.config.PtrSize):
 			check = ssa.CSlowConvScalar
+			if n.LoadOnly {
+				// Integers are loaded from anything: only that
+				// they are in the object is asked.
+				check = ssa.CSlowConv
+			}
 		case elem.IsUnsafePtr() || elem.IsPtr() && elem.Elem().Size() == 0:
 			check = ssa.CSlowConvUntyped
 		}
@@ -10271,6 +10276,10 @@ func (e *ssafn) Syslook(name string) *obj.LSym {
 		return ir.Syms(e.gd).CheckPtrConvC
 	case "checkptrConvCLoad":
 		return ir.Syms(e.gd).CheckPtrConvCLoad
+	case "c23PtrStore":
+		return ir.Syms(e.gd).C23PtrStore
+	case "c23ByteStore":
+		return ir.Syms(e.gd).C23ByteStore
 	}
 	e.Fatalf(src.NoXPos, "unknown Syslook func %v", name)
 	return nil

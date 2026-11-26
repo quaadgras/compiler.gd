@@ -713,7 +713,7 @@ func c23Header(p unsafe.Pointer) (d, n, m, b8, sh, bits uintptr) {
 	epoch := cHeaderEpoch.Load()
 	if pp := gp.m.p.ptr(); pp != nil {
 		he = &pp.cHeaders[la/pageSize%uintptr(len(pp.cHeaders))]
-		if he.page == la/pageSize && he.epoch == epoch {
+		if he.page == la/pageSize && he.epoch == epoch && la < he.limit {
 			i := uintptr(uint64(la-he.base) * uint64(he.divMul) >> 32)
 			base := he.base + i*he.elemsize
 			size := uintptr(*(*uint16)(unsafe.Pointer(he.sizes + i*2)))
@@ -742,7 +742,7 @@ func c23Header(p unsafe.Pointer) (d, n, m, b8, sh, bits uintptr) {
 			// (The epoch is from before the span was found:
 			// if it was freed since, this is not found again.)
 			*he = cHeaderEnt{
-				page: la / pageSize, epoch: epoch, base: s.base(), elemsize: s.elemsize, divMul: s.divMul,
+				page: la / pageSize, epoch: epoch, base: s.base(), limit: s.limit, elemsize: s.elemsize, divMul: s.divMul,
 				bits: uintptr(unsafe.Pointer(b)), sizes: uintptr(unsafe.Pointer(b)) + s.cBitsWords()*4,
 			}
 		}
@@ -767,6 +767,7 @@ type cHeaderEnt struct {
 	page     uintptr // the number of the page; no page of the heap is 0
 	epoch    uint64
 	base     uintptr
+	limit    uintptr
 	elemsize uintptr
 	bits     uintptr // *cBits
 	sizes    uintptr // the uint16s after the classes

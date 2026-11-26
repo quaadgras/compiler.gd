@@ -28,7 +28,8 @@ func markWholeViews(gd *base.Invocation, fn *ir.Func, ro *ir.ReassignOracle) {
 	if !ir.ShouldCheckPtr(gd, fn, 1) {
 		return
 	}
-	markLoadOnly(fn)
+	stored := markLoadOnly(fn)
+	deferClaims(gd, fn, stored)
 	clipped := make(map[*ir.ConvExpr]bool)
 	ir.Visit(fn, func(n ir.Node) {
 		switch n.Op() {
@@ -64,7 +65,7 @@ func markWholeViews(gd *base.Invocation, fn *ir.Func, ro *ir.ReassignOracle) {
 // unsafe.Pointer to a pointer whose result is loaded through and
 // nothing else: *(*T)(p), (*T)(p).f and (*[N]T)(p)[i] where they are
 // values, and not what is assigned to, or whose address is taken.
-func markLoadOnly(fn *ir.Func) {
+func markLoadOnly(fn *ir.Func) map[ir.Node]bool {
 	// The places that are stored in, or whose addresses are taken:
 	// what is dereferenced for one of them is not only loaded.
 	stored := make(map[ir.Node]bool)
@@ -128,6 +129,7 @@ func markLoadOnly(fn *ir.Func) {
 			c.LoadOnly = true
 		}
 	})
+	return stored
 }
 
 // isViewConv reports whether n is a conversion from unsafe.Pointer to a
@@ -163,7 +165,7 @@ func markWholeView(gd *base.Invocation, fn *ir.Func, ro *ir.ReassignOracle, n *i
 	k := types.PartialView(src, off, n.Type().Elem(), size)
 	if k == types.NotWhole {
 		n.View = ir.ViewWhole
-		if gd.CObjects && !n.Type().Elem().HasPointers() && (!src.HasPointers() || off >= types.PtrDataSize(gd, src)) {
+		if gd.CObjects && !n.CRecheck && !n.Type().Elem().HasPointers() && (!src.HasPointers() || off >= types.PtrDataSize(gd, src)) {
 			// In a package of C's, a view with no pointer of
 			// what has none there: the pointer it is made of
 			// lets through the same loads and stores, for it
