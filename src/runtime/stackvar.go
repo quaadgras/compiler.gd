@@ -189,14 +189,18 @@ func checkptrVar(addr uintptr) (base, size uintptr, typ *_type, typed bool, stat
 		if pp == nil {
 			return dataVarAt(addr)
 		}
-		for i := range pp.varCache {
-			if e := &pp.varCache[i]; addr-e.base < e.size && e.next == 0 {
-				return e.base, e.size, (*_type)(unsafe.Pointer(e.typ)), e.typed, varFound
-			}
+		// A variable of the data is where it is for good, and a
+		// pointer to a string of C's is the same address each
+		// time it is used: what was found for an address is kept
+		// where the address says, apart from the variables of
+		// frames, which come and go.
+		e := &pp.dataCache[(addr>>3^addr>>9)%uintptr(len(pp.dataCache))]
+		if addr-e.base < e.size {
+			return e.base, e.size, (*_type)(unsafe.Pointer(e.typ)), e.typed, varFound
 		}
 		base, size, typ, typed, state = dataVarAt(addr)
 		if state == varFound {
-			pp.varCachePut(base, size, typ, typed, 0, 0, 0)
+			e.base, e.size, e.typ, e.typed = base, size, uintptr(unsafe.Pointer(typ)), typed
 		}
 		return
 	}
@@ -275,6 +279,13 @@ type varFrame struct {
 // says what function the frame is of, and so what its variables are,
 // for as long as the three are found again: a stack that moves has
 // other frame pointers.
+// A dataCacheEnt is a variable of the data that was looked up.
+type dataCacheEnt struct {
+	base, size uintptr
+	typ        uintptr // as varCacheEnt's
+	typed      bool
+}
+
 type varCacheEnt struct {
 	base, size      uintptr
 	typ             uintptr // a *_type of the program's types, which the collector need not see

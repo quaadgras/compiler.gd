@@ -45,6 +45,14 @@ func c23Extent(p unsafe.Pointer) (before, after uintptr, ok bool) {
 		}
 		return a - base, size - (a - base), true
 	}
+	if cInData(a) {
+		// A variable of the program's data, or the bytes of a
+		// string: a format, a name. (It is in no span.)
+		if base, size, _, _, state := checkptrVar(a); state == varFound && size != 0 {
+			return a - base, size - (a - base), true
+		}
+		return 0, 0, false
+	}
 	if s := spanOfHeap(a); s != nil {
 		if s.isUserArenaChunk {
 			return 0, 0, false
@@ -158,4 +166,13 @@ func c23IsObject(p unsafe.Pointer, t *_type) bool {
 //go:linkname c23NewObject
 func c23NewObject(t *_type) unsafe.Pointer {
 	return mallocgc(t.Size_, t, true)
+}
+
+// cInData reports whether a is in the data of the program's first
+// module, from its read-only data to its end: an address that is of no
+// span and of no stack.
+//
+//go:nosplit
+func cInData(a uintptr) bool {
+	return firstmoduledata.rodata <= a && a < firstmoduledata.end
 }

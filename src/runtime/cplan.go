@@ -70,3 +70,82 @@ func cPlanOf(elem *_type, c bool) *cPlan {
 	atomicstorep(unsafe.Pointer(slot), unsafe.Pointer(pl))
 	return pl
 }
+
+// cClaimFresh claims the words of a value of plan's type at a, the w'th
+// word of s, if nothing claimed any of them and the words that are to
+// be pointers hold nothing: what malloc gave, converted for the first
+// time, which is most conversions that claim anything. It reports
+// whether it did; if not, nothing is changed that cClaim's loop over
+// the words does not expect.
+//
+// It does for all the words what cClaimWord does for each: the ids
+// first, then the classes, a uint32 of them at once. Only while the
+// collector is not marking, which cannot begin before this is done: a
+// word that becomes one it looks at holds nothing, so there is nothing
+// to show it.
+func cClaimFresh(s *mspan, b *cBits, w, a uintptr, plan *cPlan) bool {
+	const word = goarch.PtrSize
+	k := plan.elem.Size_ / word
+	mp := acquirem()
+	if writeBarrier.enabled || mp.cprobe {
+		releasem(mp)
+		return false
+	}
+	for i := uintptr(0); i < k; {
+		c := min(k-i, cClassPer-(w+i)%cClassPer)
+		mask := uint32(uint64(1)<<(2*c)-1) << ((w + i) % cClassPer * 2)
+		if atomic.Load(b.word((w+i)/cClassPer))&mask != 0 {
+			releasem(mp)
+			return false
+		}
+		i += c
+	}
+	var ids *cBits
+	for i := uintptr(0); i < k; i++ {
+		e := &plan.words[i]
+		if e.want < cUntyped && !e.union {
+			continue
+		}
+		if e.want >= cUntyped && *(*uintptr)(unsafe.Pointer(a + i*word)) != 0 {
+			releasem(mp)
+			return false
+		}
+		if e.id != 0 {
+			if ids == nil {
+				if ids = s.cIDsOf(); ids == nil {
+					ids = s.newCIDs()
+				}
+			}
+			atomic.Store(ids.word(w+i), e.id)
+		}
+	}
+	for i := uintptr(0); i < k; {
+		c := min(k-i, cClassPer-(w+i)%cClassPer)
+		shift := (w + i) % cClassPer * 2
+		var val uint32
+		for j := uintptr(0); j < c; j++ {
+			val |= plan.words[i+j].want << (shift + 2*j)
+		}
+		p := b.word((w + i) / cClassPer)
+		mask := uint32(uint64(1)<<(2*c)-1) << shift
+		for {
+			old := atomic.Load(p)
+			if old&mask != 0 {
+				// Another thread claimed a word meanwhile: the
+				// rest is cClaim's to compare, word by word.
+				// (The ids that were stored are of words whose
+				// classes say that nothing claimed them.)
+				cClaimStats.claims.Add(int64(i))
+				releasem(mp)
+				return false
+			}
+			if atomic.Cas(p, old, old|val) {
+				break
+			}
+		}
+		i += c
+	}
+	cClaimStats.claims.Add(int64(k))
+	releasem(mp)
+	return true
+}

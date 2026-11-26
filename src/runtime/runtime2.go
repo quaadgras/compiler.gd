@@ -988,6 +988,7 @@ type p struct {
 	// The variables of the stack and of the data that the checks of
 	// unsafe pointers looked up last (stackvar.go).
 	varCache     [4]varCacheEnt
+	dataCache    [64]dataCacheEnt // gd: the variables of the data that were looked up, by address (stackvar.go)
 	varCacheNext uint8
 }
 

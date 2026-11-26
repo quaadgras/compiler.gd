@@ -266,6 +266,9 @@ func cClaim(s *mspan, i, p uintptr, elem *_type, n uintptr, load, c bool) {
 			mask = getGCMask(elem)
 		}
 	}
+	if plan != nil && n == 1 && !load && cClaimFresh(s, b, (lo-sbase)/word, lo, plan) {
+		return
+	}
 	// direct: what is stored through the pointer is looked at where
 	// it is stored (c23PtrStore), or nothing is, so it may be over a
 	// pointer of a type.
