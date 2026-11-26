@@ -443,8 +443,11 @@ func WidthModifier(f string) (size, n int, ok bool) {
 	return size, j, true
 }
 
-func FormatC(f string, ap *VaList) []byte {
-	var out []byte
+func FormatC(f string, ap *VaList) []byte { return AppendFormatC(nil, f, ap) }
+
+// AppendFormatC is FormatC that appends to out: printf formats into a
+// buffer of its frame.
+func AppendFormatC(out []byte, f string, ap *VaList) []byte {
 	for i := 0; i < len(f); i++ {
 		if f[i] != '%' {
 			out = append(out, f[i])

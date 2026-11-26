@@ -30,8 +30,15 @@ func Snprintf(s *c23.Void, n uint64, format *c23.Void, va ...any) int32 {
 func Vprintf(format, ap *c23.Void) int32 { return Vfprintf(c23.Stdio(1), format, ap) }
 
 func Vfprintf(f, format, ap *c23.Void) int32 {
-	b := c23.FormatC(c23.GoString(format), c23.VaOf(ap))
-	if !c23.FileOf(f).Write(b) {
+	fl := c23.FileOf(f)
+	var dst []byte
+	if fl.W != nil && fl.Wr {
+		// Formatted where the stream's buffer is free, which Write
+		// then finds in place.
+		dst = fl.W.AvailableBuffer()
+	}
+	b := c23.AppendFormatC(dst, c23.GoString(format), c23.VaOf(ap))
+	if !fl.Write(b) {
 		return -1
 	}
 	return int32(len(b))
@@ -44,7 +51,8 @@ func Vsprintf(s, format, ap *c23.Void) int32 {
 }
 
 func Vsnprintf(s *c23.Void, n uint64, format, ap *c23.Void) int32 {
-	b := c23.FormatC(c23.GoString(format), c23.VaOf(ap))
+	var buf [256]byte
+	b := c23.AppendFormatC(buf[:0], c23.GoString(format), c23.VaOf(ap))
 	if n > 0 {
 		k := min(uint64(len(b)), n-1)
 		copy(c23.Writable(s, uintptr(k+1)), append(b[:k:k], 0))
