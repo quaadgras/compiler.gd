@@ -223,6 +223,9 @@ func (g *gen) tlv1(e expr, forAddr bool) lval {
 		}
 		// A union's member, or one of a record Go sees as bytes: at its
 		// offset.
+		if e.f.off == 0 {
+			return lval{x: fmt.Sprintf("(*(*%s)(unsafe.Pointer(%s)))", g.mirror(e.t), taddr(base)), t: e.t}
+		}
 		return lval{x: fmt.Sprintf("(*(*%s)(unsafe.Add(unsafe.Pointer(%s), %d)))", g.mirror(e.t), taddr(base), e.f.off), t: e.t}
 	case *compoundLit:
 		return lval{x: g.tcompound(e), t: e.t}

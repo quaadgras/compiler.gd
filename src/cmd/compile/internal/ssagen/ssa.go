@@ -1226,6 +1226,9 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 		elem, rtypeExpr = elem.Elem(), n.ElemElemRType
 	}
 	size := elem.Size()
+	if n.CUnchecked && count == nil {
+		return v
+	}
 	// Casting from larger type to smaller one is ok, so for smallest type,
 	// there is no check of alignment or bounds. gd: there is still the
 	// check that it is not part of a string, a slice or an interface,

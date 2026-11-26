@@ -139,7 +139,7 @@ func isViewConv(n *ir.ConvExpr) bool {
 // markWholeView sets the View of n, which uses size bytes of what it
 // points to.
 func markWholeView(gd *base.Invocation, fn *ir.Func, ro *ir.ReassignOracle, n *ir.ConvExpr, size int64) {
-	src, off, ok := viewSource(ro, n.X, 0)
+	src, off, ok := viewSourceIn(ro, n.X, 0, gd.CObjects)
 	if !ok {
 		if gd.Debug.UnsafeWhole >= 2 {
 			gd.WarnfAt(n.Pos(), "unsafewhole: unknown source: %v", n.Type())
@@ -163,6 +163,13 @@ func markWholeView(gd *base.Invocation, fn *ir.Func, ro *ir.ReassignOracle, n *i
 	k := types.PartialView(src, off, n.Type().Elem(), size)
 	if k == types.NotWhole {
 		n.View = ir.ViewWhole
+		if gd.CObjects && !n.Type().Elem().HasPointers() && (!src.HasPointers() || off >= types.PtrDataSize(gd, src)) {
+			// In a package of C's, a view with no pointer of
+			// what has none there: the pointer it is made of
+			// lets through the same loads and stores, for it
+			// points to src (its conversion was checked).
+			n.CUnchecked = true
+		}
 		// C's types are not compared yet: a union is words that
 		// its members are converted over. What the compiler writes
 		// itself is not: the adapter of a method for a value that
@@ -188,19 +195,30 @@ func markWholeView(gd *base.Invocation, fn *ir.Func, ro *ir.ReassignOracle, n *i
 // viewSource returns the type of what the pointer n points into, and the
 // offset in it, if they are known.
 func viewSource(ro *ir.ReassignOracle, n ir.Node, depth int) (*types.Type, int64, bool) {
+	return viewSourceIn(ro, n, depth, false)
+}
+
+// viewSourceIn is viewSource, for a package of C's if c is set: there a
+// conversion of an unsafe.Pointer to a pointer may give another pointer
+// than it is given (runtime.checkptrConvC: a union's member), so what it
+// gives is only known to point to its type.
+func viewSourceIn(ro *ir.ReassignOracle, n ir.Node, depth int, inC bool) (*types.Type, int64, bool) {
 	if depth > 32 {
 		return nil, 0, false
 	}
 	depth++
 	switch n.Op() {
 	case ir.OPAREN:
-		return viewSource(ro, n.(*ir.ParenExpr).X, depth)
+		return viewSourceIn(ro, n.(*ir.ParenExpr).X, depth, inC)
 	case ir.OCONVNOP:
-		if t, off, ok := viewSource(ro, n.(*ir.ConvExpr).X, depth); ok {
+		if cv := n.(*ir.ConvExpr); inC && cv.X.Type().IsUnsafePtr() && cv.Type().IsPtr() {
+			break
+		}
+		if t, off, ok := viewSourceIn(ro, n.(*ir.ConvExpr).X, depth, inC); ok {
 			return t, off, true
 		}
 	case ir.OADDR:
-		return viewPlace(ro, n.(*ir.AddrExpr).X, depth)
+		return viewPlace(ro, n.(*ir.AddrExpr).X, depth, inC)
 	case ir.OUNSAFEADD, ir.OADD:
 		n := n.(*ir.BinaryExpr)
 		x, y := n.X, n.Y
@@ -211,7 +229,7 @@ func viewSource(ro *ir.ReassignOracle, n ir.Node, depth int) (*types.Type, int64
 		if !ok {
 			return nil, 0, false
 		}
-		t, off, ok := viewSource(ro, x, depth)
+		t, off, ok := viewSourceIn(ro, x, depth, inC)
 		return t, off + c, ok
 	case ir.OSUB:
 		n := n.(*ir.BinaryExpr)
@@ -219,11 +237,14 @@ func viewSource(ro *ir.ReassignOracle, n ir.Node, depth int) (*types.Type, int64
 		if !ok {
 			return nil, 0, false
 		}
-		t, off, ok := viewSource(ro, n.X, depth)
+		t, off, ok := viewSourceIn(ro, n.X, depth, inC)
 		return t, off - c, ok
 	case ir.ONAME:
+		if ro == nil {
+			break
+		}
 		if v := ro.StaticValue(n); v != n {
-			if t, off, ok := viewSource(ro, v, depth); ok {
+			if t, off, ok := viewSourceIn(ro, v, depth, inC); ok {
 				return t, off, true
 			}
 		}
@@ -235,24 +256,24 @@ func viewSource(ro *ir.ReassignOracle, n ir.Node, depth int) (*types.Type, int64
 }
 
 // viewPlace is viewSource for the address of the variable or part of one n.
-func viewPlace(ro *ir.ReassignOracle, n ir.Node, depth int) (*types.Type, int64, bool) {
+func viewPlace(ro *ir.ReassignOracle, n ir.Node, depth int, inC bool) (*types.Type, int64, bool) {
 	switch n.Op() {
 	case ir.OPAREN:
-		return viewPlace(ro, n.(*ir.ParenExpr).X, depth)
+		return viewPlace(ro, n.(*ir.ParenExpr).X, depth, inC)
 	case ir.ODOT:
 		n := n.(*ir.SelectorExpr)
-		t, off, ok := viewPlace(ro, n.X, depth)
+		t, off, ok := viewPlace(ro, n.X, depth, inC)
 		return t, off + n.Offset(), ok
 	case ir.ODOTPTR:
 		n := n.(*ir.SelectorExpr)
-		t, off, ok := viewSource(ro, n.X, depth)
+		t, off, ok := viewSourceIn(ro, n.X, depth, inC)
 		return t, off + n.Offset(), ok
 	case ir.ODEREF:
-		return viewSource(ro, n.(*ir.StarExpr).X, depth)
+		return viewSourceIn(ro, n.(*ir.StarExpr).X, depth, inC)
 	case ir.OINDEX:
 		n := n.(*ir.IndexExpr)
 		if i, ok := viewConst(n.Index); ok && n.X.Type().IsArray() {
-			t, off, ok := viewPlace(ro, n.X, depth)
+			t, off, ok := viewPlace(ro, n.X, depth, inC)
 			return t, off + i*n.Type().Size(), ok
 		}
 	}
@@ -266,4 +287,21 @@ func viewConst(n ir.Node) (int64, bool) {
 		return 0, false
 	}
 	return constant.Int64Val(n.Val())
+}
+
+// cAddInside reports whether n, unsafe.Add(p, c) in a package of C's
+// with c a constant, is inside what p is known to point to (viewSource),
+// and not at its end: in the object that p is in, which is all that the
+// check of the addition asks (runtime.checkptrArithmeticC).
+func cAddInside(gd *base.Invocation, n *ir.BinaryExpr) bool {
+	c, ok := viewConst(n.Y)
+	if !ok {
+		return false
+	}
+	src, off, ok := viewSourceIn(nil, n.X, 0, true)
+	if !ok {
+		return false
+	}
+	types.CalcSize(gd, src)
+	return src.Size() > 0 && off+c >= 0 && off+c < src.Size()
 }

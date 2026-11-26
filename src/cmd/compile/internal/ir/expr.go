@@ -381,6 +381,12 @@ type ConvExpr struct {
 	// to a pointer is loaded through and nothing else: it is not
 	// stored through, kept, or passed on (gd: walk's markWholeViews).
 	LoadOnly bool
+
+	// CUnchecked is set for a conversion in a package of C's that is
+	// a view without pointers of a part of what the pointer is known
+	// to point to that has none: it needs no check (walk's
+	// markWholeView).
+	CUnchecked bool
 }
 
 // A ViewKind says whether a conversion to a pointer views a string, a

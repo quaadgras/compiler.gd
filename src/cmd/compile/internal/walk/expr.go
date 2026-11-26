@@ -138,6 +138,10 @@ func walkExpr1(gd *base.Invocation, n ir.Node, init *ir.Nodes) ir.Node {
 		}
 		n.X = walkExpr(gd, n.X, init)
 		n.Y = walkExpr(gd, n.Y, init)
+		if n.Op() == ir.OUNSAFEADD && gd.CObjects && cAddInside(gd, n) {
+			// (In what the pointer is known to point to.)
+			return n
+		}
 		if n.Op() == ir.OUNSAFEADD && !n.CheckPtr() && ir.ShouldCheckPtr(gd, ir.CurFunc(gd), 1) {
 			// For unsafe.Add(p, n), just walk "unsafe.Pointer(uintptr(p)+uintptr(n))"
 			// for the side effects of validating unsafe.Pointer rules.
