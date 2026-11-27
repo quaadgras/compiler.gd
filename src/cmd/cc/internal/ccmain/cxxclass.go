@@ -29,7 +29,9 @@ type classInfo struct {
 	vslot   map[*symbol]int
 	vtable  *symbol
 	subs    []*subTable // the tables of its other bases with virtual functions
-	delDtor *symbol // the destructor that also frees the object
+	delDtor *symbol     // the destructor that also frees the object
+	key     *symbol     // its key function: the unit that defines it has the class's tables
+	emit    func()      // makes the tables, when the key function is defined
 
 	complete    bool
 	userCtor    bool // a constructor is declared
@@ -899,9 +901,6 @@ func (p *parser) completeClass(t *ctype) {
 				p.use(lf.sym) // used before its body was kept (a nested class's)
 			}
 		}
-		for _, v := range ci.allVirtual() {
-			p.use(v) // the table has its address
-		}
 		return
 	}
 	for _, lf := range late {
@@ -1533,20 +1532,82 @@ func (p *parser) buildVtable(t *ctype, at pos) {
 			}
 		}
 	}
+	// A unit has the class's tables, and with them the definition of
+	// every virtual function, only if it must: another only names them,
+	// and need not be able to define what they hold (an implicit
+	// destructor of members whose classes it has not seen whole). The
+	// unit that must is the one that defines the class's key function
+	// (the Itanium C++ ABI's): the first virtual function that is not
+	// pure and has no body in the class. A class that has none, as a
+	// template's instance and a local class, has its tables in each
+	// unit that makes its objects: that defines one of its constructors
+	// or its destructor, which name them (setVptr).
+	if t.rec.inst == nil && !inBlock(ci.scope) && !p.instMember(&symbol{sc: ci.scope}) {
+		inClass := map[*symbol]bool{}
+		for _, lf := range ci.late {
+			inClass[lf.sym] = true
+		}
+		for _, m := range ci.methods {
+			if m.virtual && !m.pure && !m.implicit && !m.deleted && !m.defined && !inClass[m] && m.late == nil && m.synth == nil && m.tmpl == nil {
+				ci.key = m
+				m.keyOf = ci
+				break
+			}
+		}
+	}
 	ci.vtable = p.vtableOf("_ZTV"+rawType(t.unqual()), ci.vfuncs, inBlock(ci.scope), at)
 	for _, s := range ci.subs {
 		s.table = p.vtableOf("_ZTVn"+itoa(s.off)+"_"+rawType(t.unqual()), s.entry, inBlock(ci.scope), at)
 	}
 	if d := ci.delDtor; d != nil {
 		dtor := ci.scope.vars["~"+t.rec.tag]
-		p.synth(d, func(ps []*symbol) []stmt {
-			this := &varRef{node{p.this.t, at}, p.this}
-			return []stmt{
-				&exprStmt{p.callFunc(dtor, p.thisObject(at), nil, at)},
-				p.deallocate(&cast{node{ptrTo(tVoid), at}, this}, t, false, at),
-			}
-		})
+		// Defined when it is used: by the tables.
+		d.synth = func() {
+			p.synth(d, func(ps []*symbol) []stmt {
+				this := &varRef{node{p.this.t, at}, p.this}
+				return []stmt{
+					&exprStmt{p.callFunc(dtor, p.thisObject(at), nil, at)},
+					p.deallocate(&cast{node{ptrTo(tVoid), at}, this}, t, false, at),
+				}
+			})
+		}
 	}
+	ci.emit = func() {
+		p.fillVtable(ci.vtable, ci.vfuncs, at)
+		for _, s := range ci.subs {
+			p.fillVtable(s.table, s.entry, at)
+		}
+		p.useVirtual(ci)
+	}
+}
+
+// useVirtual marks the functions of the class's tables used: they are
+// defined in this unit.
+func (p *parser) useVirtual(ci *classInfo) {
+	for _, v := range ci.vfuncs {
+		p.use(v)
+	}
+	for _, s := range ci.subs {
+		for _, e := range s.entry {
+			p.use(e)
+		}
+	}
+}
+
+// fillVtable defines the table vt, of funcs.
+func (p *parser) fillVtable(vt *symbol, funcs []*symbol, at pos) {
+	in := &initializer{}
+	for i, f := range funcs {
+		var x expr = &intConst{node{fnPtrType, at}, 0}
+		if !f.pure {
+			f.used = true
+			x = &cast{node{fnPtrType, at}, &decay{node{ptrTo(f.t), at}, &varRef{node{f.t, at}, f}}}
+		}
+		in.items = append(in.items, initItem{off: int64(i) * fnPtrType.sizeof(), t: fnPtrType, x: x})
+	}
+	vt.init = in
+	vt.defined = true
+	vt.storage = sAuto
 }
 
 // allVirtual are the functions of the class's tables.
@@ -1561,25 +1622,15 @@ func (ci *classInfo) allVirtual() []*symbol {
 	return out
 }
 
-// vtableOf makes a table of virtual functions: an array of pointers to
-// functions.
+// vtableOf declares a table of virtual functions, an array of pointers
+// to functions: fillVtable defines it.
 func (p *parser) vtableOf(name string, funcs []*symbol, local bool, at pos) *symbol {
 	vt := &symbol{name: name, kind: symVar, t: arrayOf(fnPtrType, int64(len(funcs))), global: true,
-		linkage: 'e', defined: true, comdat: true, p: at, addr: true}
+		linkage: 'e', comdat: true, p: at, addr: true, storage: sExtern}
 	vt.src = vt.name
 	if local {
 		vt.linkage = 0
 	}
-	in := &initializer{}
-	for i, f := range funcs {
-		var x expr = &intConst{node{fnPtrType, at}, 0}
-		if !f.pure {
-			f.used = true
-			x = &cast{node{fnPtrType, at}, &decay{node{ptrTo(f.t), at}, &varRef{node{f.t, at}, f}}}
-		}
-		in.items = append(in.items, initItem{off: int64(i) * fnPtrType.sizeof(), t: fnPtrType, x: x})
-	}
-	vt.init = in
 	p.u.syms = append(p.u.syms, vt)
 	return vt
 }
@@ -1606,6 +1657,12 @@ func (p *parser) thunk(m, over *symbol, off int64, at pos) *symbol {
 	sym := &symbol{name: name, src: m.src, kind: symFunc, t: m.t, global: true, linkage: m.linkage, p: at, sc: m.sc,
 		comdat: true, implicit: true}
 	p.u.syms = append(p.u.syms, sym)
+	// Defined when it is used: by the tables.
+	sym.synth = func() { p.thunkBody(sym, m, ft, retBase, off, at) }
+	return sym
+}
+
+func (p *parser) thunkBody(sym, m *symbol, ft *funcType, retBase *ctype, off int64, at pos) {
 	p.synth(sym, func(ps []*symbol) []stmt {
 		this := &varRef{node{ps[0].t, at}, ps[0]}
 		args := []expr{p.offsetPtr(this, -off, ps[0].t.elem, true, at)}
@@ -1627,7 +1684,6 @@ func (p *parser) thunk(m, over *symbol, off int64, at pos) *symbol {
 		}
 		return []stmt{&returnStmt{c}}
 	})
-	return sym
 }
 
 // setVptr are the statements that make *this an object of the class t
@@ -1636,6 +1692,12 @@ func (p *parser) setVptr(t *ctype, at pos) []stmt {
 	ci := t.rec.cls
 	if ci == nil || !ci.poly || ci.vtable == nil {
 		return nil
+	}
+	if ci.key == nil && ci.emit != nil {
+		// No key function: the tables are where they are named.
+		emit := ci.emit
+		ci.emit = nil
+		emit()
 	}
 	vpt := ptrTo(fnPtrType)
 	set := func(off int64, vt *symbol) stmt {

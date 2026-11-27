@@ -66,6 +66,7 @@ type parser struct {
 	temps         []*tempObj // the temporaries with destructors of the full expression being parsed
 	extend        *[]*symbol // where temporaries a declared reference binds are kept, to live as long
 	declTo        *scope     // the scope the next function is declared in, if not the current one
+	trying        int        // in try: an error is a substitution failure
 	userConv      int        // ranking a user-defined conversion's own argument
 	pattern       int        // parsing a template's pattern: its parameters are placeholders
 	packOn        bool       // parsing a pack expansion's pattern, for the element packI
@@ -98,7 +99,7 @@ type parser struct {
 type parseError struct{ msg string }
 
 func (p *parser) errorAt(at pos, format string, args ...any) {
-	if debugPanic {
+	if debugPanic && p.trying == 0 {
 		panic(fmt.Sprintf("%s:%d: %s", at.file, at.line, fmt.Sprintf(format, args...)))
 	}
 	panic(parseError{fmt.Sprintf("%s:%d: %s", at.file, at.line, fmt.Sprintf(format, args...))})
@@ -2464,6 +2465,12 @@ func (p *parser) defineFunc(sym *symbol, ft *funcType, name string, at pos, inli
 		}
 	}
 	p.u.funcs = append(p.u.funcs, f)
+	if ci := sym.keyOf; ci != nil && ci.emit != nil {
+		// The class's key function: its tables are this unit's.
+		emit := ci.emit
+		ci.emit = nil
+		emit()
+	}
 }
 
 // promoteArg is the default argument promotion of t.

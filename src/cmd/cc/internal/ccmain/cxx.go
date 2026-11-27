@@ -534,6 +534,9 @@ func (p *parser) bindRef(t *ctype, e expr, at pos, what string) expr {
 	if to.kind == kFunc {
 		return p.convertAt(p.rvalue(e), t, at)
 	}
+	if to.kind == kStruct && et.kind == kStruct && to.rec != et.rec {
+		p.complete(et) // a template's instance: its bases
+	}
 	if pr, ok := e.(*classPR); ok && to.kind == kStruct && !sameType(to.unqual(), et.unqual()) && isBaseOf(to, et) {
 		// A prvalue of a derived class: the reference binds to the base
 		// of its temporary.
@@ -1719,6 +1722,31 @@ func (p *parser) classOperand(x, y expr, at pos) expr {
 	}
 	if c := p.convertClass(x, valueType(&goVal{node{to, at}, ""}), at); c != nil {
 		return c
+	}
+	if to.isPtr() && to.elem.kind == kStruct {
+		// To a pointer the other operand's converts to or from: a
+		// pointer to a base, or to a derived class.
+		var via *ctype
+		for _, f := range p.convFuncs(x.ty(), nil) {
+			rt := f.t.fn.ret.unqual()
+			if f.explicit || f.deleted || f.tmpl != nil || !rt.isPtr() || rt.isRef() || rt.elem.kind != kStruct {
+				continue
+			}
+			p.complete(to.elem)
+			p.complete(rt.elem)
+			if !isBaseOf(rt.elem, to.elem) && !isBaseOf(to.elem, rt.elem) {
+				continue
+			}
+			if via != nil && !sameType(via, rt) {
+				p.errorAt(at, "an operator with operands of types %s and %s is ambiguous", x.ty(), y.ty())
+			}
+			via = rt
+		}
+		if via != nil {
+			if c := p.convertClass(x, via, at); c != nil {
+				return c
+			}
+		}
 	}
 	p.errorAt(at, "no match for an operator with operands of types %s and %s", x.ty(), y.ty())
 	return nil

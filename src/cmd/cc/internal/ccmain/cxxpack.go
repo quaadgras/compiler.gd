@@ -174,6 +174,15 @@ func (p *parser) cxxBinary(at pos, op string, x, y expr) expr {
 		if e := p.overloaded(op, []expr{x, y}, at); e != nil {
 			return e
 		}
+		if op == "&&" || op == "||" {
+			// Each operand is a condition of its own.
+			if x.ty().kind == kStruct {
+				x = p.boolOf(x, at)
+			}
+			if y.ty().kind == kStruct {
+				y = p.boolOf(y, at)
+			}
+		}
 		x, y = p.classOperand(x, y, at), p.classOperand(y, x, at)
 	}
 	e := p.binop(at, op, p.rvalue(x), p.rvalue(y))

@@ -208,6 +208,16 @@ func (p *parser) conditional() expr {
 	}
 	lx, ly := x, y
 	x, y = p.rvalueVoid(x), p.rvalueVoid(y)
+	if xt, yt := x.ty(), y.ty(); p.cxx && xt.isPtr() && yt.isPtr() && xt.elem.kind == kStruct && yt.elem.kind == kStruct && xt.elem.rec != yt.elem.rec {
+		// C++: pointers to a class and to its base are both the base's.
+		p.complete(xt.elem)
+		p.complete(yt.elem)
+		if isBaseOf(xt.elem, yt.elem) {
+			y = p.baseAddr(y, xt.elem, at)
+		} else if isBaseOf(yt.elem, xt.elem) {
+			x = p.baseAddr(x, yt.elem, at)
+		}
+	}
 	if cv, ok := p.foldInt(c); ok && isConstExpr(x) && isConstExpr(y) {
 		// Keep it a constant expression.
 		t := p.condType(x, y, at)

@@ -868,7 +868,9 @@ func (p *parser) replay(start int, sc *scope, f func()) {
 // try runs f, and reports whether it parsed without an error: one is
 // not reported (a substitution failure is not an error).
 func (p *parser) try(f func()) (ok bool) {
+	p.trying++
 	defer func() {
+		p.trying--
 		if r := recover(); r != nil {
 			pe, isParse := r.(parseError)
 			if !isParse {
@@ -2157,7 +2159,8 @@ func (p *parser) typePackAt(i int) bool {
 // substitution failures: CCDEBUG=sfinae.
 var debugSFINAE = os.Getenv("CCDEBUG") == "sfinae"
 
-// debugPanic makes a parse error a panic, with its stack: CCDEBUG=panic.
+// debugPanic makes a parse error that is reported a panic, with its
+// stack: CCDEBUG=panic.
 var debugPanic = os.Getenv("CCDEBUG") == "panic"
 
 // instance is the instance of the class, alias or variable template tm
@@ -2199,6 +2202,29 @@ func (p *parser) instance(tm *template, args []targ) *tinst {
 // arguments args of a constructor's call, T(args) without template
 // arguments: the instance's type.
 func (p *parser) ctad(tm *template, args []expr, at pos) *ctype {
+	if len(args) == 1 {
+		// From an object of the template's own instance: that one.
+		at := args[0].ty()
+		if pr, ok := args[0].(*classPR); ok {
+			at = pr.t
+		}
+		if at.kind == kStruct && at.rec.inst != nil && (at.rec.inst.tmpl == tm || at.rec.inst.tmpl.primary == tm) {
+			return at.unqual()
+		}
+	}
+	if len(args) == 0 {
+		// No initializer: every argument is its default.
+		full := true
+		for _, tp := range tm.params {
+			full = full && (tp.dflt != 0 || tp.pack)
+		}
+		if full {
+			var t *ctype
+			if p.try(func() { t = p.instance(tm, p.fullArgs(tm, nil, at)).t }) && t != nil {
+				return t
+			}
+		}
+	}
 	if !tm.ctorsDone {
 		tm.ctorsDone = true
 		// The constructors, found in the class's tokens: each

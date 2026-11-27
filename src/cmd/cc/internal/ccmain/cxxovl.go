@@ -176,8 +176,7 @@ func (p *parser) convRank(a expr, pt *ctype) int {
 		}
 	}
 	at := a.ty()
-	p.completeFor(at)
-	p.completeFor(pt)
+	p.completeToRank(at, pt)
 	if pt.isRef() {
 		to := pt.elem
 		if to.kind == kFunc {
@@ -713,4 +712,36 @@ func (p *parser) thisOrNil(set []*symbol, at pos) expr {
 		}
 	}
 	return nil
+}
+
+// completeToRank defines the classes that ranking the conversion of
+// an argument of type at to a parameter of type pt looks into, if they
+// are templates' instances: a class that is converted (its constructors
+// and conversion functions), and the classes two different pointers
+// point to (one may be the other's base). Nothing else is: a pointer to
+// a class converts to void * or to itself whatever the class is, which
+// need not be complete.
+func (p *parser) completeToRank(at, pt *ctype) {
+	byRef := pt.isRef()
+	if byRef {
+		pt = pt.elem
+	}
+	if at.kind == kStruct || pt.kind == kStruct {
+		if at.kind == kStruct && pt.kind == kStruct && at.rec == pt.rec && byRef {
+			return
+		}
+		p.complete(at)
+		p.complete(pt)
+		return
+	}
+	pointee := func(t *ctype) *ctype {
+		if (t.kind == kPtr || t.kind == kArray) && t.elem != nil && t.elem.kind == kStruct {
+			return t.elem
+		}
+		return nil
+	}
+	if ac, pc := pointee(at), pointee(pt); ac != nil && pc != nil && ac.rec != pc.rec {
+		p.complete(ac)
+		p.complete(pc)
+	}
 }
