@@ -28,6 +28,10 @@ type lval struct {
 	// In the 1:1 translation (thin.go) an lvalue is this, an addressable
 	// Go expression, and addr its address, a Go pointer.
 	x string
+	// ubase is the union that the lvalue is a member of, if the member
+	// is a pointer where the union has an integer too, or that integer
+	// (unionPtrPun).
+	ubase string
 }
 
 func (g *gen) lv(e expr) lval {

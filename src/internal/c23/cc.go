@@ -54,9 +54,12 @@ type Func struct {
 
 var funcType = abi.TypeFor[Func]()
 
-// NewFunc returns the C pointer to the function f.
+// NewFunc returns the C pointer to the function f. A program calls it
+// once for each of its functions that a pointer is taken to, as it
+// starts: its body at each of them is half a kilobyte that runs once.
 //
 //go:nocheckptr
+//go:noinline
 func NewFunc(f any) *Void {
 	p := (*Func)(newObject(funcType))
 	p.f = f

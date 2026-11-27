@@ -142,14 +142,15 @@ compiled: the mangled names are the Itanium ABI's, the calls are Go's.
 ## Status
 
 `go test cmd/cc -run Cxx` compiles `testdata/cxx/*.cc` with cmd/cc and
-with g++ and compares what they print (41 programs). Against Godot
+with g++ and compares what they print (48 programs). Against Godot
 (4.7.1, with its own defines and include directories, and `__GNUC__`
 defined: Godot expects its compiler to be GCC, clang or MSVC), 176 of
 the 177 `.cpp` files of `core` translate, each alone, and the 176
 together, as one program of 1.2 million lines of Go (1.9 million before
 the translation was 1:1): in 30 seconds on 32 threads (0.4 seconds from
 `cc -cache` when nothing it read has changed), which the Go compiler
-then builds in 3 to 5 minutes, into a program of 67 MB (167 MB before). The other,
+then builds in a minute and a half, into a program of 82 MB (65 MB
+without what a debugger reads). The other,
 `core/math/geometry_2d.cpp`, includes clipper2, which uses `<vector>`,
 `<string>`, `<queue>` and `<iostream>`.
 
@@ -161,9 +162,13 @@ objects of static duration are constructed, and a test prints the same
 Basis, a Quaternion, a Transform3D and a Color compute; String
 (concatenation, searching, splitting, numbers, UTF-8, `vformat`, paths,
 hashes); Vector, LocalVector, HashMap, HashSet, RBMap and List; and
-Variant, with Array and Dictionary, converted and printed. The engine is
-not set up in it (no `register_core_types`): ClassDB and the object
-system have not been run. The whole run, core's static initialization
+Variant, with Array and Dictionary, converted and printed. A second
+test sets core up as the engine does (`register_core_types`, with an OS
+that does nothing) and prints the same as with g++ too: the 106 classes
+that core registers, an object made by its class's name and reached
+through `Ref`, methods called by name through ClassDB with Variants,
+metadata, and a signal that is declared, connected to a bound Callable
+and emitted. The whole run, core's static initialization
 included, takes 8 ms, where g++'s build takes 3 ms and the translation
 with capabilities took 76 ms to start.
 

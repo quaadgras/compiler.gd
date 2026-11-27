@@ -737,7 +737,15 @@ func (p *parser) completeClass(t *ctype) {
 			continue
 		}
 		ps := o.t.fn.params[1:]
-		if len(ps) == 0 {
+		// A default constructor is one that no argument is given to:
+		// each of its parameters, if it has any, has a default argument.
+		none := true
+		for i := 1; i < len(o.t.fn.params); i++ {
+			if i >= len(o.t.fn.defaults) || o.t.fn.defaults[i].start == 0 {
+				none = false
+			}
+		}
+		if none {
 			if o.implicit {
 				defaultedDefault = true
 			} else {

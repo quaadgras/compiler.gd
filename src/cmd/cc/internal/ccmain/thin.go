@@ -219,12 +219,20 @@ func (g *gen) tlv1(e expr, forAddr bool) lval {
 		if xt.rec.uptr && hasPointers(e.t) {
 			// A union's member that has a pointer: in the union's
 			// interface value.
-			return lval{x: g.unionHeld(base, e.t), t: e.t}
+			l := lval{x: g.unionHeld(base, e.t), t: e.t}
+			if unionPtrPun(xt.rec, e.f) && simpleLvalue(base) {
+				l.ubase = base
+			}
+			return l
 		}
 		// A union's member, or one of a record Go sees as bytes: at its
 		// offset.
 		if e.f.off == 0 {
-			return lval{x: fmt.Sprintf("(*(*%s)(unsafe.Pointer(%s)))", g.mirror(e.t), taddr(base)), t: e.t}
+			l := lval{x: fmt.Sprintf("(*(*%s)(unsafe.Pointer(%s)))", g.mirror(e.t), taddr(base)), t: e.t}
+			if unionPtrPun(xt.rec, e.f) && simpleLvalue(base) {
+				l.ubase = base
+			}
+			return l
 		}
 		return lval{x: fmt.Sprintf("(*(*%s)(unsafe.Add(unsafe.Pointer(%s), %d)))", g.mirror(e.t), taddr(base), e.f.off), t: e.t}
 	case *compoundLit:
@@ -305,7 +313,29 @@ func (g *gen) held(n string, t *ctype) string {
 // aligns a variable, as the program asked: it is allocated
 // (c23.MallocAligned), and its Go variable is the pointer to it.
 func overAligned(s *symbol) bool {
-	return s.kind == symVar && s.t.align > 8 || s.t.alignof() > 16
+	return s.kind == symVar && s.t.align > 8 || s.t.alignof() > 16 || storageArray(s)
+}
+
+// storageArray reports whether the object s is an array of bytes that
+// is declared with an alignment, of a pointer's or more: memory that the
+// program keeps objects of other types in, as
+//
+//	alignas(T) unsigned char buf[sizeof(T) * 4];
+//	T *p = new (buf) T;
+//
+// does. An array of bytes of Go's holds no pointer that the collector
+// sees, so such an array is in C's memory, where a word is what it is
+// claimed for (runtime/cclaim.go), and its Go variable is the pointer to
+// it, as an over-aligned object's is.
+func storageArray(s *symbol) bool {
+	t := s.t
+	if s.kind != symVar || t.kind != kArray || t.isVLA() || t.align < target.ptrSize {
+		return false
+	}
+	for t.kind == kArray {
+		t = t.elem
+	}
+	return t.isInteger() && t.sizeof() == 1
 }
 
 // allocAligned is the allocation of the over-aligned object s.
@@ -342,6 +372,36 @@ func (g *gen) tload(l lval) string {
 	return l.x
 }
 
+// unionPtrPun reports whether f, a member of the union r whose pointers
+// are in an object of their own (types.go's unionPtr), is a pointer
+// where another member is an integer of a pointer's size, or that
+// integer:
+//
+//	union { uint64_t object; CallableCustom *custom; };
+//
+// C reads the pointer's address in the integer after it stored the
+// pointer, and no pointer after it stored the integer (Godot's Callable
+// is null if object is 0, and has a custom if custom is not null). The
+// union's bytes hold the integer and its pointer holds the other. So a
+// pointer that is stored in the member has its address stored in the
+// bytes too (c23.UnionAddr): what the integer is read as, an integer
+// there, which no pointer is made of. And when the integer is stored
+// the union holds no pointer from then on.
+func unionPtrPun(r *record, f *field) bool {
+	if !r.uptr || !r.union || f.off != 0 || f.bits >= 0 || r.ubytes < target.ptrSize {
+		return false
+	}
+	word := func(m *field) bool {
+		return m.off == 0 && m.bits < 0 && m.t.isInteger() && m.t.kind != kBool && m.t.sizeof() == target.ptrSize
+	}
+	for _, m := range r.fields {
+		if m != f && (f.t.isPtr() && word(m) || word(f) && m.off == 0 && m.t.isPtr()) {
+			return true
+		}
+	}
+	return false
+}
+
 func (g *gen) tstore(l lval, v string, c expr) {
 	switch {
 	case l.t.kind == kStruct || l.t.kind == kArray:
@@ -361,6 +421,12 @@ func (g *gen) tstore(l lval, v string, c expr) {
 		v = constLit(l.t, k.v)
 	}
 	g.p("%s = %s", l.x, v)
+	switch {
+	case l.ubase != "" && l.t.isPtr():
+		g.p("c23.UnionAddr(unsafe.Pointer(&%s), unsafe.Pointer(%s))", l.ubase, l.x)
+	case l.ubase != "":
+		g.p("%s.p = nil", l.ubase) // the union holds the integer now
+	}
 }
 
 // trv is e's value, if the 1:1 translation has its own for it.
@@ -1081,6 +1147,9 @@ func (g *gen) tglobalVar(s *symbol) {
 		g.effect(s.ctor)
 	}
 	g.out, g.ind = save, saveInd
+	if n := g.inits.Len(); n > 0 && !strings.HasSuffix(g.inits.String()[max(n-len(initSplit), 0):], initSplit) {
+		g.inits.WriteString(initSplit) // the next object's is on its own
+	}
 }
 
 // cString is the string literal s as a Go string constant, if its
@@ -1198,8 +1267,8 @@ func (g *gen) initLit(t *ctype, in *initializer) (string, bool) {
 // expression of the object's type in memory.
 func (g *gen) initLeaf(t *ctype, x expr) (string, bool) {
 	if s, ok := x.(*strLit); ok && t.kind == kArray {
-		if q, ok := cString(s); ok && t.n > 0 {
-			return fmt.Sprintf("c23.Lit[%s](%s)", g.mirror(t), q), true
+		if _, ok := cString(s); ok && t.n > 0 {
+			return g.mirror(t) + "{" + arrayElems(s.data, 1, t.elem.isUnsigned()) + "}", true
 		}
 		return "", false
 	}
@@ -1260,8 +1329,44 @@ func (g *gen) tstr(s *strLit) string {
 	g.strs[key] = n
 	esz := s.t.elem.sizeof()
 	data := s.data + strings.Repeat("\x00", int(esz))
-	fmt.Fprintf(&g.vars, "var %s = c23.Lit[[%d]%s](%s)\n", n, int64(len(data))/esz, g.mirror(s.t.elem), strconv.Quote(data))
+	fmt.Fprintf(&g.vars, "var %s = [%d]%s{%s}\n", n, int64(len(data))/esz, g.mirror(s.t.elem), arrayElems(data, esz, s.t.elem.isUnsigned()))
 	return n
+}
+
+// arrayElems is the elements of a Go array literal whose elements, of
+// size bytes each, are the characters of data: a letter where one is
+// meant, and nothing for the zeros it ends with, which Go's array has.
+// The array is data of the program then, as C's is. (A call that made
+// it of a Go string, c23.Lit, was a statement of the package's
+// initialization for each literal: ten thousand of them in Godot's
+// core, in one function that took the compiler a minute and a half.)
+func arrayElems(data string, size int64, unsigned bool) string {
+	n := int64(len(data)) / size
+	val := func(i int64) uint64 {
+		var v uint64
+		for k := int64(0); k < size; k++ {
+			v |= uint64(data[i*size+k]) << (8 * k)
+		}
+		return v
+	}
+	for n > 0 && val(n-1) == 0 {
+		n--
+	}
+	var b strings.Builder
+	for i := int64(0); i < n; i++ {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		switch v := val(i); {
+		case v >= ' ' && v < 0x7f && v != '\'' && v != '\\':
+			fmt.Fprintf(&b, "'%c'", rune(v))
+		case !unsigned && size < 8 && v>>(8*size-1) != 0:
+			fmt.Fprintf(&b, "%d", int64(v)-1<<(8*size))
+		default:
+			fmt.Fprintf(&b, "%d", v)
+		}
+	}
+	return b.String()
 }
 
 // Functions.
@@ -1320,7 +1425,7 @@ func (g *gen) tfuncPtr(s *symbol) string {
 	if !g.descs[d] {
 		g.descs[d] = true
 		fmt.Fprintf(&g.vars, "var %s *c23.Void\n", d)
-		fmt.Fprintf(&g.descInit, "%s = c23.NewFunc(%s)\n", d, f)
+		fmt.Fprintf(&g.descInit, "%s = c23.NewFunc(%s)\n%s", d, f, initSplit)
 	}
 	return d
 }

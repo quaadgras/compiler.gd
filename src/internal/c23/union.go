@@ -46,6 +46,18 @@ func UnionBox[M any](slot *UnionRef) *M {
 	return (*M)(unionBox(slot, t))
 }
 
+// UnionAddr stores the address that the pointer v is in the first bytes
+// of the union at u, which has a member that is an integer of a
+// pointer's size where v was stored in a member that is a pointer: C
+// reads the address there, in the integer (a union that is null if its
+// integer is 0, when it holds a pointer or the number of an object).
+// The pointer itself is in the union's value.
+//
+//go:nocheckptr
+func UnionAddr(u unsafe.Pointer, v unsafe.Pointer) {
+	*(*uintptr)(u) = uintptr(v)
+}
+
 //go:linkname unionBox runtime.c23UnionBox
 func unionBox(slot *UnionRef, t *abi.Type) unsafe.Pointer
 

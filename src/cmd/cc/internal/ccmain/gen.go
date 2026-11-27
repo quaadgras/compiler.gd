@@ -121,6 +121,47 @@ func (g *gen) p(format string, args ...any) {
 	g.out.WriteString("\n")
 }
 
+// initSplit is a line of the text of func init after which the function
+// may end and another begin: what follows uses no variable of what is
+// before it.
+const initSplit = "\x00\n"
+
+// initLines is how many lines a func init has before it ends at the next
+// initSplit. A program's initializers are one function to C, and to Go
+// they may be many, which run in the order they are written in: a
+// function of tens of thousands of statements (the tables of virtual
+// functions and the function descriptors of all of Godot's core) takes
+// the compiler minutes on one thread, and a few hundred of them at a
+// time take seconds on all of them.
+const initLines = 400
+
+// writeInits writes the statements of text, with the initSplit lines
+// that say where they may be parted, as functions named init.
+func writeInits(b *strings.Builder, text string) {
+	if text == "" {
+		return
+	}
+	open, n := false, 0
+	for _, part := range strings.SplitAfter(text, initSplit) {
+		part = strings.TrimSuffix(part, initSplit)
+		if part == "" {
+			continue
+		}
+		if !open {
+			b.WriteString("\nfunc init() {\n")
+			open, n = true, 0
+		}
+		b.WriteString(part)
+		if n += strings.Count(part, "\n"); n >= initLines {
+			b.WriteString("}\n")
+			open = false
+		}
+	}
+	if open {
+		b.WriteString("}\n")
+	}
+}
+
 func catch(err *error) {
 	if r := recover(); r != nil {
 		ge, ok := r.(genError)
@@ -154,16 +195,8 @@ func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, er
 	b.WriteString(pg.types.String())
 	b.WriteString(pg.tdVars.String())
 	b.WriteString(pg.vars.String())
-	if pg.descInit.Len() > 0 {
-		b.WriteString("\nfunc init() {\n")
-		b.WriteString(pg.descInit.String())
-		b.WriteString("}\n")
-	}
-	if pg.inits.Len() > 0 {
-		b.WriteString("\nfunc init() {\n")
-		b.WriteString(pg.inits.String())
-		b.WriteString("}\n")
-	}
+	writeInits(&b, pg.descInit.String())
+	writeInits(&b, pg.inits.String())
 	b.WriteString("\n")
 	b.WriteString(pg.funcs.String())
 	if o.main {
@@ -496,7 +529,7 @@ func (g *gen) record(t *ctype) string {
 	defer func() { r.bytes = bytes }()
 	var fields []string
 	for i, f := range r.fields {
-		if f.bits >= 0 || f.packed || f.t.align > f.t.unqual().alignofNatural() {
+		if f.packed || f.bits < 0 && f.t.align > f.t.unqual().alignofNatural() {
 			bytes = true
 		}
 		if i == len(r.fields)-1 && f.t.sizeof() == 0 {
@@ -550,8 +583,23 @@ func (g *gen) record(t *ctype) string {
 	r.goName = name
 	g.mirrors[key.String()] = name
 	if !bytes {
-		for _, f := range r.fields {
-			fields = append(fields, fmt.Sprintf("%s %s", g.fieldName(f, len(fields)), g.mirror(f.t)))
+		// The bit-fields are in bytes that Go sees as bytes, between
+		// the members around them, and are loaded and stored through
+		// the record's address (bitLoad): the other members are Go's
+		// fields, as they are in a record that has no bit-field.
+		bits, pos := hasBitField(r), int64(0)
+		for i, f := range r.fields {
+			if f.bits >= 0 {
+				continue
+			}
+			if bits && pos < f.off {
+				fields = append(fields, fmt.Sprintf("_ [%d]uint8", f.off-pos))
+			}
+			fields = append(fields, fmt.Sprintf("%s %s", g.fieldName(f, i), g.mirror(f.t)))
+			pos = f.off + f.t.sizeof()
+		}
+		if bits && pos < r.size {
+			fields = append(fields, fmt.Sprintf("_ [%d]uint8", r.size-pos))
 		}
 	}
 	var b strings.Builder
@@ -593,6 +641,9 @@ func (g *gen) record(t *ctype) string {
 		b.WriteString("}\n\n")
 		if g.o.debug {
 			for i, f := range r.fields {
+				if f.bits >= 0 {
+					continue
+				}
 				fn := g.fieldName(f, i)
 				fmt.Fprintf(&b, "var _ [unsafe.Offsetof(%s{}.%s) - %d]byte\nvar _ [%d - unsafe.Offsetof(%s{}.%s)]byte\n",
 					name, fn, f.off, f.off, name, fn)
@@ -825,24 +876,51 @@ func sorted[V any](m map[string]V) []string {
 // naturalLayout reports whether r has the layout Go gives a struct of
 // its members: no attribute changed it.
 func naturalLayout(r *record) bool {
+	bits := hasBitField(r)
 	off, align := int64(0), int64(1)
 	for _, f := range r.fields {
 		if f.bits >= 0 {
-			return false
+			// In the bytes that the mirror has between its fields
+			// (record).
+			continue
 		}
 		a := f.t.unqual().alignofNatural()
 		if f.t.kind == kStruct {
 			a = min(f.t.rec.align, 8)
 		}
-		off = (off + a - 1) / a * a
-		if off != f.off {
-			return false
+		if bits {
+			// The bytes before the member are in the mirror, whatever
+			// they are: bit-fields, or padding.
+			if f.off < off || f.off%a != 0 {
+				return false
+			}
+			off = f.off
+		} else {
+			off = (off + a - 1) / a * a
+			if off != f.off {
+				return false
+			}
 		}
 		off += f.t.sizeof()
 		align = max(align, a)
 	}
+	if bits {
+		// (A bit-field's unit may be aligned more than any member
+		// that Go sees: then the record is too.)
+		return off <= r.size && r.size%align == 0 && align == r.align
+	}
 	size := (off + align - 1) / align * align
 	return size == r.size && align == r.align
+}
+
+// hasBitField reports whether a member of r is a bit-field.
+func hasBitField(r *record) bool {
+	for _, f := range r.fields {
+		if f.bits >= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // constLitStr is constLit of a constant written in decimal.

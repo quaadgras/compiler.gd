@@ -107,7 +107,13 @@ func c0_name(c c23.UInt) *c23.Char {
   object of the heap, in which whatever of it has a pointer is
   ("Unions", below). A struct that Go cannot lay out as C does (packed,
   over-aligned) is its bytes; its words, each a possible pointer, if a
-  member is a pointer, so that the collector sees what C stores.
+  member is a pointer, so that the collector sees what C stores. A
+  struct with bit-fields is a struct to Go: its other members are
+  fields, and the bytes that the bit-fields are in are bytes between
+  them (`_ [n]uint8`), which the bit-fields are loaded from and stored
+  in through the struct's address. (Godot's `Object` has six: as words
+  it was claimed for pointers by the copy of a zero value, and each
+  member of it was a claim of something else.)
 - **What Go has no variable for** is reached through its address, with
   internal/c23's `Peek` and `Poke` (and `Move` for a struct that is
   assigned): bit-fields, `_Atomic`, `long double` and `_Complex` in
@@ -115,7 +121,12 @@ func c0_name(c c23.UInt) *c23.Char {
   typed pointer checks nothing: the address is an lvalue's, made of a
   pointer that was checked where C made it. A variable length array
   and a variable aligned more than Go aligns (`alignas(64)`) are
-  allocated, and their Go variables are the pointers to them. What
+  allocated, and their Go variables are the pointers to them. So is an
+  array of bytes that is declared with an alignment of a pointer's or
+  more (`alignas(T) unsigned char buf[sizeof(T) * 4]`): it is memory
+  that objects of other types are kept in, with the placement `new` or
+  a cast, and an array of bytes of Go's holds no pointer that the
+  collector sees, where C's memory is what it is claimed for. What
   is allocated at an alignment (these, and `aligned_alloc`,
   `posix_memalign`, `memalign`) is the last bytes of an object that is
   as much longer as it takes to have such an address in it: the object
@@ -760,6 +771,14 @@ type union_value struct {
   member. This is how Godot's Variant keeps a String, an Array or a
   Callable in an array of bytes. A cast to a type with no pointer is to
   the bytes.
+- **An integer where another member is a pointer**, of a pointer's
+  size (`union { uint64_t object; CallableCustom *custom; }`), is read
+  as C reads it after the pointer was stored: a pointer that is stored
+  in the member has its address stored in the union's bytes too
+  (`c23.UnionAddr`), an integer there, which no pointer is made of. And
+  the union holds no pointer once the integer is stored in its member.
+  Godot's Callable is null if the integer is 0, and has a custom
+  callable if the pointer is not null.
 - **A pointer with no type** is converted by the runtime. C has a
   member at the union's address, and the union at a member's, so a
   `void *` that is one is converted to the other, in another function,
