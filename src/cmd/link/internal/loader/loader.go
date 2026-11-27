@@ -474,10 +474,21 @@ func (st *loadState) addSym(name string, ver int, r *oReader, li uint32, kind in
 				// new symbol overwrites old symbol.
 				l.objSyms[oldi] = objSym{r.objidx, li}
 			}
+		} else if r.DataSize(li) != 0 && oldr.DataSize(oldli) == 0 && sym.AbiSymKindToSymKind[objabi.SymKind(oldsym.Type())].IsData() {
+			// gd: the old symbol is a variable declared without a
+			// value, by a file compiled by itself (cmd/compile -unit)
+			// that only names it: the new one, which another such
+			// file defines //go:dupok, is the variable.
+			l.objSyms[oldi] = objSym{r.objidx, li}
 		}
 		return oldi
 	}
 	if oldsym.Dupok() {
+		if r.DataSize(li) == 0 && oldr.DataSize(oldli) != 0 && sym.AbiSymKindToSymKind[objabi.SymKind(osym.Type())].IsData() {
+			// gd: the reverse. The declaration without a value is of
+			// the variable that the old symbol defines.
+			return oldi
+		}
 		// oldsym is Dupok, new is not.
 		// new symbol overwrites old symbol.
 		l.objSyms[oldi] = objSym{r.objidx, li}

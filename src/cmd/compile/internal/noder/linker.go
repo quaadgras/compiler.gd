@@ -314,6 +314,7 @@ func (l *linker) relocTypeExt(gd *base.Invocation, w *pkgbits.Encoder, name *ir.
 func (l *linker) relocVarExt(w *pkgbits.Encoder, name *ir.Name) {
 	w.Sync(pkgbits.SyncVarExt)
 	l.linkname(w, name)
+	w.Bool(name.Linksym().DuplicateOK()) // //go:dupok
 }
 
 func (l *linker) linkname(w *pkgbits.Encoder, name *ir.Name) {

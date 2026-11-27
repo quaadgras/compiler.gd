@@ -15,6 +15,7 @@ import (
 	"cmd/internal/obj"
 	"cmd/internal/objabi"
 	"cmd/internal/src"
+	"fmt"
 )
 
 // MakeTask makes an initialization record for the package, if necessary.
@@ -125,7 +126,16 @@ func MakeTask(gd *base.Invocation) {
 		// the package's task is the one of the files compiled together,
 		// which import what this one does.
 		if len(fns) > 0 {
-			gd.Fatalf("a separately compiled file (-unit) has variables to initialize or an init function")
+			// Say what: the first statements of what would run.
+			what := ""
+			for _, fn := range typecheck.Target(gd).Inits {
+				for i, n := range fn.Body {
+					if i < 3 {
+						what += fmt.Sprintf("\n\t%v", n)
+					}
+				}
+			}
+			gd.Fatalf("a separately compiled file (-unit) has variables to initialize or an init function:%s", what)
 		}
 		return
 	}

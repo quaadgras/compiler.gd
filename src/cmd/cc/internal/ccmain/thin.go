@@ -457,6 +457,13 @@ func (g *gen) trv(e expr) (string, bool) {
 		}
 		if lit, ok := e.x.(*strLit); ok {
 			if q, ok := cString(lit); ok {
+				if g.refs != nil {
+					// In an object's declaration (staticInit): the
+					// address of an array, which is data, where a
+					// call would be code that runs as the program
+					// starts.
+					return g.retype("&"+g.cstrVar(lit)+"[0]", "*c23.Char", g.gt(e.t)), true
+				}
 				return g.retype("c23.String("+q+")", "*c23.Char", g.gt(e.t)), true
 			}
 		}
@@ -1054,6 +1061,9 @@ func (g *gen) tinitObject(x string, t *ctype, in *initializer) {
 		g.tstore(lval{x: x, t: t}, g.rv(in.scalar), in.scalar)
 		return
 	}
+	if g.fillFuncs(x, t, in) {
+		return
+	}
 	for _, it := range in.items {
 		switch {
 		case it.f != nil && it.f.bits >= 0:
@@ -1074,6 +1084,44 @@ func (g *gen) tinitObject(x string, t *ctype, in *initializer) {
 			g.tstore(lval{x: dst, t: it.t}, g.rv(it.x), it.x)
 		}
 	}
+}
+
+var fdName = regexp.MustCompile(`^fd_[A-Za-z0-9_]+$`)
+
+// fillFuncs initializes x, of type t, if it is an array of pointers to
+// functions whose elements are all functions' addresses or null, as a
+// table of virtual functions is: with one call, and a table of the
+// descriptors' variables, where a statement for each element would be
+// code. It reports whether it did.
+func (g *gen) fillFuncs(x string, t *ctype, in *initializer) bool {
+	if t.kind != kArray || t.elem.kind != kPtr || t.elem.elem.kind != kFunc || len(in.items) < 4 || int64(len(in.items)) != t.n {
+		return false
+	}
+	w := t.elem.sizeof()
+	var elems []string
+	any := false
+	for i, it := range in.items {
+		if it.f != nil || it.zero || it.off != int64(i)*w {
+			return false
+		}
+		v := "nil"
+		if c, ok := it.x.(*intConst); !ok || c.v != 0 {
+			v = g.rv(it.x)
+			if !fdName.MatchString(v) {
+				return false
+			}
+			v, any = "&"+v, true
+		}
+		elems = append(elems, v)
+	}
+	if !any {
+		return false
+	}
+	g.fillN++
+	tab := fmt.Sprintf("%sfill_%s%d", g.o.prefix, g.unitPre(), g.fillN)
+	fmt.Fprintf(&g.vars, "var %s = [...]**c23.Void{%s}\n", tab, strings.Join(elems, ", "))
+	g.p("c23.FillFuncs(unsafe.Pointer(%s), unsafe.Pointer(&%s), %d)", taddr(x), tab, len(elems))
+	return true
 }
 
 func (g *gen) tglobalVar(s *symbol) {
@@ -1157,6 +1205,11 @@ func (g *gen) tglobalVar(s *symbol) {
 		x = g.tglobal(s)
 	} else if lit, ok := g.staticInitFor(s, shared); ok {
 		// Initialized where Go declares it.
+		if shared {
+			// By every unit that has the object, the same: the
+			// linker keeps one.
+			g.vars.WriteString("//go:dupok\n")
+		}
 		if s.t.isAggregate() {
 			fmt.Fprintf(&g.vars, "var %s = %s\n", name, lit)
 		} else {
@@ -1210,19 +1263,19 @@ func (g *gen) tglobalVar(s *symbol) {
 	}
 }
 
-// staticInitFor is staticInit, for an object that is not one of several
-// units' (shared): that one is declared the same by each, without a
-// value, and each gives it its constants as the program starts.
+// staticInitFor is staticInit. An object that several units define
+// (shared) is declared with its value by each, //go:dupok.
 func (g *gen) staticInitFor(s *symbol, shared bool) (string, bool) {
-	if shared {
-		return "", false
-	}
 	lit, ok := g.staticInit(s)
-	if ok && g.o.unit != "" && strings.Contains(lit, "c23.String(") {
-		// A pointer to a string literal is a call to Go, which would
-		// initialize the variable as the package starts: a unit's
-		// are given their values by its own function.
-		return "", false
+	if ok && g.o.unit != "" {
+		// What Go would compute as the package starts (a call, an
+		// address that is not an element's or a field's): a unit's
+		// variables are given such values by its own function.
+		for _, call := range []string{"unsafe.Add(", "c23.String(", "c23.LabelAddr(", "c23.Addr(", "math."} {
+			if strings.Contains(lit, call) {
+				return "", false
+			}
+		}
 	}
 	return lit, ok
 }
@@ -1408,6 +1461,19 @@ func (g *gen) tstr(s *strLit) string {
 	return n
 }
 
+// cstrVar is the Go variable of the string literal s of bytes, for the
+// declarations that have its address.
+func (g *gen) cstrVar(s *strLit) string {
+	key := "decl|" + s.data
+	if n, ok := g.strs[key]; ok {
+		return n
+	}
+	n := fmt.Sprintf("%ss_%s%d", g.o.prefix, g.unitPre(), len(g.strs))
+	g.strs[key] = n
+	fmt.Fprintf(&g.vars, "var %s = [%d]c23.Char{%s}\n", n, len(s.data)+1, arrayElems(s.data+"\x00", 1, false))
+	return n
+}
+
 // arrayElems is the elements of a Go array literal whose elements, of
 // size bytes each, are the characters of data: a letter where one is
 // meant, and nothing for the zeros it ends with, which Go's array has.
@@ -1497,14 +1563,42 @@ func (g *gen) tfuncPtr(s *symbol) string {
 		return fmt.Sprintf("c23.NewFunc(%s)", f)
 	}
 	d := "fd_" + strings.ReplaceAll(name, ".", "_")
+	// The function itself is what its descriptor holds, as a function
+	// of the type that calls through pointers have, if the two types
+	// differ only in what their pointers point to: no function is made
+	// to stand between.
+	direct := ""
+	if !isLibcGo(name) {
+		ft := s.t.fn
+		if t := g.calleeType(s); t != nil {
+			ft = t.fn
+		}
+		if sameCall(ft) {
+			direct = name
+		}
+	}
 	if !g.descs[d] {
 		g.descs[d] = true
 		fmt.Fprintf(&g.vars, "var %s *c23.Void\n", d)
-		if g.o.unit != "" {
-			// The function has one descriptor, whichever unit makes it:
-			// its address is the same to all.
+		ft := s.t.fn
+		if t := g.calleeType(s); t != nil {
+			ft = t.fn
+		}
+		switch {
+		case direct != "":
+			// In the table of the functions of its Go type.
+			g.fdEntry(g.funcSig(ft, nil), g.erasedSig(ft), name, d)
+		case strings.HasPrefix(f, "func(") && g.o.unit != "":
+			// The function that the descriptor calls it through is
+			// one function, which every unit that makes the
+			// descriptor defines: a function literal would be one
+			// more function for each unit.
+			fa := "fa_" + strings.TrimPrefix(d, "fd_")
+			fmt.Fprintf(&g.funcs, "//go:dupok\nfunc %s%s\n\n", fa, strings.TrimPrefix(f, "func"))
+			g.fdEntry(g.erasedSig(ft), g.erasedSig(ft), fa, d)
+		case g.o.unit != "":
 			fmt.Fprintf(&g.descInit, "if %s == nil {\n%s = c23.NewFunc(%s)\n}\n%s", d, d, f, initSplit)
-		} else {
+		default:
 			fmt.Fprintf(&g.descInit, "%s = c23.NewFunc(%s)\n%s", d, f, initSplit)
 		}
 	}
@@ -1578,6 +1672,23 @@ func (g *gen) erasedSig(ft *funcType) string {
 		res = " " + g.et(ft.ret)
 	}
 	return fmt.Sprintf("func(%s)%s", strings.Join(ps, ", "), res)
+}
+
+// sameCall reports whether a function of type ft is called as one of
+// erasedSig's type is: its Go type has pointers where that has
+// pointers, and nothing else of them differs. Not so if it takes a
+// struct, which a call through a pointer passes the address of, or has
+// no prototype.
+func sameCall(ft *funcType) bool {
+	if !ft.proto && len(ft.params) == 0 {
+		return false
+	}
+	for _, pt := range ft.params {
+		if pt.kind == kStruct || pt.kind == kArray {
+			return false
+		}
+	}
+	return true
 }
 
 // erased is the Go function literal that calls the function name, of

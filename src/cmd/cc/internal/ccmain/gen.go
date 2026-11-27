@@ -78,6 +78,10 @@ type pkgGen struct {
 	complete map[string]*ctype
 	fileTmpN int // temporaries of file-scope code, which is all in one function
 
+	fillN    int        // tables of functions' addresses made (fillFuncs)
+	fdGroups []*fdGroup // the functions that have descriptors, by Go type (fdEntry)
+	fdIndex  map[string]*fdGroup
+
 	// A unit's (units.go).
 	prelude  strings.Builder // what its objects are made with, before anything is initialized
 	dynInits strings.Builder // the initializers that run code
@@ -182,6 +186,57 @@ func writeInits(b *strings.Builder, name, text string) {
 	}
 }
 
+// An fdGroup is the functions of one Go type that have descriptors.
+type fdGroup struct {
+	sig, erased string
+	funcs, vars []string
+}
+
+// fdEntry records that the Go function f, of type sig, has the
+// descriptor that the variable d holds, and is called through pointers
+// as a function of type erased.
+func (pg *pkgGen) fdEntry(sig, erased, f, d string) {
+	if pg.fdIndex == nil {
+		pg.fdIndex = map[string]*fdGroup{}
+	}
+	gr := pg.fdIndex[sig]
+	if gr == nil {
+		gr = &fdGroup{sig: sig, erased: erased}
+		pg.fdIndex[sig] = gr
+		pg.fdGroups = append(pg.fdGroups, gr)
+	}
+	gr.funcs, gr.vars = append(gr.funcs, f), append(gr.vars, d)
+}
+
+// fdTables writes what makes the descriptors of the functions that have
+// them: for each, a call that is given the address of the descriptor's
+// variable, that of the function and the type that calls through
+// pointers to it have, which a variable holds for all the functions
+// that are called alike. (An interface made of each function, or
+// tables of the functions of each Go type, cost more: in code, or in
+// the types they need.)
+func (pg *pkgGen) fdTables() {
+	types := map[string]string{}
+	var typeInit, descs strings.Builder
+	for _, gr := range pg.fdGroups {
+		t := types[gr.erased]
+		if t == "" {
+			t = fmt.Sprintf("%sfdt_%s%d", pg.o.prefix, pg.unitPre(), len(types))
+			types[gr.erased] = t
+			fmt.Fprintf(&pg.vars, "var %s unsafe.Pointer\n", t)
+			fmt.Fprintf(&typeInit, "\t%s = c23.FuncType((%s)(nil))\n%s", t, gr.erased, initSplit)
+		}
+		for j, f := range gr.funcs {
+			fmt.Fprintf(&descs, "\t{\n\t\tf := %s\n\t\tc23.FuncInto(&%s, unsafe.Pointer(&f), %s)\n\t}\n%s", f, gr.vars[j], t, initSplit)
+		}
+	}
+	old := pg.descInit.String()
+	pg.descInit.Reset()
+	pg.descInit.WriteString(typeInit.String())
+	pg.descInit.WriteString(descs.String())
+	pg.descInit.WriteString(old)
+}
+
 func catch(err *error) {
 	if r := recover(); r != nil {
 		ge, ok := r.(genError)
@@ -211,6 +266,7 @@ func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, er
 		g := &gen{pkgGen: pg, u: u, unitN: i}
 		g.unit()
 	}
+	pg.fdTables()
 	var b strings.Builder
 	b.WriteString(pg.types.String())
 	b.WriteString(pg.tdVars.String())

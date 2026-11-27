@@ -89,6 +89,9 @@ type pkgWriter struct {
 	typDecls  map[*types2.TypeName]typeDeclGen
 	methodIdx map[*types2.Func]int // method declaration order, for x/tools decoder (#81188)
 
+	// dupokVars are the variables declared //go:dupok.
+	dupokVars map[*types2.Var]bool
+
 	// linknames maps package-scope objects to their linker symbol name,
 	// if specified by a //go:linkname or //go:linknamestd directive.
 	linknames map[types2.Object]struct {
@@ -1327,6 +1330,7 @@ func (w *writer) typeExt(obj *types2.TypeName) {
 func (w *writer) varExt(obj *types2.Var) {
 	w.Sync(pkgbits.SyncVarExt)
 	w.linkname(obj)
+	w.Bool(w.p.dupokVars[obj])
 }
 
 func (w *writer) linkname(obj types2.Object) {
@@ -2984,7 +2988,20 @@ func (c *declCollector) Visit(n syntax.Node) syntax.Visitor {
 		return c.withTParams(obj)
 
 	case *syntax.VarDecl:
-		pw.checkPragmas(n.Pragma, 0, true)
+		// gd: //go:dupok on a variable of a file that is compiled by
+		// itself: every such file that has the variable declares it
+		// with the same value, and the linker keeps one.
+		pw.checkPragmas(n.Pragma, ir.Dupok, true)
+		if asPragmaFlag(n.Pragma)&ir.Dupok != 0 {
+			for _, name := range n.NameList {
+				if obj, ok := pw.info.Defs[name].(*types2.Var); ok {
+					if pw.dupokVars == nil {
+						pw.dupokVars = map[*types2.Var]bool{}
+					}
+					pw.dupokVars[obj] = true
+				}
+			}
+		}
 
 		if p, ok := n.Pragma.(*pragmas); ok && len(p.Embeds) > 0 {
 			if err := checkEmbed(c.gd, n, c.file.importedEmbed, c.withinFunc); err != nil {

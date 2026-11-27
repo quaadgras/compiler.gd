@@ -66,6 +66,60 @@ func NewFunc(f any) *Void {
 	return seal(unsafe.Pointer(p))
 }
 
+// NewFuncAs is NewFunc for the function f seen as one of the type of
+// like, a nil function: the type that a call through the pointer has
+// (FuncOf), which differs from f's in what its pointers point to and in
+// nothing a call depends on. cmd/cc passes the C function itself, where
+// it would otherwise make a Go function for each that does nothing but
+// convert pointers and call it.
+//
+//go:nocheckptr
+func NewFuncAs(f, like any) *Void {
+	(*abi.EmptyInterface)(unsafe.Pointer(&f)).Type = (*abi.EmptyInterface)(unsafe.Pointer(&like)).Type
+	return NewFunc(f)
+}
+
+// FuncType returns what FuncInto is given for the functions that are
+// called through pointers as functions of like's type, a nil function.
+func FuncType(like any) unsafe.Pointer {
+	return unsafe.Pointer((*abi.EmptyInterface)(unsafe.Pointer(&like)).Type)
+}
+
+// FuncInto makes the descriptor of a function and stores it in *d, if
+// *d has none: pf points to a variable that holds the function, and
+// typ is FuncType's for the type that calls through pointers to it
+// have. It is NewFuncAs for a program that makes a descriptor for each
+// of a hundred thousand functions as it starts, in which what a
+// statement for each takes is most of that code: this takes three
+// addresses.
+//
+//go:nocheckptr
+//go:noinline
+func FuncInto(d **Void, pf, typ unsafe.Pointer) {
+	if *d != nil {
+		return
+	}
+	var f any
+	e := (*abi.EmptyInterface)(unsafe.Pointer(&f))
+	e.Type, e.Data = (*abi.Type)(typ), *(*unsafe.Pointer)(pf)
+	*d = NewFunc(f)
+}
+
+// FillFuncs stores in the n pointers at dst the descriptors that the
+// variables src points to an array of hold (nil: none): a table of
+// virtual functions, whose entries are not known until the
+// descriptors are made.
+//
+//go:nocheckptr
+func FillFuncs(dst, src unsafe.Pointer, n int) {
+	const w = unsafe.Sizeof(uintptr(0))
+	for i := uintptr(0); i < uintptr(n); i++ {
+		if p := *(***Void)(unsafe.Add(src, i*w)); p != nil {
+			*(**Void)(unsafe.Add(dst, i*w)) = *p
+		}
+	}
+}
+
 var funcs seen
 
 // funcAt returns the Func that p points to: p is the address of an

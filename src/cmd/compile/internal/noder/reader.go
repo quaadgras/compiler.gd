@@ -1307,6 +1307,10 @@ func (r *reader) typeExt(name *ir.Name) {
 func (r *reader) varExt(name *ir.Name) {
 	r.Sync(pkgbits.SyncVarExt)
 	r.linkname(name)
+	if r.Bool() {
+		// //go:dupok: the linker keeps one of the files' definitions.
+		name.Linksym().Set(obj.AttrDuplicateOK, true)
+	}
 }
 
 func (r *reader) linkname(name *ir.Name) {
