@@ -64,6 +64,7 @@ type template struct {
 	primary *template
 	pattern int    // the "<" of its arguments
 	patArgs []targ // them, with the parameters as placeholders
+	patBad  bool   // a specialization whose pattern cannot be parsed: never chosen
 
 	// A function template.
 	pat          *funcType // its type, with the parameters as placeholders
@@ -1274,10 +1275,15 @@ func (p *parser) selectSpec(tm *template, args []targ) (*template, []targ) {
 					}
 				})
 			})
-			if !ok || sp.patArgs == nil {
-				sp.patArgs = []targ{}
-				continue
+			if !ok {
+				sp.patBad = true
 			}
+			if sp.patArgs == nil {
+				sp.patArgs = []targ{} // none (template <> struct X<>), or bad
+			}
+		}
+		if sp.patBad {
+			continue
 		}
 		// Match the pattern's arguments, the primary's packs spread.
 		flat := flatArgs(args)

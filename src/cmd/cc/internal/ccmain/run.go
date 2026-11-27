@@ -13,6 +13,9 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"runtime/debug"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -35,7 +38,30 @@ func Translate(file string, src []byte, pkg string, withMain bool) ([]byte, erro
 
 // Run runs cc with the command-line arguments args (without the command
 // name) and returns its exit status.
+// limitMemory makes the collector work harder before the translator
+// takes most of the memory that is free: many units' trees are kept at
+// once, and a large program's are gigabytes. (Only where the system
+// says how much is free; GOMEMLIMIT set by the user is kept.)
+func limitMemory() {
+	if os.Getenv("GOMEMLIMIT") != "" {
+		return
+	}
+	b, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 2 && f[0] == "MemAvailable:" {
+			if kb, err := strconv.ParseInt(f[1], 10, 64); err == nil && kb > 0 {
+				debug.SetMemoryLimit(kb * 1024 / 2)
+			}
+		}
+	}
+}
+
 func Run(args []string, stdout, stderr io.Writer) int {
+	limitMemory()
 	fs := flag.NewFlagSet("cc", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	pkg := fs.String("pkg", "main", "package of the output")

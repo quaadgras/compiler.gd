@@ -134,9 +134,6 @@ func parse(file string, toks []token) (u *unit, err error) {
 	p.u.tags = p.sc.tags
 	for p.peek().kind != tkEOF {
 		p.topLevel()
-		if p.cxx {
-			p.drain(false)
-		}
 	}
 	if p.cxx {
 		p.drain(true)
@@ -147,6 +144,10 @@ func parse(file string, toks []token) (u *unit, err error) {
 			s.t = arrayOf(s.t.elem, 1)
 		}
 	}
+	// The unit's symbols keep the parser (the functions that would
+	// define them do): not its tokens, which nothing reads again and
+	// are most of what a unit takes.
+	p.toks, p.tids, p.pending = nil, nil, nil
 	return p.u, nil
 }
 
@@ -1077,7 +1078,7 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 			f.t = arrayOf(f.t.elem, 0)
 			r.flex = true
 		} else if !f.t.isComplete() && !(f.t.kind == kArray && f.t.n == 0) {
-			p.errorf("field %q has incomplete type", f.name)
+			p.errorf("field %q has incomplete type %s (%s)", f.name, f.t, rawType(f.t))
 		}
 	}
 	r.fields = fields
