@@ -239,8 +239,8 @@ Not there yet:
   initialization of static locals;
 - generic lambdas, structured bindings, user-defined literals,
   deduction guides, member templates of class templates defined outside
-  both, designated initializers and brace elision for aggregates with
-  members that have constructors;
+  both, brace elision for aggregates with members that have
+  constructors, designators that are nested or out of order;
 - the containers and streams of the standard library (`<vector>`,
   `<string>`, `<iostream>`): Godot's own code does not use them, some
   of its third-party libraries do;
