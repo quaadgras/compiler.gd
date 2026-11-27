@@ -142,7 +142,7 @@ compiled: the mangled names are the Itanium ABI's, the calls are Go's.
 ## Status
 
 `go test cmd/cc -run Cxx` compiles `testdata/cxx/*.cc` with cmd/cc and
-with g++ and compares what they print (48 programs). Against Godot
+with g++ and compares what they print (50 programs). Against Godot
 (4.7.1, with its own defines and include directories, and `__GNUC__`
 defined: Godot expects its compiler to be GCC, clang or MSVC), 176 of
 the 177 `.cpp` files of `core` translate, each alone, and the 176
@@ -221,11 +221,14 @@ What is there, by step of the order above:
 
 Not there yet:
 
-- **constexpr evaluation**: a constexpr function's call is not a
-  constant to cmd/cc. A constexpr object initialized with one is
-  initialized when the program starts, and a `static_assert` that needs
-  one is not checked. Template arguments and array lengths that need one
-  are errors.
+- **constexpr evaluation**: a call of a constexpr function with
+  constants is a constant if the function is no member and computes
+  with integers (a function template's instance too): the width of a
+  bit-field, the length of an array, a template's argument. A member
+  function's call, one that computes with floating point or with
+  objects, is not: a constexpr object initialized with one is
+  initialized when the program starts, and a `static_assert` that
+  needs one is not checked.
 - a second base class with virtual functions, virtual base classes,
   `dynamic_cast`, run-time type information;
 - exceptions (Godot is built without them);

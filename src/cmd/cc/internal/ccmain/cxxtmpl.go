@@ -1779,6 +1779,11 @@ func (p *parser) instFunc(tm *template, args []targ, at pos) *symbol {
 			sym.comdat = true
 			sym.explicit = s.explicit
 			sym.inst = in
+			if s.constx {
+				// (Its call with constants may be a constant, as a
+				// function's that is no template: consteval.go.)
+				sym.constFn = true
+			}
 			if p.accept("=") {
 				if p.accept("delete") {
 					sym.deleted = true

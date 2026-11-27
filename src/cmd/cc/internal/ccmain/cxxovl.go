@@ -542,7 +542,17 @@ func (p *parser) callFunc(sym *symbol, obj expr, args []expr, at pos) expr {
 		}
 	}
 	fn := &decay{node{ptrTo(sym.t), at}, &varRef{node{sym.t, at}, sym}}
-	return p.callResult(&call{node{ft.ret.unqual(), at}, fn, ft, out}, ft, at)
+	c := &call{node{ft.ret.unqual(), at}, fn, ft, out}
+	if sym.constFn && !ft.ret.isRef() && constFnBody(c) != nil {
+		// A constexpr function's call with constants is the constant,
+		// where it is written: an operand of the length of an array or
+		// of a bit-field's width folds with it, as the call alone does
+		// (foldInt).
+		if v, ok := p.foldConstCall(c); ok {
+			return &intConst{node{c.t, at}, v}
+		}
+	}
+	return p.callResult(c, ft, at)
 }
 
 // callResult is a call's value to C++: what a returned reference refers
