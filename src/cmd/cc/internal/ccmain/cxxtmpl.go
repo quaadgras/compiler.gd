@@ -463,6 +463,12 @@ func (p *parser) declName() (name string, at, qual int, isFunc bool) {
 						continue
 					}
 				}
+				if p.isAt(j+1, "<") {
+					if s := p.lookup(t.text); s != nil && s.kind == symTemplate && s.tmpl.kind == 'v' {
+						// A variable template's specialization: name<pattern>.
+						return t.text, j, p.qualStart(j), false
+					}
+				}
 				last, lastAt = t.text, j
 				if j > 0 && p.isAt(j-1, "~") {
 					last, lastAt = "~"+t.text, j-1
@@ -760,6 +766,16 @@ func (p *parser) templateDecl() {
 	tm.hasBody = p.skipDecl(false)
 	if !isFunc {
 		tm.kind = 'v'
+		if t := p.toks[tm.nameAt+1]; t.kind == tkPunct && t.text == "<" {
+			// A partial specialization of a variable template.
+			old := p.lookup(name)
+			if old == nil || old.kind != symTemplate || old.tmpl.kind != 'v' {
+				p.errorAt(at, "%q is not a variable template", name)
+			}
+			tm.primary, tm.pattern = old.tmpl, tm.nameAt+1
+			old.tmpl.specs = append(old.tmpl.specs, tm)
+			return
+		}
 		tm.sym = &symbol{name: name, src: name, kind: symTemplate, tmpl: tm, sc: p.sc, p: at}
 		p.sc.vars[name] = tm.sym
 		return
@@ -1442,7 +1458,23 @@ func (p *parser) unify(pt, at *ctype, bound []targ, set []bool) bool {
 		if in == nil || in.tmpl != pt.dep.tmpl {
 			return false
 		}
-		return p.unifyArgs(pt.dep.args, flatArgs(in.args), bound, set)
+		flat := flatArgs(in.args)
+		if n, tps := len(pt.dep.args), pt.dep.tmpl.params; n < len(flat) && len(flat) == len(tps) {
+			// The pattern leaves the template's last arguments to their
+			// defaults (const Set<T> &, of Set<T, Hash<T>>): what it
+			// gives is matched.
+			dflts := true
+			for _, tp := range tps[n:] {
+				dflts = dflts && tp.dflt != 0 && !tp.pack
+			}
+			for _, a := range pt.dep.args {
+				dflts = dflts && !(a.t != nil && a.t.kind == kTParam && a.t.isPackT) && !a.packV
+			}
+			if dflts {
+				flat = flat[:n]
+			}
+		}
+		return p.unifyArgs(pt.dep.args, flat, bound, set)
 	case kMemPtr:
 		amp := memPtrOf(at)
 		return amp != nil && p.unify(pt.mp.cls, amp.cls, bound, set) && p.unify(pt.elem, amp.t, bound, set)
@@ -2190,8 +2222,14 @@ func (p *parser) instance(tm *template, args []targ) *tinst {
 			in.t = s.t
 		}
 	case 'v':
-		sc := p.bindParams(tm, args)
-		p.replay(tm.start, sc, func() { p.topLevel() })
+		// The specialization the arguments match best, or the template.
+		stm, sargs := p.selectSpec(tm, args)
+		sc := p.bindParams(stm, sargs)
+		p.replay(stm.start, sc, func() {
+			p.varSpec = stm != tm
+			p.topLevel()
+			p.varSpec = false
+		})
 		in.sym = sc.vars[tm.name]
 		if in.sym != nil && in.sym.kind == symVar {
 			in.sym.name = mangleVar(tm.sc, tm.name+"I"+key+"E")

@@ -67,6 +67,7 @@ type parser struct {
 	extend        *[]*symbol // where temporaries a declared reference binds are kept, to live as long
 	declTo        *scope     // the scope the next function is declared in, if not the current one
 	trying        int        // in try: an error is a substitution failure
+	varSpec       bool       // declaring a variable template's specialization: its name has arguments
 	userConv      int        // ranking a user-defined conversion's own argument
 	pattern       int        // parsing a template's pattern: its parameters are placeholders
 	packOn        bool       // parsing a pack expansion's pattern, for the element packI
@@ -1335,7 +1336,7 @@ func (p *parser) declarator(base *ctype) (string, *ctype, attrs) {
 	a := p.attributes()
 	t := base
 	for {
-		if p.cxx {
+		if p.cxx && !(p.varSpec && p.peek().kind == tkIdent && p.isAt(1, "<")) {
 			if cls, n := p.memPtrAhead(0); n > 0 {
 				// C::*: a pointer to member.
 				p.pos += n

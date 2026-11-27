@@ -304,6 +304,12 @@ func (p *parser) nameAt(j int, in *scope) (*symbol, int) {
 		tm = s.tmpl
 	case s.kind == symTypedef && s.instOf != nil:
 		tm = s.instOf
+	case s.kind == symVar && in == nil && s.sc != nil && s.sc.kind == skTemplate && s.sc.parent != nil:
+		// A variable template's instance, named in its own
+		// initializer: the template (fact<N - 1>).
+		if o := s.sc.parent.find(t.text); o != nil && o.kind == symTemplate && o.tmpl.kind == 'v' {
+			tm = o.tmpl
+		}
 	}
 	if tm == nil {
 		return s, j + 1
@@ -909,6 +915,14 @@ func (p *parser) isCtorName(sym *symbol, n int) bool {
 // identifier, ~T, operator+ or operator T, which may be qualified. in is
 // the scope its qualifier names.
 func (p *parser) declaratorID() (name string, in *scope) {
+	if p.varSpec && p.peek().kind == tkIdent && p.isAt(1, "<") {
+		// A variable template's specialization, name<pattern>: the
+		// pattern is what selected it.
+		p.varSpec = false
+		name = p.ident()
+		p.skipAngles()
+		return name, nil
+	}
 	if p.is("::") || p.peek().kind == tkIdent && (p.isAt(1, "::") || p.isAt(1, "<")) {
 		var j int
 		in, j = p.nested(0)
