@@ -1206,6 +1206,21 @@ func (p *parser) postfix(x expr) expr {
 		case p.accept("["):
 			i := p.rvalue(p.expr())
 			p.expect("]")
+			if s, ok := x.(*strLit); ok && p.cxx && s.t.elem.sizeof() == 1 {
+				// C++: a character of a string literal is a constant
+				// ("DXT1"[3] in an enumerator's value).
+				if v, ok := p.foldInt(i); ok && v >= 0 && v <= int64(len(s.data)) {
+					c := int64(0)
+					if v < int64(len(s.data)) {
+						c = int64(s.data[v])
+						if !s.t.elem.isUnsigned() {
+							c = int64(int8(c))
+						}
+					}
+					x = &intConst{node{s.t.elem.unqual(), at}, c}
+					continue
+				}
+			}
 			b := p.rvalue(x)
 			if !b.ty().isPtr() && i.ty().isPtr() {
 				b, i = i, b
@@ -1330,8 +1345,13 @@ func (p *parser) primary() expr {
 	case tkString:
 		n := int64(len(t.str))/t.ty.sizeof() + 1
 		if p.cxx {
-			// C++: an array of const elements.
-			return &strLit{node{arrayOf(t.ty.qualified(qConst), n), at}, t.str}
+			// C++: an array of const elements; u8"..." is of char
+			// (until C++20's char8_t).
+			et := t.ty
+			if et == tUChar {
+				et = tChar
+			}
+			return &strLit{node{arrayOf(et.qualified(qConst), n), at}, t.str}
 		}
 		return &strLit{node{arrayOf(t.ty, n), at}, t.str}
 	case tkPunct:

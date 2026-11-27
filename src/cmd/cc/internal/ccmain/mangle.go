@@ -203,6 +203,13 @@ func (m *mangler) typ(t *ctype, raw bool) {
 		m.named(t.enum.sc, sourceName(t.enum.tag), raw)
 		return
 	}
+	if t.enum != nil && t.enum.sc != nil && len(t.enum.consts) > 0 {
+		// C++: an unnamed enumeration is a type of its own (a template's
+		// instance for it is not the one for its underlying type): named
+		// by its first enumerator.
+		m.named(t.enum.sc, sourceName("._"+t.enum.consts[0].name), raw)
+		return
+	}
 	switch t.chr {
 	case 'w':
 		m.b.WriteString("w")

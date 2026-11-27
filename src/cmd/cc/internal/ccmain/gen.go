@@ -499,6 +499,11 @@ func (g *gen) mirror(t *ctype) string {
 		return fmt.Sprintf("[%d]%s", max(t.n, 0), g.mirror(t.elem))
 	case kStruct:
 		if !t.rec.complete {
+			// Declared only, here (the result of a function this unit
+			// only names): another unit may complete it.
+			if c := g.complete[completeKey(t)]; c != nil {
+				return g.mirror(c)
+			}
 			return "byte"
 		}
 		return g.record(t)

@@ -1556,7 +1556,8 @@ func (p *parser) castAhead() bool {
 			}
 			return true
 		}
-		return p.isAt(n+1, "*") || p.isAt(n+1, "&") || p.isAt(n+1, "^") || p.isAt(n+1, ")") || p.isTypeStart(n+1) && p.paramsAhead(n)
+		// (T() ...) not followed by ")" is a temporary's use: (T() * x).
+		return p.isAt(n+1, "*") || p.isAt(n+1, "&") || p.isAt(n+1, "^") || p.isTypeStart(n+1) && p.paramsAhead(n)
 	}
 	return true
 }
@@ -1719,6 +1720,27 @@ func (p *parser) classOperand(x, y expr, at pos) expr {
 	to := y.ty()
 	if to.kind == kStruct || to.kind == kArray {
 		to = tInt
+	}
+	if to.kind == kNullptr {
+		// With nullptr: the pointer the class converts to, if it is to
+		// one type of pointer.
+		var via *ctype
+		for _, f := range p.convFuncs(x.ty(), nil) {
+			rt := f.t.fn.ret.unqual()
+			if f.explicit || f.deleted || f.tmpl != nil || !rt.isPtr() || rt.isRef() {
+				continue
+			}
+			if via != nil && !sameType(via, rt) {
+				via = nil
+				break
+			}
+			via = rt
+		}
+		if via != nil {
+			if c := p.convertClass(x, via, at); c != nil {
+				return c
+			}
+		}
 	}
 	if c := p.convertClass(x, valueType(&goVal{node{to, at}, ""}), at); c != nil {
 		return c
