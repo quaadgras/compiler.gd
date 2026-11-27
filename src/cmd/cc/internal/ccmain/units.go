@@ -330,7 +330,10 @@ func translateUnits(files []string, o options, incDirs []string, dir string) (tr
 			errs[i] = err
 			return
 		}
-		info := &pg.info
+		// (A copy: the unit's trees, which the generator has, are
+		// not kept with it.)
+		info := new(unitInfo)
+		*info = pg.info
 		info.Tag, info.File, info.Options = tag, f, opts
 		info.Inputs = map[string]string{}
 		for path, sum := range in.files {

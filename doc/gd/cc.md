@@ -20,6 +20,26 @@ several at a time, since nothing of one is another's until they are
 linked; they are then linked and generated as one Go file, which is the
 same whatever the order they were parsed in.
 
+`cc -units dir` writes a Go file for each C file, which Go compiles by
+itself ([units.md](units.md)), and `cc_root.go`, which makes them a
+package: a change to one C file translates and compiles that file. The
+Go of a unit is made of that file alone. Its types have the same names
+in every unit: a C++ class's is made of what names it in C++ (so two
+files may not define different classes of one name, unless in unnamed
+namespaces: cc says which files do), another type's of its layout. A
+function or object with external linkage is declared where it is not
+defined; an inline function is defined by every unit that uses it; an
+object that several units define (an inline variable, a table of
+virtual functions, a static local of an inline function) is one object,
+given its constants by each unit and initialized by code once. Each unit
+has a function that makes its objects and one that runs its
+initializers; the root calls the first of every unit, then the second of
+every unit, then `main`, so that no initializer runs before every
+object has its constants. With `-undef` the functions that no unit
+defines panic when they are called; without it they are reported. A
+unit is translated again only if a file its translation read has
+changed (`dir/tag.ccu` has the list).
+
 `cc -cache dir` keeps the translation of a command line in `dir`, with
 what it read: the files, by their contents, and the files it looked for
 and did not find (a header that appears in a directory searched before
