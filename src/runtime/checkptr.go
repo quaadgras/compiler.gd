@@ -79,8 +79,22 @@ func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, load, c bool) {
 			return
 		}
 		if typ != nil {
+			// What the two checks say is of the types and of where in
+			// the object the pointer is, and of nothing that is in the
+			// memory: a conversion that passed passes again.
+			k := checkptrPassedKey{uintptr(unsafe.Pointer(typ)), uintptr(unsafe.Pointer(elem)), uintptr(p) - tbase, size, base + s.elemsize - tbase, 0}
+			if load {
+				k.flags |= 1
+			}
+			if c {
+				k.flags |= 2
+			}
+			if checkptrPassed(&k) {
+				return
+			}
 			checkptrWhole(typ, tbase, base+s.elemsize, uintptr(p), elem, size)
 			checkptrCompat(typ, tbase, base+s.elemsize, uintptr(p), elem, size, load, c)
+			checkptrPass(&k)
 			return
 		}
 		if wholeBitsEnabled {
@@ -108,6 +122,62 @@ func checkptrAlign(p unsafe.Pointer, elem *_type, n uintptr, load, c bool) {
 	if checkptrStraddles(p, size) {
 		throw("checkptr: converted pointer straddles multiple allocations")
 	}
+}
+
+// A checkptrPassedKey is all that the checks of a conversion of a
+// pointer into an object of the heap that has a type depend on
+// (checkptrWhole, checkptrCompat): the object's type and the type
+// converted to, where in the object's values the pointer is, how many
+// bytes the conversion is of, how far the object goes, and whether the
+// conversion is only loaded through and is C's.
+type checkptrPassedKey struct {
+	typ, elem      uintptr
+	lo, size, room uintptr
+	flags          uintptr
+}
+
+// checkptrPassedN is how many conversions that passed a P remembers. A
+// program converts the same few pointers again and again (the nodes of a
+// sync.Map, each time it is read), and the comparison of two types word
+// by word is hundreds of times what the conversion is.
+const checkptrPassedN = 64
+
+func (k *checkptrPassedKey) slot() uintptr {
+	h := (k.typ>>4)*0x9e3779b97f4a7c15 ^ (k.elem>>4)*0xc2b2ae3d27d4eb4f ^ (k.lo>>3)*0x165667b19e3779f9 ^ k.size
+	return h >> (goarch.PtrSize*8 - 6)
+}
+
+// checkptrPassed reports whether the conversion that k is has passed its
+// checks before, as far as the P remembers.
+//
+//go:nosplit
+func checkptrPassed(k *checkptrPassedKey) bool {
+	mp := acquirem()
+	ok := false
+	if pp := mp.p.ptr(); pp != nil {
+		e := &pp.checkptrPassed[k.slot()]
+		ok = e.typ == k.typ && e.elem == k.elem && e.lo == k.lo && e.size == k.size && e.room == k.room && e.flags == k.flags
+	}
+	releasem(mp)
+	return ok
+}
+
+// checkptrPass records that the conversion that k is passed its checks:
+// they returned. Types that are not of the program's own module (those
+// that reflect makes) are not recorded, and neither is a conversion that
+// was only asked about, which returns if it fails too.
+//
+//go:nosplit
+func checkptrPass(k *checkptrPassedKey) {
+	md := &firstmoduledata
+	if k.typ < md.types || k.typ >= md.etypes || k.elem < md.types || k.elem >= md.etypes {
+		return
+	}
+	mp := acquirem()
+	if pp := mp.p.ptr(); pp != nil && !mp.cprobe {
+		pp.checkptrPassed[k.slot()] = *k
+	}
+	releasem(mp)
 }
 
 // checkptrStop stops the program for a conversion that msg says what is
@@ -232,6 +302,23 @@ func checkptrConvVar(off, vsize uintptr, typ *_type, typed bool, elem *_type, si
 // What is in nothing that the runtime knows the bounds of, memory that
 // the program mapped, is let be for now.
 func checkptrArithmeticC(p unsafe.Pointer, originals []unsafe.Pointer) unsafe.Pointer {
+	// The addresses are looked up as integers, by functions that may
+	// grow the stack: if it was copied meanwhile, an address of the
+	// stack that was taken before is of the old one, and so is what
+	// was made of it. The pointers themselves were adjusted, so the
+	// check is made again with them (as in checkptrArithmeticC1,
+	// checkptrConvC1 and checkptrAlignmentC).
+	for {
+		gp := getg()
+		moves := gp.stackMoves
+		r := checkptrArithmeticCMoved(p, originals)
+		if gp.stackMoves == moves {
+			return r
+		}
+	}
+}
+
+func checkptrArithmeticCMoved(p unsafe.Pointer, originals []unsafe.Pointer) unsafe.Pointer {
 	r := uintptr(p)
 	if r&cPoison != 0 {
 		// Made of what was no pointer: it stays that.
@@ -286,9 +373,10 @@ func checkptrArithmeticC1(p, original unsafe.Pointer) unsafe.Pointer {
 	// compiled code could not say for itself, as a large one: the P
 	// remembers its span (cHeaderOf).
 	if r, a := uintptr(p), uintptr(original); (r|a)&(cPtrBits|cPoison) == 0 && a >= minLegalPointer {
+		// (An object of C's is not in the stack: r is what it was.)
 		if _, base, size, ok := cHeaderOf(a); ok && r-base <= size {
 			if r-base == size {
-				return unsafe.Pointer(r | cEnd)
+				return unsafe.Pointer(uintptr(p) | cEnd)
 			}
 			return p
 		}
@@ -302,6 +390,17 @@ func checkptrArithmeticC1(p, original unsafe.Pointer) unsafe.Pointer {
 // are in one object, each of them whole, and an object of C's is claimed
 // for them (cclaim.go).
 func checkptrAlignmentC(p unsafe.Pointer, elem *_type, n uintptr) {
+	for {
+		gp := getg()
+		moves := gp.stackMoves
+		checkptrAlignmentCMoved(p, elem, n)
+		if gp.stackMoves == moves {
+			return
+		}
+	}
+}
+
+func checkptrAlignmentCMoved(p unsafe.Pointer, elem *_type, n uintptr) {
 	if p == nil || uintptr(p) < minLegalPointer {
 		return
 	}
@@ -359,6 +458,19 @@ func checkptrConvCLoad(p unsafe.Pointer, elem *_type, n uintptr) unsafe.Pointer 
 }
 
 func checkptrConvC1(p unsafe.Pointer, elem *_type, load bool) unsafe.Pointer {
+	// (If the stack was copied the address that was looked up is of
+	// the old one: checkptrArithmeticC.)
+	for {
+		gp := getg()
+		moves := gp.stackMoves
+		r := checkptrConvCMoved(p, elem, load)
+		if gp.stackMoves == moves {
+			return r
+		}
+	}
+}
+
+func checkptrConvCMoved(p unsafe.Pointer, elem *_type, load bool) unsafe.Pointer {
 	a := uintptr(p)
 	if a < minLegalPointer || a&cPoison != 0 {
 		// Null, an integer that C keeps in a pointer, or a pointer
@@ -541,8 +653,13 @@ func checkptrViewKept(p unsafe.Pointer, elem *_type, n uintptr) {
 			// What the object was allocated as.
 			return
 		}
+		k := checkptrPassedKey{uintptr(unsafe.Pointer(typ)), uintptr(unsafe.Pointer(elem)), uintptr(p) - tbase, size, base + s.elemsize - tbase, 0}
+		if checkptrPassed(&k) {
+			return
+		}
 		checkptrWhole(typ, tbase, base+s.elemsize, uintptr(p), elem, size)
 		checkptrCompat(typ, tbase, base+s.elemsize, uintptr(p), elem, size, false, false)
+		checkptrPass(&k)
 		return
 	}
 	if wholeBitsEnabled {

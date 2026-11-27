@@ -633,6 +633,12 @@ type g struct {
 	// c23 is what internal/c23 keeps for this goroutine as a thread of
 	// C's: its errno, and the like (c23GTable).
 	c23 unsafe.Pointer
+
+	// stackMoves counts the times that the stack was copied
+	// (copystack). A check of C's that kept an address of the stack as
+	// an integer while it called what may grow the stack is made again
+	// if this changed (checkptr.go's checkptrConvC1).
+	stackMoves uintptr
 }
 
 // gTrackingPeriod is the number of transitions out of _Grunning between
@@ -991,6 +997,10 @@ type p struct {
 	cHeaders     [64]cHeaderEnt    // gd: the spans of C's small objects that c23Header looked up, by page (cclaim.go)
 	dataCache    [256]dataCacheEnt // gd: the variables of the data that were looked up, by address (stackvar.go)
 	varCacheNext uint8
+
+	// gd: the conversions of pointers that passed their checks
+	// (checkptr.go's checkptrPassed).
+	checkptrPassed [checkptrPassedN]checkptrPassedKey
 }
 
 type schedt struct {

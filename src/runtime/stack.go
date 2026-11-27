@@ -1019,6 +1019,7 @@ func copystack(gp *g, newsize uintptr) {
 
 	// Swap out old stack for new one
 	gp.stack = new
+	gp.stackMoves++
 	gp.stackguard0 = new.lo + stackGuard // NOTE: might clobber a preempt request
 	gp.sched.sp = new.hi - used
 	gp.stktopsp += adjinfo.delta
