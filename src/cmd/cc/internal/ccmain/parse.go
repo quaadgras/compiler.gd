@@ -2448,7 +2448,7 @@ func (p *parser) defineFunc(sym *symbol, ft *funcType, name string, at pos, inli
 	}
 	if p.cxx {
 		p.nrvo(f)
-		if sym.t.fn.ret.isAuto {
+		if hasAuto(sym.t.fn.ret) {
 			sym.t.fn.ret = tVoid // no return statement gave it a type
 		}
 	}

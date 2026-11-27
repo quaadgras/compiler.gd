@@ -1045,6 +1045,11 @@ func (p *parser) initMembers(t *ctype, inits map[*field]memInit, baseInits map[*
 			}
 			p.pos = save
 		}
+		if bc := classOf(b.t); bc != nil && bc.empty && len(in.args) == 0 && !needsCtor(b.t) {
+			// An empty base takes no room: there is nothing to zero
+			// (its one byte is the object's first).
+			continue
+		}
 		e := p.constructAt(p.baseObject(p.thisObject(at), b.t, at), b.t, in.args, at, mode)
 		out = append(out, &exprStmt{p.fullExpr(mark, e)})
 	}

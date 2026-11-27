@@ -432,6 +432,10 @@ func (p *parser) statement() stmt {
 					rt = valueType(x)
 				}
 				p.fn.sym.t.fn.ret = rt
+			} else if p.cxx && hasAuto(rt) {
+				// auto &, const auto &, auto *: as a variable's.
+				rt = p.autoType(rt, x, at)
+				p.fn.sym.t.fn.ret = rt
 			}
 			p.expect(";")
 			if rt.kind == kVoid {
