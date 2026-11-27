@@ -128,6 +128,10 @@ func (g *gen) function(f *funcDecl) {
 	case f.inline || f.sym.comdat:
 		g.funcs.WriteString("//go:inline\n")
 	}
+	if g.o.unit != "" && f.sym.comdat && f.sym.linkage == 'e' {
+		// Each unit that uses it defines it: the linker keeps one.
+		g.funcs.WriteString("//go:dupok\n")
+	}
 	fmt.Fprintf(&g.funcs, "func %s%s\n\n", g.names[f.sym], strings.TrimPrefix(lit, "func"))
 	g.fn = nil
 }

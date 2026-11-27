@@ -51,3 +51,9 @@ type (
 // unsafe.Pointer, which is where the compiler checks it
 // (doc/gd/unsafe.md).
 type Void [0]byte
+
+// Incomplete is the one field of a struct that stands, in a file of C
+// that Go compiles by itself (cmd/cc's units), for a class that the
+// file has only declared: the type is the one of the file that defines
+// the class, which this file has pointers to and nothing else.
+type Incomplete struct{}

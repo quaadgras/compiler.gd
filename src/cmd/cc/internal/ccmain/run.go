@@ -70,6 +70,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	debug := fs.Bool("debug", false, "write the assertions that Go lays each struct and union out as C does")
 	out := fs.String("o", "", "output file")
 	cacheDir := fs.String("cache", "", "keep translations in `dir`, and take from it the one of this command line if what it read has not changed")
+	unitsDir := fs.String("units", "", "write each C file's Go to `dir` as a file that Go compiles by itself, with the root that makes them a package, and translate only the files that changed")
 	var incDirs []string
 	fs.Func("I", "search `dir` for #include (repeatable)", func(s string) error {
 		incDirs = append(incDirs, s)
@@ -82,6 +83,15 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *unitsDir != "" && fs.NArg() >= 1 {
+		n, err := translateUnits(fs.Args(), options{pkg: *pkg, main: *withMain, undef: *undef, debug: *debug}, incDirs, *unitsDir)
+		if err != nil {
+			fmt.Fprintln(stderr, "cc:", err)
+			return 1
+		}
+		fmt.Fprintf(stderr, "cc: %d of %d units translated\n", n, fs.NArg())
+		return 0
 	}
 	if fs.NArg() < 1 || *out == "" {
 		fs.Usage()

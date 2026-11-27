@@ -273,10 +273,13 @@ type symbol struct {
 	synth       func()    // makes its (implicit) definition, when it is used
 	queued      bool
 	owner       *funcDecl // a local's or parameter's function
-	capInit     expr      // a lambda's initialized capture: what initializes it
+	staticIn    *symbol   // a static local's function, and which of its statics it is: with the function's name, its name to every unit that has the function (units.go)
+	staticN     int
+	capInit     expr // a lambda's initialized capture: what initializes it
 }
 
 type funcDecl struct {
+	nstatic int // its static locals so far
 	sym     *symbol
 	params  []*symbol
 	body    *block

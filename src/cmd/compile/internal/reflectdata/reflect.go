@@ -993,6 +993,16 @@ func formalType(t *types.Type) *types.Type {
 	return t
 }
 
+// incompleteC reports whether t is declared as a type that a unit has
+// only the name of: a struct of one field, an internal/c23.Incomplete.
+func incompleteC(t *types.Type) bool {
+	if t.Sym() == nil || !t.IsStruct() || t.NumFields() != 1 {
+		return false
+	}
+	s := t.Field(0).Type.Sym()
+	return s != nil && s.Name == "Incomplete" && s.Pkg != nil && s.Pkg.Path == "internal/c23"
+}
+
 func writeType(gd *base.Invocation, t *types.Type) *obj.LSym {
 	t = formalType(t)
 	if t.IsUntyped() {
@@ -1018,6 +1028,13 @@ func writeType(gd *base.Invocation, t *types.Type) *obj.LSym {
 	// compiling package runtime, so we don't need or want to emit one
 	// from this fake type.
 	if sym := tbase.Sym(); sym != nil && sym.Pkg == ir.Pkgs(gd).Runtime {
+		return lsym
+	}
+
+	if gd.Flag.Unit && incompleteC(t) {
+		// A class that this file of C has only declared (cmd/cc's
+		// units): the file that defines it has the type, or the
+		// package's root does.
 		return lsym
 	}
 

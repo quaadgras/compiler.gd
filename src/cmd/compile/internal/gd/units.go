@@ -23,7 +23,8 @@ import (
 
 // Units (doc/gd/units.md).
 //
-// A file that begins with the line "//go:unit" is compiled by itself,
+// A file with the line "//go:unit" before its package clause, first or
+// after one line of comment, is compiled by itself,
 // as a C file is: it declares every type it uses and every function and
 // variable of the package's other files that it names (a function
 // without a body, a variable without a value), and nothing of it is
@@ -39,16 +40,22 @@ import (
 
 const unitMarker = "//go:unit\n"
 
-// isUnitFile reports whether the Go file begins with the unit marker.
+// isUnitFile reports whether the Go file has the unit marker: its
+// first line, or its second after a comment (// Code generated ...).
 func isUnitFile(name string) bool {
 	f, err := os.Open(name)
 	if err != nil {
 		return false
 	}
 	defer f.Close()
-	var buf [len(unitMarker)]byte
+	var buf [512]byte
 	n, _ := io.ReadFull(f, buf[:])
-	return string(buf[:n]) == unitMarker
+	head := string(buf[:n])
+	if strings.HasPrefix(head, unitMarker) {
+		return true
+	}
+	first, rest, ok := strings.Cut(head, "\n")
+	return ok && strings.HasPrefix(first, "//") && strings.HasPrefix(rest, unitMarker)
 }
 
 // splitUnits separates the files to compile into the units and the rest.

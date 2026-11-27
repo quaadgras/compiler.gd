@@ -1093,17 +1093,29 @@ func (g *gen) tglobalVar(s *symbol) {
 		}
 		g.errorf(s.p, "storage size of %q isn't known", s.name)
 	}
+	shared := g.o.unit != "" && sharedVar(s)
 	if s.tls {
 		// Each thread's, made when it first uses it.
-		fmt.Fprintf(&g.vars, "var %s = c23.NewTLS(func() *c23.Void {\n", name)
-		fmt.Fprintf(&g.vars, "p := new(%s)\n", g.mirror(s.t))
+		w := &g.vars
+		if g.o.unit != "" {
+			// (A unit's variables have no initializers that run: unitInits.)
+			fmt.Fprintf(&g.vars, "var %s *c23.TLS\n", name)
+			w = &g.prelude
+			fmt.Fprintf(w, "if %s == nil {\n%s = c23.NewTLS(func() *c23.Void {\n", name, name)
+		} else {
+			fmt.Fprintf(w, "var %s = c23.NewTLS(func() *c23.Void {\n", name)
+		}
+		fmt.Fprintf(w, "p := new(%s)\n", g.mirror(s.t))
 		if s.init != nil {
 			save, saveInd := g.out, g.ind
-			g.out = &g.vars
+			g.out = w
 			g.tinitObject("(*p)", s.t, s.init)
 			g.out, g.ind = save, saveInd
 		}
-		g.vars.WriteString("return (*c23.Void)(unsafe.Pointer(p))\n})\n")
+		w.WriteString("return (*c23.Void)(unsafe.Pointer(p))\n})\n")
+		if g.o.unit != "" {
+			w.WriteString("}\n" + initSplit)
+		}
 		return
 	}
 	if g.declared == nil {
@@ -1117,12 +1129,22 @@ func (g *gen) tglobalVar(s *symbol) {
 	if s.allocSize > s.t.sizeof() {
 		// With an initialized flexible array member: longer than its
 		// type. The Go variable is the pointer to it.
-		fmt.Fprintf(&g.vars, "var %s = c23.AllocRaw(%d)\n", name, s.allocSize)
+		if g.o.unit != "" {
+			fmt.Fprintf(&g.vars, "var %s *c23.Void\n", name)
+			fmt.Fprintf(&g.prelude, "if %s == nil {\n%s = c23.AllocRaw(%d)\n}\n%s", name, name, s.allocSize, initSplit)
+		} else {
+			fmt.Fprintf(&g.vars, "var %s = c23.AllocRaw(%d)\n", name, s.allocSize)
+		}
 		x = g.tglobal(s)
 	} else if overAligned(s) {
-		fmt.Fprintf(&g.vars, "var %s = %s\n", name, allocAligned(s))
+		if g.o.unit != "" {
+			fmt.Fprintf(&g.vars, "var %s *c23.Void\n", name)
+			fmt.Fprintf(&g.prelude, "if %s == nil {\n%s = %s\n}\n%s", name, name, allocAligned(s), initSplit)
+		} else {
+			fmt.Fprintf(&g.vars, "var %s = %s\n", name, allocAligned(s))
+		}
 		x = g.tglobal(s)
-	} else if lit, ok := g.staticInit(s); ok {
+	} else if lit, ok := g.staticInitFor(s, shared); ok {
 		// Initialized where Go declares it.
 		if s.t.isAggregate() {
 			fmt.Fprintf(&g.vars, "var %s = %s\n", name, lit)
@@ -1136,7 +1158,14 @@ func (g *gen) tglobalVar(s *symbol) {
 	if x == name && hasUnionPtr(s.t) {
 		// The runtime knows where the unions of the heap are, from
 		// its types and claims: of a variable's it is told.
-		fmt.Fprintf(&g.vars, "var _ = c23.UnionGlobal(&%s)\n", name)
+		if g.o.unit != "" {
+			fmt.Fprintf(&g.prelude, "\tc23.UnionGlobal(&%s)\n%s", name, initSplit)
+		} else {
+			fmt.Fprintf(&g.vars, "var _ = c23.UnionGlobal(&%s)\n", name)
+		}
+	}
+	if g.o.unit != "" && !s.defined && s.storage == sExtern {
+		return // another unit's: declared
 	}
 	save, saveInd := g.out, g.ind
 	g.out, g.ind = &g.inits, 1
@@ -1144,12 +1173,47 @@ func (g *gen) tglobalVar(s *symbol) {
 		g.tinitObject(x, s.t, s.init)
 	}
 	if s.ctor != nil {
-		g.effect(s.ctor)
+		if g.o.unit != "" {
+			// What runs code is run when every unit's objects are
+			// made and have their constants (unitInits); and once, if
+			// other units have the object too.
+			g.out = &g.dynInits
+			if shared {
+				fmt.Fprintf(&g.vars, "var %s__once bool\n", name)
+				g.p("if !%s__once {", name)
+				g.p("%s__once = true", name)
+			}
+			g.effect(s.ctor)
+			if shared {
+				g.p("}")
+			}
+		} else {
+			g.effect(s.ctor)
+		}
 	}
 	g.out, g.ind = save, saveInd
-	if n := g.inits.Len(); n > 0 && !strings.HasSuffix(g.inits.String()[max(n-len(initSplit), 0):], initSplit) {
-		g.inits.WriteString(initSplit) // the next object's is on its own
+	for _, b := range []*strings.Builder{&g.inits, &g.dynInits} {
+		if n := b.Len(); n > 0 && !strings.HasSuffix(b.String()[max(n-len(initSplit), 0):], initSplit) {
+			b.WriteString(initSplit) // the next object's is on its own
+		}
 	}
+}
+
+// staticInitFor is staticInit, for an object that is not one of several
+// units' (shared): that one is declared the same by each, without a
+// value, and each gives it its constants as the program starts.
+func (g *gen) staticInitFor(s *symbol, shared bool) (string, bool) {
+	if shared {
+		return "", false
+	}
+	lit, ok := g.staticInit(s)
+	if ok && g.o.unit != "" && strings.Contains(lit, "c23.String(") {
+		// A pointer to a string literal is a call to Go, which would
+		// initialize the variable as the package starts: a unit's
+		// are given their values by its own function.
+		return "", false
+	}
+	return lit, ok
 }
 
 // cString is the string literal s as a Go string constant, if its
@@ -1325,7 +1389,7 @@ func (g *gen) tstr(s *strLit) string {
 	if n, ok := g.strs[key]; ok {
 		return n
 	}
-	n := fmt.Sprintf("%ss_%d", g.o.prefix, len(g.strs))
+	n := fmt.Sprintf("%ss_%s%d", g.o.prefix, g.unitPre(), len(g.strs))
 	g.strs[key] = n
 	esz := s.t.elem.sizeof()
 	data := s.data + strings.Repeat("\x00", int(esz))
@@ -1425,7 +1489,13 @@ func (g *gen) tfuncPtr(s *symbol) string {
 	if !g.descs[d] {
 		g.descs[d] = true
 		fmt.Fprintf(&g.vars, "var %s *c23.Void\n", d)
-		fmt.Fprintf(&g.descInit, "%s = c23.NewFunc(%s)\n%s", d, f, initSplit)
+		if g.o.unit != "" {
+			// The function has one descriptor, whichever unit makes it:
+			// its address is the same to all.
+			fmt.Fprintf(&g.descInit, "if %s == nil {\n%s = c23.NewFunc(%s)\n}\n%s", d, d, f, initSplit)
+		} else {
+			fmt.Fprintf(&g.descInit, "%s = c23.NewFunc(%s)\n%s", d, f, initSplit)
+		}
 	}
 	return d
 }

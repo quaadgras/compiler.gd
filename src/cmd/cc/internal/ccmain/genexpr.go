@@ -50,7 +50,7 @@ func (g *gen) globalName(s *symbol) string {
 	if s.kind == symVar && !s.t.isComplete() {
 		g.errorf(s.p, "undefined reference to %q", s.name)
 	}
-	if _, lib := libcVars[s.name]; s.kind == symVar && s.storage == sExtern && !s.defined && !lib && !g.o.undef {
+	if _, lib := libcVars[s.name]; s.kind == symVar && s.storage == sExtern && !s.defined && !lib && !g.o.undef && g.o.unit == "" {
 		g.errorf(s.p, "undefined reference to %q", s.name)
 	}
 	return n
@@ -1111,6 +1111,23 @@ func (g *gen) funcName(s *symbol, at pos) string {
 		}
 		if s.weak || def.weak {
 			return ""
+		}
+		if g.o.unit != "" {
+			// Another unit's, perhaps: declared, as C declares it.
+			if g.stubs == nil {
+				g.stubs = map[*symbol]bool{}
+			}
+			if !g.stubs[def] {
+				g.stubs[def] = true
+				ft := def.t.fn
+				names := []string{}
+				for i := range ft.params {
+					names = append(names, fmt.Sprintf("a%d", i))
+				}
+				fmt.Fprintf(&g.funcs, "func %s%s\n\n", g.names[def], strings.TrimPrefix(g.funcSig(ft, names), "func"))
+				g.info.undef(g.names[def], s.name)
+			}
+			return g.names[def]
 		}
 		if !g.o.undef {
 			g.errorf(at, "undefined reference to %q", s.name)

@@ -2217,6 +2217,8 @@ func (p *parser) declarator2C(name string, t *ctype, s specs, a attrs, at pos) *
 		if p.fn == nil {
 			p.u.syms = append(p.u.syms, sym)
 		} else if global {
+			sym.staticIn, sym.staticN = p.fn.sym, p.fn.nstatic
+			p.fn.nstatic++
 			p.u.statics = append(p.u.statics, sym)
 		} else {
 			sym.owner = p.fn

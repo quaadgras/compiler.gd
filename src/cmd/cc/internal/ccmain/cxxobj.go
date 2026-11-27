@@ -538,6 +538,9 @@ func (p *parser) finishVar(sym *symbol, mark int, at pos) {
 		if len(init) > 0 {
 			p.symN++
 			guard := &symbol{name: "guard." + itoa(int64(p.symN)), kind: symVar, t: tBool, global: true, storage: sStatic, p: at, defined: true}
+			if sym.staticIn != nil {
+				guard.staticIn, guard.staticN = sym.staticIn, -1-sym.staticN
+			}
 			p.u.statics = append(p.u.statics, guard)
 			gv := &varRef{node{tBool, at}, guard}
 			init = append([]stmt{&exprStmt{&assign{node{tBool, at}, "=", gv, p.intc(1, tBool, at), tBool}}}, init...)
