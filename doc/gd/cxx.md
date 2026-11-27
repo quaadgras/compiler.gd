@@ -229,8 +229,10 @@ Not there yet:
   objects, is not: a constexpr object initialized with one is
   initialized when the program starts, and a `static_assert` that
   needs one is not checked.
-- a second base class with virtual functions, virtual base classes,
-  `dynamic_cast`, run-time type information;
+- virtual base classes, `dynamic_cast`, run-time type information
+  (a class may have several base classes with virtual functions: each
+  after the first has its own table in the object, whose entries for
+  the functions the class overrides are thunks);
 - exceptions (Godot is built without them);
 - implicit move constructors and move assignment (the copy is used),
   destructors of objects of static duration at exit, thread-safe

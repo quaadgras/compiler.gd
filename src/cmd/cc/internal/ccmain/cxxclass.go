@@ -28,6 +28,7 @@ type classInfo struct {
 	vfuncs  []*symbol  // its table of virtual functions (nil: pure)
 	vslot   map[*symbol]int
 	vtable  *symbol
+	subs    []*subTable // the tables of its other bases with virtual functions
 	delDtor *symbol // the destructor that also frees the object
 
 	complete    bool
@@ -134,6 +135,18 @@ func (s *scope) findMember(name string, seen map[*scope]bool) *symbol {
 
 // A baseClass is a direct base of a class: f is its subobject, nil for
 // an empty base, which takes no room.
+// A subTable is the table of virtual functions of a subobject of a
+// class that does not share the class's own: a base with virtual
+// functions after the first, or such a base of a base. Its entries for
+// the functions the class overrides are thunks, which make this the
+// class's object.
+type subTable struct {
+	off   int64     // of the subobject in the class's object
+	funcs []*symbol // each entry's function
+	entry []*symbol // each entry: the function, or its thunk
+	table *symbol
+}
+
 type baseClass struct {
 	t *ctype
 	f *field
@@ -314,9 +327,6 @@ func (p *parser) leadingFields(t *ctype, own []*field) []*field {
 	for _, b := range ci.bases {
 		if b == ci.primary {
 			continue
-		}
-		if bc := classOf(b.t); bc != nil && bc.poly {
-			p.errorf("a second base class with virtual functions (%s) is not supported yet", b.t)
 		}
 		add(b)
 	}
@@ -776,7 +786,7 @@ func (p *parser) completeClass(t *ctype) {
 		ci.nontrivDtor = ci.nontrivDtor || needsDtor(b.t)
 		ci.nontrivCopy = ci.nontrivCopy || needsCopy(b.t)
 		if bc := classOf(b.t); bc != nil {
-			for _, v := range bc.vfuncs {
+			for _, v := range bc.allVirtual() {
 				if v.t.fn.dtor {
 					// An implicit destructor overrides a virtual one.
 					ci.nontrivDtor = true
@@ -889,7 +899,7 @@ func (p *parser) completeClass(t *ctype) {
 				p.use(lf.sym) // used before its body was kept (a nested class's)
 			}
 		}
-		for _, v := range ci.vfuncs {
+		for _, v := range ci.allVirtual() {
 			p.use(v) // the table has its address
 		}
 		return
@@ -1465,6 +1475,18 @@ func (p *parser) buildVtable(t *ctype, at pos) {
 	if ci.primary != nil {
 		ci.vfuncs = append([]*symbol(nil), classOf(ci.primary.t).vfuncs...)
 	}
+	for _, b := range ci.bases {
+		bc := classOf(b.t)
+		if bc == nil || !bc.poly {
+			continue
+		}
+		if b != ci.primary {
+			ci.subs = append(ci.subs, &subTable{off: b.f.off, funcs: append([]*symbol(nil), bc.vfuncs...), entry: append([]*symbol(nil), bc.vfuncs...)})
+		}
+		for _, s := range bc.subs {
+			ci.subs = append(ci.subs, &subTable{off: b.f.off + s.off, funcs: append([]*symbol(nil), s.funcs...), entry: append([]*symbol(nil), s.entry...)})
+		}
+	}
 	deleting := func(dtor *symbol) *symbol {
 		sym := &symbol{name: strings.Replace(dtor.name, "D1Ev", "D0Ev", 1), src: dtor.src, kind: symFunc, t: dtor.t, global: true,
 			linkage: dtor.linkage, p: at, sc: dtor.sc, comdat: true, implicit: true}
@@ -1484,6 +1506,11 @@ func (p *parser) buildVtable(t *ctype, at pos) {
 				break
 			}
 		}
+		for _, s := range ci.subs {
+			for _, v := range s.funcs {
+				m.virtual = m.virtual || sameVirtual(m, v)
+			}
+		}
 		switch {
 		case found >= 0:
 			m.virtual = true
@@ -1499,26 +1526,23 @@ func (p *parser) buildVtable(t *ctype, at pos) {
 				ci.vfuncs = append(ci.vfuncs, deleting(m))
 			}
 		}
-	}
-	// The table: an array of pointers to functions.
-	vt := &symbol{name: "_ZTV" + rawType(t.unqual()), kind: symVar, t: arrayOf(fnPtrType, int64(len(ci.vfuncs))), global: true,
-		linkage: 'e', defined: true, comdat: true, p: at, addr: true}
-	vt.src = vt.name
-	if inBlock(ci.scope) {
-		vt.linkage = 0
-	}
-	in := &initializer{}
-	for i, f := range ci.vfuncs {
-		var x expr = &intConst{node{fnPtrType, at}, 0}
-		if !f.pure {
-			f.used = true
-			x = &cast{node{fnPtrType, at}, &decay{node{ptrTo(f.t), at}, &varRef{node{f.t, at}, f}}}
+		for _, s := range ci.subs {
+			for i, v := range s.funcs {
+				if !sameVirtual(m, v) {
+					continue
+				}
+				s.funcs[i], s.entry[i] = m, p.thunk(m, v, s.off, at)
+				if ft.dtor {
+					s.funcs[i+1], s.entry[i+1] = ci.delDtor, p.thunk(ci.delDtor, nil, s.off, at)
+				}
+				break
+			}
 		}
-		in.items = append(in.items, initItem{off: int64(i) * fnPtrType.sizeof(), t: fnPtrType, x: x})
 	}
-	vt.init = in
-	p.u.syms = append(p.u.syms, vt)
-	ci.vtable = vt
+	ci.vtable = p.vtableOf("_ZTV"+rawType(t.unqual()), ci.vfuncs, inBlock(ci.scope), at)
+	for _, s := range ci.subs {
+		s.table = p.vtableOf("_ZTVn"+itoa(s.off)+"_"+rawType(t.unqual()), s.entry, inBlock(ci.scope), at)
+	}
 	if d := ci.delDtor; d != nil {
 		dtor := ci.scope.vars["~"+t.rec.tag]
 		p.synth(d, func(ps []*symbol) []stmt {
@@ -1531,6 +1555,87 @@ func (p *parser) buildVtable(t *ctype, at pos) {
 	}
 }
 
+// allVirtual are the functions of the class's tables.
+func (ci *classInfo) allVirtual() []*symbol {
+	if len(ci.subs) == 0 {
+		return ci.vfuncs
+	}
+	out := append([]*symbol(nil), ci.vfuncs...)
+	for _, s := range ci.subs {
+		out = append(out, s.funcs...)
+	}
+	return out
+}
+
+// vtableOf makes a table of virtual functions: an array of pointers to
+// functions.
+func (p *parser) vtableOf(name string, funcs []*symbol, local bool, at pos) *symbol {
+	vt := &symbol{name: name, kind: symVar, t: arrayOf(fnPtrType, int64(len(funcs))), global: true,
+		linkage: 'e', defined: true, comdat: true, p: at, addr: true}
+	vt.src = vt.name
+	if local {
+		vt.linkage = 0
+	}
+	in := &initializer{}
+	for i, f := range funcs {
+		var x expr = &intConst{node{fnPtrType, at}, 0}
+		if !f.pure {
+			f.used = true
+			x = &cast{node{fnPtrType, at}, &decay{node{ptrTo(f.t), at}, &varRef{node{f.t, at}, f}}}
+		}
+		in.items = append(in.items, initItem{off: int64(i) * fnPtrType.sizeof(), t: fnPtrType, x: x})
+	}
+	vt.init = in
+	p.u.syms = append(p.u.syms, vt)
+	return vt
+}
+
+// thunk is the function that calls the member function m with this
+// moved back by off bytes: the entry for m in the table of the
+// subobject at off, which virtual calls on that subobject use. If m
+// returns a pointer or reference to a class derived from the one that
+// over, the function it overrides there, returns, the thunk's result
+// is that base's.
+func (p *parser) thunk(m, over *symbol, off int64, at pos) *symbol {
+	ft := m.t.fn
+	if ft.variadic {
+		p.errorAt(at, "%s overrides a virtual function of a second base class and takes variable arguments: not supported", m.name)
+	}
+	name := "_ZThn" + itoa(off) + "_" + strings.TrimPrefix(m.name, "_Z")
+	var retBase *ctype
+	if over != nil && ft.ret.kind == kPtr && ft.ret.elem.kind == kStruct {
+		if ot := over.t.fn.ret; ot.kind == kPtr && ot.elem.kind == kStruct && isBaseOf(ot.elem, ft.ret.elem) && mustOffset(ot.elem.rec, ft.ret.elem.rec) != 0 {
+			retBase = ot.elem
+			name = "_ZTchn" + itoa(off) + "_" + rawType(retBase.unqual()) + "_" + strings.TrimPrefix(m.name, "_Z")
+		}
+	}
+	sym := &symbol{name: name, src: m.src, kind: symFunc, t: m.t, global: true, linkage: m.linkage, p: at, sc: m.sc,
+		comdat: true, implicit: true}
+	p.u.syms = append(p.u.syms, sym)
+	p.synth(sym, func(ps []*symbol) []stmt {
+		this := &varRef{node{ps[0].t, at}, ps[0]}
+		args := []expr{p.offsetPtr(this, -off, ps[0].t.elem, true, at)}
+		for _, s := range ps[1:] {
+			args = append(args, &varRef{node{s.t, at}, s})
+		}
+		m.used = true
+		p.use(m)
+		fn := &decay{node{ptrTo(m.t), at}, &varRef{node{m.t, at}, m}}
+		c := &call{node{ft.ret.unqual(), at}, fn, ft, args}
+		switch {
+		case ft.ret.kind == kVoid:
+			return []stmt{&exprStmt{c}}
+		case ft.ret.kind == kStruct && !ft.ret.isRef():
+			return []stmt{p.classReturn(p.callResult(c, ft, at), ft.ret, at, len(p.temps))}
+		}
+		if retBase != nil {
+			return []stmt{&returnStmt{&cast{node{ft.ret.unqual(), at}, p.baseAddr(c, retBase, at)}}}
+		}
+		return []stmt{&returnStmt{c}}
+	})
+	return sym
+}
+
 // setVptr are the statements that make *this an object of the class t
 // to virtual calls: its pointer to the table is t's.
 func (p *parser) setVptr(t *ctype, at pos) []stmt {
@@ -1539,11 +1644,20 @@ func (p *parser) setVptr(t *ctype, at pos) []stmt {
 		return nil
 	}
 	vpt := ptrTo(fnPtrType)
-	this := &varRef{node{p.this.t, at}, p.this}
-	slot := &deref{node{vpt, at}, &cast{node{ptrTo(vpt), at}, this}}
-	vt := ci.vtable
-	val := &decay{node{vpt, at}, &varRef{node{vt.t, at}, vt}}
-	return []stmt{&exprStmt{&assign{node{vpt, at}, "=", slot, val, vpt}}}
+	set := func(off int64, vt *symbol) stmt {
+		var this expr = &varRef{node{p.this.t, at}, p.this}
+		if off != 0 {
+			this = &binary{node{ptrTo(tChar), at}, "+", &cast{node{ptrTo(tChar), at}, this}, p.intc(off, tLong, at)}
+		}
+		slot := &deref{node{vpt, at}, &cast{node{ptrTo(vpt), at}, this}}
+		val := &decay{node{vpt, at}, &varRef{node{vt.t, at}, vt}}
+		return &exprStmt{&assign{node{vpt, at}, "=", slot, val, vpt}}
+	}
+	out := []stmt{set(0, ci.vtable)}
+	for _, s := range ci.subs {
+		out = append(out, set(s.off, s.table))
+	}
+	return out
 }
 
 // virtualFn is the function that the entry slot of the table of the
