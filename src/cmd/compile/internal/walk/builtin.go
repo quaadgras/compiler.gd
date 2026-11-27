@@ -910,9 +910,15 @@ func walkUnsafeData(gd *base.Invocation, n *ir.UnaryExpr, init *ir.Nodes) ir.Nod
 		// heap copy in hot zero-alloc code (e.g. log/slog's StringValue).
 		// Look through ONAME / OCONVNOP to the underlying literal for
 		// inliner-created parameter bindings (e.g. `value := "foo"` from
-		// inlining log/slog.StringValue("foo")). ir.StaticValue walks
-		// single-assignment chains back to the root.
-		x := ir.StaticValue(n.X)
+		// inlining log/slog.StringValue("foo")). The chain of single
+		// assignments back to the root was followed before the walk
+		// (analyzePreWalk): ir.StaticValue reads the whole function for
+		// each name, which for a function of C's with thousands of these
+		// is most of the time of compiling it.
+		x := n.X
+		if v := staticValue(gd, x); v != nil {
+			x = v
+		}
 		if x.Op() == ir.OLITERAL && x.Val().Kind() == constant.String {
 			s := constant.StringVal(x.Val())
 			if len(s) == 0 {

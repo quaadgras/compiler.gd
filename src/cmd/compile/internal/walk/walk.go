@@ -548,6 +548,13 @@ func analyzePreWalk(gd *base.Invocation, fn *ir.Func) *walkAnalysis {
 					sv[x] = v
 				}
 			}
+		case ir.OUNSAFESTRINGDATA:
+			// The constant that a string whose bytes are asked for is
+			// (walkUnsafeData).
+			x := n.(*ir.UnaryExpr).X
+			if v := ro.StaticValue(x); v != nil && v != x && ir.IsConst(v, constant.String) {
+				sv[x] = v
+			}
 		case ir.OCONVIFACE:
 			x := n.(*ir.ConvExpr).X
 			v := ro.StaticValue(x)
