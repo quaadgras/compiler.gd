@@ -1240,6 +1240,16 @@ func (p *parser) templateID(tm *template, j int, at pos) (*symbol, int) {
 // complete defines the class t, if it is a template's instance that is
 // not defined yet.
 func (p *parser) complete(t *ctype) {
+	if t != nil && t.kind == kStruct && !t.rec.complete && t.rec.lazy != nil {
+		// A member class of an instance: defined now.
+		lz := t.rec.lazy
+		t.rec.lazy = nil
+		p.replay(lz.start, lz.sc, func() {
+			p.cls, p.lazySkip = lz.cls, t.rec
+			p.declSpecs()
+		})
+		return
+	}
 	if t == nil || t.kind != kStruct || t.rec.complete || t.rec.inst == nil {
 		return
 	}

@@ -89,6 +89,7 @@ type ctype struct {
 }
 
 type record struct {
+	lazy     *lazyClass // C++: its definition, put off until it must be complete
 	tag      string
 	union    bool
 	fields   []*field

@@ -67,6 +67,7 @@ type parser struct {
 	extend        *[]*symbol // where temporaries a declared reference binds are kept, to live as long
 	declTo        *scope     // the scope the next function is declared in, if not the current one
 	trying        int        // in try: an error is a substitution failure
+	lazySkip      *record    // the member class being defined now, which was put off
 	varSpec       bool       // declaring a variable template's specialization: its name has arguments
 	userConv      int        // ranking a user-defined conversion's own argument
 	pattern       int        // parsing a template's pattern: its parameters are placeholders
@@ -899,8 +900,47 @@ done:
 	return s
 }
 
+// A lazyClass is the definition of a member class of a class template's
+// instance, not parsed yet: complete parses it.
+type lazyClass struct {
+	start int // its class key's token
+	sc    *scope
+	cls   *ctype
+}
+
+// classEnd is the offset of the token after the class body that
+// follows (after a base clause, if there is one): 0 if there is none.
+func (p *parser) classEnd() int {
+	j := 0
+	for !p.isAt(j, "{") {
+		if t := p.peekAt(j); t.kind == tkEOF || t.kind == tkPunct && t.text == ";" {
+			return 0
+		}
+		j++
+	}
+	for depth := 0; ; j++ {
+		t := p.peekAt(j)
+		if t.kind == tkEOF {
+			return 0
+		}
+		if t.kind != tkPunct {
+			continue
+		}
+		switch t.text {
+		case "{":
+			depth++
+		case "}":
+			depth--
+			if depth == 0 {
+				return j + 1
+			}
+		}
+	}
+}
+
 // recordSpec parses a struct or union specifier, after its keyword.
 func (p *parser) recordSpec(union bool, kw token) *ctype {
+	kwPos := p.pos - 1
 	a := p.attributes()
 	if p.cxx && p.is("alignas") && p.isAt(1, "(") {
 		p.pos += 2
@@ -940,6 +980,25 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 	if p.cxx && p.is("final") && (p.isAt(1, "{") || p.isAt(1, ":")) {
 		p.next()
 	}
+	if p.cxx && tag != "" && (p.is("{") || p.is(":")) && p.sc.kind == skClass && p.sc.rec != nil && p.sc.rec.inst != nil {
+		// A member class of a class template's instance is defined when
+		// it must be complete, as C++ has it, not with the instance:
+		// its members' types need not be complete before (the element
+		// of List<T>, where T is only declared yet).
+		old := p.sc.tags[tag]
+		if end := p.classEnd(); end > 0 && p.isAt(end, ";") && (old == nil || !old.rec.complete && old.rec != p.lazySkip) {
+			t := old
+			if t == nil {
+				t = &ctype{kind: kStruct, rec: &record{tag: tag, union: union, id: p.nextRecord(), sc: p.sc}}
+				p.sc.tags[tag] = t
+				p.declareTag(p.sc, tag, t)
+			}
+			t.rec.lazy = &lazyClass{start: kwPos, sc: p.sc, cls: p.cls}
+			p.pos += end
+			return t
+		}
+	}
+	p.lazySkip = nil
 	var bases []*ctype
 	if p.cxx && p.is(":") && tag != "" {
 		p.next()
