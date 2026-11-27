@@ -106,9 +106,12 @@ func (p *parser) listRank(l *initList, pt *ctype) int {
 		if s, _ := p.listCtor(pt, l); s != nil {
 			return rkUser
 		}
-		p.userConv++
+		// The constructor's arguments are converted as any call's: each
+		// may take a user-defined conversion of its own.
+		save, saveT := p.userConv, p.explicitT
+		p.userConv, p.explicitT = 0, nil
 		s := p.resolve(ctors(pt), nil, l.args, l.p, "", true)
-		p.userConv--
+		p.userConv, p.explicitT = save, saveT
 		if s == nil || s.deleted {
 			return rkNone
 		}

@@ -1037,12 +1037,7 @@ func (p *parser) initMembers(t *ctype, inits map[*field]memInit, baseInits map[*
 		if in.braceAt != 0 {
 			save := p.pos
 			p.pos = in.braceAt + 1
-			for !p.is("}") {
-				in.args = append(in.args, p.assignment())
-				if !p.accept(",") {
-					break
-				}
-			}
+			in.args = append(in.args, p.exprList("}")...)
 			p.pos = save
 		}
 		if bc := classOf(b.t); bc != nil && bc.empty && len(in.args) == 0 && !needsCtor(b.t) {
@@ -1122,15 +1117,7 @@ func (p *parser) initMember(f *field, in memInit, at pos) stmt {
 			e = p.copyBytes(dst, p.compoundLiteral(t.unqual(), at), at)
 		default:
 			p.next()
-			var args []expr
-			for !p.is("}") {
-				args = append(args, p.assignment())
-				if !p.accept(",") {
-					break
-				}
-			}
-			p.expect("}")
-			e = p.constructAt(dst, t, args, at, mValue)
+			e = p.constructAt(dst, t, p.exprList("}"), at, mValue)
 		}
 		p.pos = save
 	case t.kind == kStruct:

@@ -386,6 +386,9 @@ func better(a, b candidate) bool {
 func (p *parser) resolve(set []*symbol, obj expr, args []expr, at pos, name string, quiet bool) *symbol {
 	var cands []candidate
 	for _, s := range set {
+		if s.tmpl == nil && len(p.explicitT) > 0 {
+			continue // f<T>(x) names a template
+		}
 		if c, ok := p.viable(s, obj, args); ok {
 			cands = append(cands, c)
 		}
