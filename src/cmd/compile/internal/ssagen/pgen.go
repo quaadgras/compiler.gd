@@ -257,9 +257,11 @@ func (s *ssafn) AllocFrame(gd *base.Invocation, f *ssa.Func) {
 			s.stksize++
 		}
 		s.stksize += w
-		if n.Addrtaken() && f.Config.CShadow() {
+		if n.Addrtaken() && n.Type().Size() > 0 && f.Config.CShadow() {
 			// The words of the variable are words of the
-			// shadow of C's memory (cShadowFrame).
+			// shadow of C's memory (cShadowFrame). A variable
+			// of no size has none: it keeps its one byte of
+			// padding (test/codegen/zerosize.go).
 			s.stksize = types.RoundUp(s.stksize, 8)
 		}
 		s.stksize = types.RoundUp(s.stksize, types.StackAlignment(n.Type()))
