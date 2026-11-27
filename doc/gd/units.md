@@ -74,11 +74,13 @@ is fast when little has changed.
 
 The same could be had by making each C file a Go package, with
 `//go:linkname` for the references that packages may not have (C files
-refer to each other in circles). It was tried first. It needs the same
-of `cmd/cc`, and of the compiler only `//go:dupok`; but every type would
-be a different Go type in each package, which the run-time checks of C's
-memory would then have to compare word by word, and the Go would be full
-of directives that say what the package clause already says here.
+refer to each other in circles). Two hand-written packages were linked
+that way first, and it works. It needs the same of `cmd/cc`, and of the
+compiler only `//go:dupok`; but every type would be a different Go type
+in each package, which the run-time checks of C's memory compare by
+their identity before anything else (what the other comparison would
+cost was not measured), and the Go would be full of directives that say
+what the package clause already says here.
 
 ## What is not done
 
