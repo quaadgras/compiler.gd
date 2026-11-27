@@ -6,10 +6,13 @@ package gd
 
 import (
 	"cmp"
+	"fmt"
 	"internal/race"
 	"math/rand"
+	"os"
 	"slices"
 	"sync"
+	"time"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
@@ -212,7 +215,17 @@ func compileFunctions(gd *base.Invocation, profile *pgoir.Profile) {
 				cq = cq[:len(cq)-1]
 				mu.Unlock()
 				cur = fn
-				ssagen.Compile(gd, fn, w, profile)
+				if gd.Debug.SlowFunc > 0 {
+					// (-d=slowfunc: what a package's time goes to, when
+					// most of its functions were done long before.)
+					start := time.Now()
+					ssagen.Compile(gd, fn, w, profile)
+					if d := time.Since(start); d >= time.Duration(gd.Debug.SlowFunc)*time.Millisecond {
+						fmt.Fprintf(os.Stderr, "slowfunc: %v %v (%d statements)\n", d.Round(time.Millisecond), ir.FuncName(fn), len(fn.Body))
+					}
+				} else {
+					ssagen.Compile(gd, fn, w, profile)
+				}
 				closures = fn.Closures
 			}
 		}()
