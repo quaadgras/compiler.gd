@@ -1082,6 +1082,17 @@ func (g *gen) tglobalVar(s *symbol) {
 		return // the library's object: found where it is used (tglobal)
 	}
 	if s.t.kind == kArray && s.t.n < 0 && s.storage == sExtern && !s.defined {
+		if g.o.unit != "" && s.t.elem.isComplete() {
+			// Another unit's array, whose length this one does not
+			// know: declared with one element, which the linker makes
+			// the array that the other unit defines. (It is used
+			// through its address only.)
+			fmt.Fprintf(&g.vars, "var %s [1]%s\n", name, g.mirror(s.t.elem))
+			if g.declared == nil {
+				g.declared = map[*symbol]bool{}
+			}
+			g.declared[s] = true
+		}
 		return // declared, never defined: an error only if used
 	}
 	if s.t.kind == kArray && s.t.n < 0 {

@@ -47,7 +47,7 @@ func (g *gen) globalName(s *symbol) string {
 	if !ok {
 		g.errorf(s.p, "internal error: no name for %s", s.name)
 	}
-	if s.kind == symVar && !s.t.isComplete() {
+	if s.kind == symVar && !s.t.isComplete() && !(g.o.unit != "" && s.t.kind == kArray) {
 		g.errorf(s.p, "undefined reference to %q", s.name)
 	}
 	if _, lib := libcVars[s.name]; s.kind == symVar && s.storage == sExtern && !s.defined && !lib && !g.o.undef && g.o.unit == "" {
