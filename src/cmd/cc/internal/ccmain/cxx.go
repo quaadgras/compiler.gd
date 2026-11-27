@@ -793,8 +793,10 @@ func (p *parser) castTo(e expr, t *ctype, at pos, how string) expr {
 // conversion, or a temporary's construction.
 func (p *parser) functionalCast(t *ctype, at pos) expr {
 	brace := p.is("{")
-	if ci := classOf(t); brace && (t.kind == kArray || t.kind == kStruct && (ci == nil || !ci.userCtor)) {
-		// An aggregate's: a compound literal.
+	if ci := classOf(t); brace && (t.kind == kArray || t.kind == kStruct && (ci == nil || !ci.userCtor && len(ci.nsdmi) == 0 && !needsCtor(t) && !needsCopy(t))) {
+		// An aggregate's: a compound literal. (One with members that
+		// constructors or default member initializers initialize is
+		// initialized member by member, below.)
 		return p.compoundLiteral(t, at)
 	}
 	if brace && t.kind == kStruct {
@@ -1152,7 +1154,7 @@ func (p *parser) funcQuals(ft *funcType) {
 // skipDefaultArg skips a default argument: to the "," or ")" that ends
 // it.
 func (p *parser) skipDefaultArg() {
-	depth := 0
+	depth, angle := 0, 0
 	for {
 		t := p.peek()
 		if t.kind == tkEOF {
@@ -1167,8 +1169,21 @@ func (p *parser) skipDefaultArg() {
 					return
 				}
 				depth--
-			case ",":
+			case "<":
+				// A template's arguments: their commas are not the list's.
+				if depth == 0 && p.templateNameAt(p.pos-1) {
+					angle++
+				}
+			case ">":
+				if depth == 0 && angle > 0 {
+					angle--
+				}
+			case ">>":
 				if depth == 0 {
+					angle = max(angle-2, 0)
+				}
+			case ",":
+				if depth == 0 && angle == 0 {
 					return
 				}
 			}

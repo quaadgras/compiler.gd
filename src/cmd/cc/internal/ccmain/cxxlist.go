@@ -11,14 +11,32 @@ package ccmain
 // object, parameter or result that takes it.
 type initList struct {
 	node
-	args []expr
+	args  []expr
+	names []string // C++20 designators (.name = value), if it has them: the member each element initializes
 }
 
 // braceList parses a braced initializer list, at its "{".
 func (p *parser) braceList() *initList {
 	at := p.here()
 	p.next()
-	return &initList{node{tVoid, at}, p.exprList("}")}
+	if p.is(".") && p.peekAt(1).kind == tkIdent && (p.isAt(2, "=") || p.isAt(2, "{")) {
+		// Designated initializers: of an aggregate's members, by name.
+		l := &initList{node: node{tVoid, at}}
+		for p.accept(".") {
+			l.names = append(l.names, p.ident())
+			if p.accept("=") && !p.is("{") {
+				l.args = append(l.args, p.assignment())
+			} else {
+				l.args = append(l.args, p.braceList())
+			}
+			if !p.accept(",") {
+				break
+			}
+		}
+		p.expect("}")
+		return l
+	}
+	return &initList{node: node{tVoid, at}, args: p.exprList("}")}
 }
 
 // ilElem is the element type of t, if t is a std::initializer_list.
@@ -160,10 +178,33 @@ func (p *parser) listInit(dst expr, t *ctype, l *initList, at pos) expr {
 		if len(l.args) > len(fields) {
 			p.errorAt(at, "too many initializers for %s", t)
 		}
+		if l.names != nil {
+			fields = t.rec.fields
+			for _, name := range l.names {
+				found := false
+				for _, f := range fields {
+					found = found || f.name == name
+				}
+				if !found {
+					p.errorAt(at, "%s has no member %q", t, name)
+				}
+			}
+		}
 		for i, f := range fields {
 			m := &member{node{f.t, at}, dst, f}
-			if i < len(l.args) {
-				list = append(list, &exprStmt{p.initWith(m, l.args[i], at)})
+			arg := -1
+			if l.names == nil && i < len(l.args) {
+				arg = i
+			}
+			for j, name := range l.names {
+				if name == f.name {
+					arg = j
+				}
+			}
+			if arg >= 0 {
+				list = append(list, &exprStmt{p.initWith(m, l.args[arg], at)})
+			} else if l.names != nil && t.rec.union {
+				continue
 			} else if e := p.defaultMember(m, ci, f, at); e != nil {
 				list = append(list, &exprStmt{e})
 			}
@@ -183,7 +224,7 @@ func (p *parser) listInit(dst expr, t *ctype, l *initList, at pos) expr {
 			// The elements the list does not give: constructed.
 			for i := int64(len(l.args)); i < t.n; i++ {
 				elem := &deref{node{t.elem, at}, &binary{node{ptrTo(t.elem), at}, "+", base, p.intc(i, tLong, at)}}
-				list = append(list, &exprStmt{p.initWith(elem, &initList{node{tVoid, at}, nil}, at)})
+				list = append(list, &exprStmt{p.initWith(elem, &initList{node: node{tVoid, at}}, at)})
 			}
 		}
 		return &stmtExpr{node{tVoid, at}, &block{list: list}, nil}
@@ -216,7 +257,7 @@ func (p *parser) defaultMember(m expr, ci *classInfo, f *field, at pos) expr {
 		}
 	}
 	if needsCtor(f.t) {
-		return p.initWith(m, &initList{node{tVoid, at}, nil}, at)
+		return p.initWith(m, &initList{node: node{tVoid, at}}, at)
 	}
 	return nil
 }

@@ -74,16 +74,37 @@ func (p *parser) rangeFor(at pos) stmt {
 	name, dt, _ := p.declarator(p.baseOr(s))
 	p.expect(":")
 	var rng expr
+	var list *initList
 	if p.is("{") {
-		p.errorAt(at, "a braced list as a for statement's range is not supported yet")
+		list = p.braceList()
+		if len(list.args) == 0 {
+			p.errorAt(at, "an empty braced list as a for statement's range")
+		}
+	} else {
+		rng = p.expr()
 	}
-	rng = p.expr()
 	p.expect(")")
 
 	// The range: referred to if it is an lvalue, kept if it is not.
 	var rangeSym *symbol
 	var obj expr
-	if p.isLvalueCxx(rng) {
+	if list != nil {
+		// A braced list: an array of its elements, of the first's type
+		// (what std::initializer_list refers to).
+		var et *ctype
+		if pr, ok := list.args[0].(*classPR); ok {
+			et = pr.t.unqual()
+		} else {
+			et = valueType(list.args[0])
+		}
+		rt := arrayOf(et, int64(len(list.args)))
+		rangeSym = &symbol{name: "__range", kind: symVar, t: rt, p: at, owner: p.fn, defined: true}
+		p.fn.locals = append(p.fn.locals, rangeSym)
+		obj = &varRef{node{rt, at}, rangeSym}
+		mark := len(p.temps)
+		rangeSym.ctor = p.listInit(obj, rt, list, at)
+		p.finishVar(rangeSym, mark, at)
+	} else if p.isLvalueCxx(rng) {
 		rt := refTo(rng.ty(), 1)
 		rangeSym = &symbol{name: "__range", kind: symVar, t: rt, p: at, owner: p.fn, defined: true}
 		p.fn.locals = append(p.fn.locals, rangeSym)

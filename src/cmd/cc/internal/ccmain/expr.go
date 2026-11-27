@@ -838,6 +838,9 @@ func (p *parser) unaryExpr() expr {
 				// GNU: the conjugate.
 				return &builtinCall{node{x.ty(), at}, "conj", []expr{x}}
 			}
+			if p.cxx && t.text == "+" && x.ty().isPtr() {
+				return x // C++: a pointer's value (an array's first element's address)
+			}
 			if !x.ty().isArith() || t.text == "~" && !x.ty().isInteger() {
 				p.errorAt(at, "wrong type argument to unary %s", t.text)
 			}

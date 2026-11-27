@@ -405,3 +405,55 @@ int iconv_close(iconv_t cd);
 	}
 	initPxFiles()
 }
+
+func init() {
+	// What Godot's Unix drivers use beyond POSIX's required headers.
+	extendHeader("limits.h", `#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+#ifndef NAME_MAX
+#define NAME_MAX 255
+#endif
+`)
+	extendHeader("sys/ioctl.h", `#define _IOC(d, t, n, s) (((unsigned long)(d) << 30) | ((unsigned long)(s) << 16) | ((t) << 8) | (n))
+#define _IO(t, n) _IOC(0, (t), (n), 0)
+#define _IOW(t, n, T) _IOC(1, (t), (n), sizeof(T))
+#define _IOR(t, n, T) _IOC(2, (t), (n), sizeof(T))
+#define _IOWR(t, n, T) _IOC(3, (t), (n), sizeof(T))
+`)
+	extendHeader("dlfcn.h", `#define RTLD_DEFAULT ((void *)0)
+#define RTLD_NEXT ((void *)-1l)
+`)
+	// Threads are goroutines: they have no names for the system to show.
+	extendHeader("pthread.h", `static inline int pthread_setname_np(pthread_t __t, const char *__name) {
+	(void)__t;
+	(void)__name;
+	return 0;
+}
+`)
+	// Extended attributes: no file system has them here.
+	sysHeaders["sys/xattr.h"] = `#ifndef __CC_SYS_XATTR_H
+#define __CC_SYS_XATTR_H
+#include <sys/types.h>
+#include <errno.h>
+#define XATTR_CREATE 1
+#define XATTR_REPLACE 2
+static inline ssize_t getxattr(const char *__path, const char *__name, void *__value, size_t __size) {
+	errno = ENOTSUP;
+	return -1;
+}
+static inline ssize_t listxattr(const char *__path, char *__list, size_t __size) {
+	errno = ENOTSUP;
+	return -1;
+}
+static inline int setxattr(const char *__path, const char *__name, const void *__value, size_t __size, int __flags) {
+	errno = ENOTSUP;
+	return -1;
+}
+static inline int removexattr(const char *__path, const char *__name) {
+	errno = ENOTSUP;
+	return -1;
+}
+#endif
+`
+}

@@ -1093,7 +1093,7 @@ func (p *parser) newExpr(at pos) expr {
 		as := p.exprList(end)
 		switch {
 		case end == "}" && count == nil && t.kind == kStruct:
-			init = &exprStmt{p.listInit(obj, t, &initList{node{tVoid, at}, as}, at)}
+			init = &exprStmt{p.listInit(obj, t, &initList{node: node{tVoid, at}, args: as}, at)}
 		case count != nil:
 			// The elements given, then the rest value-initialized.
 			var list []stmt

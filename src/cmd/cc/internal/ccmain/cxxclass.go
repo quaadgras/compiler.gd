@@ -1111,8 +1111,10 @@ func (p *parser) initMember(f *field, in memInit, at pos) stmt {
 			}
 		case ci == nil || t.kind == kArray || !ci.userCtor:
 			// An aggregate's: as a compound literal's, copied.
-			if needsCopy(t) {
-				p.errorAt(at, "braces for an aggregate with members that are copied by constructors are not supported yet")
+			if needsCopy(t) || needsCtor(t) {
+				// Its members are constructed: one by one.
+				e = p.listInit(dst, t, p.braceList(), at)
+				break
 			}
 			e = p.copyBytes(dst, p.compoundLiteral(t.unqual(), at), at)
 		default:
