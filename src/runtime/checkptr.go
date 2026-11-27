@@ -541,8 +541,16 @@ func checkptrConvCMoved(p unsafe.Pointer, elem *_type, load bool) unsafe.Pointer
 		return p
 	}
 	if s := spanOfHeap(a); s != nil && !s.isUserArenaChunk {
-		// An object of Go's: its slot.
-		if base := s.base() + s.objIndex(a)*s.elemsize; elem.Size_ > base+s.elemsize-a {
+		// An object of Go's: its slot. A variable of C's that Go
+		// allocated is its value, and the byte after it is what a
+		// pointer to its end is in (cObjectIsC): a pointer there is to
+		// the end, as it is in what malloc gave.
+		base := s.base() + s.objIndex(a)*s.elemsize
+		limit := base + s.elemsize
+		if typ, tbase := checkptrObjectType(s, base); typ != nil && a >= tbase && cObjectIsC(typ) {
+			limit = tbase + (*structtype)(unsafe.Pointer(typ)).Fields[0].Typ.Size_
+		}
+		if a > limit || elem.Size_ > limit-a {
 			return unsafe.Pointer(a | cEnd)
 		}
 	}
