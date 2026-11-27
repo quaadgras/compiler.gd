@@ -21,8 +21,20 @@ import (
 // (c23Header). The byte of a word that is in no object of C's, and in no
 // variable that the shadow was told of, is zero: nothing of the shadow
 // is memory until it is written.
+//
+// The shadow is where nothing else of a program is: not what the system
+// places (a program and its heap from 0x5555_5555_4000 or below
+// 0x0200_0000_0000, its mappings and stacks below 0x8000_0000_0000 or
+// from 0x2aaa_aaaa_a000), not Go's heap (from 0x00c0_0000_0000), and not
+// the shadows that the sanitizers of C have at addresses of their own:
+// ThreadSanitizer's are below 0x3800_0000_0000 (the
+// race detector's from 0x2000_0000_0000 to 0x4000_0000_0000),
+// AddressSanitizer's end at 0x1000_7fff_8000, and MemorySanitizer's are
+// all that is from 0x0100_0000_0000 to 0x4000_0000_0000 and at
+// 0x5000_0000_0000 and 0x6000_0000_0000. The compiler has the address
+// (CShadowBase in cmd/compile/internal/ssa).
 const (
-	cShadowBase  = 0x1000_0000_0000
+	cShadowBase  = 0x4000_0000_0000
 	cShadowBytes = 1 << 44
 )
 

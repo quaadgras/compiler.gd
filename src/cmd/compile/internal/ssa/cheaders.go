@@ -992,7 +992,7 @@ func cEach(x, n int64) int64 {
 // The shadow of C's memory (runtime/cshadow.go), and what the byte of a
 // word says beside its class (runtime's cWordIn, cWordStart).
 const (
-	CShadowBase  = 0x1000_0000_0000
+	CShadowBase  = 0x4000_0000_0000
 	CShadowIn    = 0x80
 	CShadowStart = 0x40
 	CShadowRO    = 0x20

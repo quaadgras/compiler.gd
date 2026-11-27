@@ -5,9 +5,12 @@
 package amd64
 
 import (
+	"math/bits"
+
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/objw"
+	"cmd/compile/internal/ssa"
 	"cmd/internal/obj"
 	"cmd/internal/obj/x86"
 )
@@ -38,7 +41,7 @@ func cshadowrange(gd *base.Invocation, pp *objw.Progs, p *obj.Prog, n *ir.Name, 
 		p.From.Name = obj.NAME_PARAM
 	}
 	p = pp.Append(gd, p, x86.ASHRQ, obj.TYPE_CONST, 0, 3, obj.TYPE_REG, x86.REG_R12, 0)
-	p = pp.Append(gd, p, x86.ABTSQ, obj.TYPE_CONST, 0, 44, obj.TYPE_REG, x86.REG_R12, 0)
+	p = pp.Append(gd, p, x86.ABTSQ, obj.TYPE_CONST, 0, int64(bits.TrailingZeros64(ssa.CShadowBase)), obj.TYPE_REG, x86.REG_R12, 0)
 	store := func(bytes []byte, set func(int) bool) {
 		for i := 0; i < len(bytes); {
 			if !set(i) {
