@@ -42,6 +42,11 @@ type Invocation struct {
 	// not a captured pipe.
 	Stdout io.Writer
 
+	// UnitObjs are the objects of the package's files that are
+	// compiled by themselves (gd/units.go), which follow the package's
+	// in its archive.
+	UnitObjs []string
+
 	// Flagset is the per-Invocation flag set used by registerFlags
 	// and ParseFlags. Each Invocation owns its own *flag.FlagSet so
 	// multiple compile invocations in the same process don't fight

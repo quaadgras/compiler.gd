@@ -42,6 +42,10 @@ const (
 )
 
 func dumpobj(gd *base.Invocation) {
+	if gd.Flag.Unit {
+		dumpUnitObj(gd)
+		return
+	}
 	if gd.Flag.LinkObj == "" {
 		dumpobj1(gd, gd.Flag.LowerO, modeCompilerObj|modeLinkerObj)
 		return
@@ -69,6 +73,7 @@ func dumpobj1(gd *base.Invocation, outfile string, mode int) {
 		start := startArchiveEntry(bout)
 		dumpLinkerObj(gd, bout)
 		finishArchiveEntry(bout, start, "_go_.o")
+		dumpUnitObjs(gd, bout)
 	}
 	if mode&modeCompilerObj != 0 && gd.Debug.SkipExtInst != 0 {
 		// (-d=skipextinst: which instantiations importers may rely

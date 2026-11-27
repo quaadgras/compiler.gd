@@ -268,8 +268,22 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 	// the type system is ready.
 	ssagen.InitTables(gd)
 
+	// The files that are compiled by themselves (units.go): their
+	// objects, compiled now or kept from before, go with the package's.
+	files := gd.Flagset.Args()
+	if !gd.Flag.Unit {
+		if units, rest := splitUnits(files); len(units) > 0 {
+			if len(rest) == 0 {
+				gd.Fatalf("a package of units has no file that is compiled with the package")
+			}
+			gd.UnitObjs = compileUnits(archInit, gd, args, units)
+			files = rest
+			gd.Flag.Complete = false // the units define what this declares
+		}
+	}
+
 	// Parse and typecheck input.
-	noder.LoadPackage(gd, gd.Flagset.Args())
+	noder.LoadPackage(gd, files)
 
 	// C translated by cmd/cc: its objects on the heap are allocated
 	// with a byte after them (ir.CObjType). C's library is checked as

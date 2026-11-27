@@ -175,6 +175,13 @@ func runClean(ctx context.Context, cmd *base.Command, args []string) {
 				}
 			}
 
+			// gd: the objects of the files that the compiler compiles
+			// by themselves (//go:unit; cmd/compile/internal/gd/units.go).
+			if err := sh.RemoveAll(filepath.Join(dir, "gd-units")); err != nil && !printedErrors {
+				printedErrors = true
+				base.Error(err)
+			}
+
 			logFile := filepath.Join(dir, "log.txt")
 			if err := sh.RemoveAll(logFile); err != nil && !printedErrors {
 				printedErrors = true
