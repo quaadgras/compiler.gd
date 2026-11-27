@@ -1262,7 +1262,9 @@ func writeType(gd *base.Invocation, t *types.Type) *obj.LSym {
 	// can be defined in multiple packages, that is, unnamed types,
 	// instantiated types and shape types.
 	dupok := 0
-	if tbase.Sym() == nil || tbase.IsFullyInstantiated() || tbase.HasShape() {
+	if tbase.Sym() == nil || tbase.IsFullyInstantiated() || tbase.HasShape() || gd.Flag.Unit {
+		// (-unit: each file of the package that uses a type declares
+		// it, the same.)
 		dupok = obj.DUPOK
 	}
 

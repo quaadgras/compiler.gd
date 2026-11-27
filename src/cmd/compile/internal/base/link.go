@@ -6,6 +6,8 @@ package base
 
 import (
 	"cmd/internal/obj"
+	"cmd/internal/objabi"
+	"strings"
 )
 
 // ReservedImports are import paths used internally for generated
@@ -34,6 +36,14 @@ func (gd *Invocation) PkgLinksym(prefix, name string, abi obj.ABI) *obj.LSym {
 	sep := "."
 	if ReservedImports[prefix] {
 		sep = ":"
+	}
+	if gd.Flag.Unit && !strings.ContainsAny(name, ".·") && prefix == objabi.PathToPrefix(gd.Ctxt.Pkgpath) {
+		// A function or variable of a package whose files are compiled
+		// separately: another file's object defines it, or refers to
+		// it, by its name, as the linker dedups and checks what has
+		// no package ("_"). (What the compiler makes itself has a "."
+		// in its name and is this object's own.)
+		return gd.linksym("_", prefix+sep+name, abi)
 	}
 	return gd.linksym(prefix, prefix+sep+name, abi)
 }

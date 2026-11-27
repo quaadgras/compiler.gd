@@ -1246,6 +1246,9 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 	}
 
 	fn.Pragma = r.pragmaFlag()
+	if fn.Pragma&ir.Dupok != 0 {
+		fn.SetDupok(true)
+	}
 
 	r.linkname(name)
 

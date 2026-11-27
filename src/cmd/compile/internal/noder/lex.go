@@ -37,6 +37,7 @@ const (
 		ir.LocalArgs |
 		ir.InlineHint |
 		ir.AlwaysInline |
+		ir.Dupok |
 		ir.Systemstack |
 		ir.Nowritebarrier |
 		ir.Nowritebarrierrec |
@@ -65,6 +66,8 @@ func pragmaFlag(verb string) ir.PragmaFlag {
 		return ir.InlineHint
 	case "go:alwaysinline":
 		return ir.AlwaysInline
+	case "go:dupok":
+		return ir.Dupok
 	case "go:notear":
 		return ir.NoTear
 	case "go:localargs":

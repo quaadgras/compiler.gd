@@ -89,6 +89,7 @@ type CmdFlags struct {
 	BuildID            string       "help:\"record `id` as the build id in the export metadata\""
 	CPUProfile         string       "help:\"write cpu profile to `file`\""
 	Complete           bool         "help:\"compiling complete package (no C or assembly)\""
+	Unit               bool         "help:\"compiling one file of a package whose files are compiled separately (cmd/cc)\""
 	ClobberDead        bool         "help:\"clobber dead stack slots (for debugging)\""
 	ClobberDeadReg     bool         "help:\"clobber dead registers (for debugging)\""
 	Dwarf              bool         "help:\"generate DWARF symbols\""

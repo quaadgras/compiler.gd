@@ -5,6 +5,7 @@
 package noder
 
 import (
+	"cmd/internal/goobj"
 	"cmp"
 	"fmt"
 	"internal/pkgbits"
@@ -601,4 +602,10 @@ func writeUnifiedExport(gd *base.Invocation, out io.Writer) {
 	}
 
 	gd.Ctxt.Fingerprint = l.pw.DumpTo(out)
+	if gd.Flag.Unit {
+		// One file of a package whose files are compiled separately: no
+		// package imports what it exports, and the package's
+		// fingerprint is that of the files compiled together.
+		gd.Ctxt.Fingerprint = goobj.FingerprintType{}
+	}
 }

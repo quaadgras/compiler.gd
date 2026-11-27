@@ -120,6 +120,15 @@ func MakeTask(gd *base.Invocation) {
 	if len(deps) == 0 && len(fns) == 0 && types.LocalPkg(gd).Path != "main" && types.LocalPkg(gd).Path != "runtime" {
 		return // nothing to initialize
 	}
+	if gd.Flag.Unit {
+		// One file of a package whose files are compiled separately:
+		// the package's task is the one of the files compiled together,
+		// which import what this one does.
+		if len(fns) > 0 {
+			gd.Fatalf("a separately compiled file (-unit) has variables to initialize or an init function")
+		}
+		return
+	}
 
 	// Make an .inittask structure.
 	sym := typecheck.Lookup(gd, ".inittask")
