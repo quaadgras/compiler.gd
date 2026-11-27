@@ -79,8 +79,8 @@ func scopeNames(sc *scope) []string {
 				names = append(names, sourceName(sc.name))
 			}
 		case skClass:
-			if sc.rec != nil && sc.rec.mtag != "" {
-				names = append(names, sc.rec.mtag)
+			if sc.rec != nil {
+				names = append(names, recTag(sc.rec))
 			} else {
 				names = append(names, sourceName(sc.name))
 			}
@@ -136,6 +136,22 @@ func (m *mangler) name(sc *scope, unqualified, cv string) {
 		m.b.WriteString(unqualified)
 		m.b.WriteString("E")
 	}
+}
+
+// recTag is a class's own name as mangled. A class declared in a
+// C++ function is a type of its own, whatever others are named the same in
+// other functions: its name has its number.
+func recTag(r *record) string {
+	if r.mtag != "" {
+		return r.mtag
+	}
+	tag := r.tag
+	if tag == "" {
+		tag = "._" + itoa(int64(r.id))
+	} else if r.cls != nil && inBlock(r.sc) {
+		tag += "._" + itoa(int64(r.id))
+	}
+	return sourceName(tag)
 }
 
 // rawType is t's mangling without substitutions: its key.
@@ -250,15 +266,7 @@ func (m *mangler) typ(t *ctype, raw bool) {
 		m.params(t.fn, raw)
 		m.b.WriteString("E")
 	case kStruct:
-		tag := t.rec.tag
-		if tag == "" {
-			tag = "._" + itoa(int64(t.rec.id))
-		}
-		tag = sourceName(tag)
-		if t.rec.mtag != "" {
-			tag = t.rec.mtag
-		}
-		m.named(t.rec.sc, tag, raw)
+		m.named(t.rec.sc, recTag(t.rec), raw)
 		return // a class's name is its own substitution, made by named
 	}
 	if !raw {

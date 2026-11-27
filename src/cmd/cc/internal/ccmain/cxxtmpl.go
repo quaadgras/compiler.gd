@@ -122,6 +122,44 @@ func hasTParam(t *ctype) bool {
 	return false
 }
 
+// allExplicit reports whether every template parameter the type t
+// names is one of those marked in explicit.
+func allExplicit(t *ctype, explicit []bool) bool {
+	if t == nil {
+		return true
+	}
+	switch t.kind {
+	case kTParam:
+		return !t.isPackT && int(t.n) < len(explicit) && explicit[t.n]
+	case kDependent:
+		if t.dep == nil || t.dep.tmpl == nil {
+			return false
+		}
+		for _, a := range t.dep.args {
+			if a.dep || a.isPack || a.t == nil && !a.isVal || a.t != nil && !allExplicit(a.t, explicit) {
+				return false
+			}
+		}
+		return true
+	case kMemPtr:
+		return false
+	case kArray:
+		return t.depN == 0 && allExplicit(t.elem, explicit)
+	case kPtr, kComplex:
+		return allExplicit(t.elem, explicit)
+	case kFunc:
+		if !allExplicit(t.fn.ret, explicit) {
+			return false
+		}
+		for _, pt := range t.fn.params {
+			if !allExplicit(pt, explicit) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func depArgs(args []targ) bool {
 	for _, a := range args {
 		if a.dep || a.t != nil && hasTParam(a.t) || a.isPack && depArgs(a.pack) {
@@ -1523,6 +1561,10 @@ func (p *parser) deduce(tm *template, given []targ, args []expr, at pos) ([]targ
 		}
 		bound[i], set[i] = a, true
 	}
+	explicit := append([]bool(nil), set...)
+	for i, tp := range tm.params {
+		explicit[i] = explicit[i] && !tp.pack
+	}
 	if pat := p.funcPattern(tm); pat != nil {
 		for i, pt := range pat.params {
 			if pt.kind == kTParam && pt.isPackT || pt.isRef() && pt.elem.kind == kTParam && pt.elem.isPackT {
@@ -1554,6 +1596,11 @@ func (p *parser) deduce(tm *template, given []targ, args []expr, at pos) ([]targ
 			}
 			if i >= len(args) {
 				break
+			}
+			if len(given) > 0 && allExplicit(pt, explicit) {
+				// Nothing to deduce: the argument is converted to the
+				// parameter's type, as a function's that is no template.
+				continue
 			}
 			if !p.deduceArg(pt, args[i], bound, set) {
 				return nil, false

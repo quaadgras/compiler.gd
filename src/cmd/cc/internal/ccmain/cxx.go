@@ -793,6 +793,9 @@ func (p *parser) castTo(e expr, t *ctype, at pos, how string) expr {
 // conversion, or a temporary's construction.
 func (p *parser) functionalCast(t *ctype, at pos) expr {
 	brace := p.is("{")
+	if brace && t.kind == kStruct {
+		p.complete(t) // a template's instance: its members, before they are initialized
+	}
 	if ci := classOf(t); brace && (t.kind == kArray || t.kind == kStruct && (ci == nil || !ci.userCtor && len(ci.nsdmi) == 0 && !needsCtor(t) && !needsCopy(t))) {
 		// An aggregate's: a compound literal. (One with members that
 		// constructors or default member initializers initialize is
@@ -1666,6 +1669,36 @@ func (p *parser) cxxUnary(t token, at pos) (expr, bool) {
 	if x.ty().kind == kStruct {
 		if t.text == "!" {
 			return p.fold(&unary{node{tInt, at}, "!", p.boolOf(x, at)}), true
+		}
+		if t.text == "+" || t.text == "-" || t.text == "~" {
+			// C's operator, on what the class's conversion function
+			// to an arithmetic type gives.
+			var to *ctype
+			for _, f := range p.convFuncs(x.ty(), nil) {
+				rt := f.t.fn.ret
+				if rt.isRef() {
+					rt = rt.elem
+				}
+				rt = rt.unqual()
+				if f.explicit || f.deleted || !rt.isArith() || t.text == "~" && !rt.isInteger() {
+					continue
+				}
+				if to != nil && !sameType(to, rt) {
+					p.errorAt(at, "operator%s on %s is ambiguous: it converts to %s and to %s", t.text, x.ty(), to, rt)
+				}
+				to = rt
+			}
+			if to != nil {
+				if c := p.convertClass(x, to, at); c != nil {
+					v := p.rvalue(c)
+					rt := promote(v.ty())
+					v = p.convert(v, rt)
+					if t.text == "+" {
+						return v, true
+					}
+					return p.fold(&unary{node{rt, at}, t.text, v}), true
+				}
+			}
 		}
 		p.errorAt(at, "no match for operator%s (operand type is %s)", t.text, x.ty())
 	}
