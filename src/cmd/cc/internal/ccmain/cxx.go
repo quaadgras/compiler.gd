@@ -342,6 +342,16 @@ func (p *parser) nested(i int) (in *scope, j int) {
 		if !p.isAt(e, "::") {
 			break
 		}
+		if s != nil && in == nil && (s.kind == symVar || s.kind == symFunc) && p.isAt(j+1, "::") {
+			// Before "::" only namespaces and types are looked for: one
+			// that a variable of the same name hides is found.
+			for sc := p.sc; sc != nil; sc = sc.parent {
+				if v := sc.find(p.peekAt(j).text); v != nil && (v.kind == symNamespace || v.kind == symTypedef) {
+					s = v
+					break
+				}
+			}
+		}
 		var next *scope
 		if s != nil {
 			switch s.kind {
@@ -975,17 +985,111 @@ func (p *parser) directInitAhead() bool {
 	if p.isAt(1, ")") || p.isAt(1, "...") {
 		return false
 	}
-	if p.isTypeStart(1) {
+	return !p.paramsAhead(0)
+}
+
+// paramsAhead reports whether what the "(" at i starts can be a list of
+// parameters: its first item is a parameter's declaration, and no later
+// one is plainly an expression. (The later ones are judged by their
+// tokens alone: naming a type may instantiate a template, which is for
+// the declaration's own parse to do.)
+func (p *parser) paramsAhead(i int) bool {
+	if !p.paramAhead(i + 1) {
+		return false
+	}
+	known := func(j int) *symbol {
+		if t := p.peekAt(j); t.kind == tkIdent {
+			return p.lookup(t.text)
+		}
+		return nil
+	}
+	depth, angle := 0, 0
+	for j := i + 1; ; j++ {
+		t := p.peekAt(j)
+		if t.kind == tkEOF {
+			return true
+		}
+		if t.kind != tkPunct {
+			continue
+		}
+		switch t.text {
+		case "(", "[", "{":
+			depth++
+		case ")", "]", "}":
+			depth--
+		case "<":
+			if s := known(j - 1); p.peekAt(j-1).kind == tkIdent && (s == nil || s.kind == symTypedef || s.kind == symTemplate) {
+				angle++
+			}
+		case ">":
+			angle = max(angle-1, 0)
+		case ">>":
+			angle = max(angle-2, 0)
+		}
+		if depth < 0 {
+			return true
+		}
+		if depth != 0 || angle != 0 || t.text != "," {
+			continue
+		}
+		// The next item: an expression if it starts as only one does.
+		n := p.peekAt(j + 1)
+		switch n.kind {
+		case tkPunct:
+			if n.text != "[" && n.text != "::" && n.text != "..." {
+				return false
+			}
+		case tkIdent:
+			switch n.text {
+			case "this", "nullptr", "true", "false", "sizeof", "alignof", "new", "static_cast", "const_cast", "reinterpret_cast", "typeid", "noexcept":
+				return false
+			}
+			s := known(j + 1)
+			if s == nil {
+				break
+			}
+			switch s.kind {
+			case symVar, symFunc, symEnumConst, symField:
+				if !p.isAt(j+2, "::") {
+					return false
+				}
+			case symTypedef:
+				// T(1, 2), T{}: a temporary; T(), T(*), T(U): a type.
+				if p.isAt(j+2, "{") {
+					return false
+				}
+				if p.isAt(j+2, "(") {
+					m := p.peekAt(j + 3)
+					if m.kind != tkIdent && m.kind != tkPunct {
+						return false
+					}
+					if m.kind == tkIdent {
+						if ms := known(j + 3); ms != nil && ms.kind != symTypedef && ms.kind != symTemplate {
+							return false
+						}
+					}
+				}
+			}
+		default:
+			return false // a constant
+		}
+	}
+}
+
+// paramAhead reports whether the first item of a parenthesized list, at
+// i, can be a parameter's declaration.
+func (p *parser) paramAhead(i int) bool {
+	if p.isTypeStart(i) {
 		// A parameter's type, unless it is T(args) or T{args}: a
 		// temporary. T(name) declares a parameter only if name is not
 		// something declared.
-		k := p.typeSpecEnd(1)
+		k := p.typeSpecEnd(i)
 		switch {
 		case p.isAt(k, "{"):
-			return true
+			return false
 		case p.isAt(k, "("):
 			if _, m := p.memPtrAhead(k + 1); m > 0 {
-				return false
+				return true
 			}
 			m := k + 1
 			for p.isAt(m, "*") || p.isAt(m, "&") || p.isAt(m, "&&") {
@@ -994,27 +1098,27 @@ func (p *parser) directInitAhead() bool {
 			if p.isAt(m, ")") && m == k+1 {
 				// T(): a parameter of function type, if a parameter's
 				// end follows; else a temporary.
-				return !p.isAt(m+1, ",") && !p.isAt(m+1, ")")
+				return p.isAt(m+1, ",") || p.isAt(m+1, ")")
 			}
 			if p.isAt(m, ")") {
-				return false // T(*), T(&): a parameter's type
+				return true // T(*), T(&): a parameter's type
 			}
 			if p.isTypeStart(m) {
-				return false // T(U): a function type
+				return p.paramsAhead(k) // T(U): a function type
 			}
 			if t := p.peekAt(m); t.kind == tkIdent && p.isAt(m+1, ")") && p.lookup(t.text) == nil {
-				return false
+				return true
 			}
-			return true
+			return false
 		}
-		return false
+		return true
 	}
-	if t := p.peekAt(1); t.kind == tkIdent {
+	if t := p.peekAt(i); t.kind == tkIdent {
 		if s := p.lookup(t.text); s != nil && s.kind == symPack && !s.isParamPack {
-			return false // a pack of types: a parameter pack's
+			return true // a pack of types: a parameter pack's
 		}
 	}
-	return true
+	return false
 }
 
 // funcQuals parses what follows a function declarator's parameters in
@@ -1431,7 +1535,7 @@ func (p *parser) castAhead() bool {
 			}
 			return true
 		}
-		return p.isAt(n+1, "*") || p.isAt(n+1, "&") || p.isAt(n+1, "^") || p.isAt(n+1, ")") || p.isTypeStart(n+1)
+		return p.isAt(n+1, "*") || p.isAt(n+1, "&") || p.isAt(n+1, "^") || p.isAt(n+1, ")") || p.isTypeStart(n+1) && p.paramsAhead(n)
 	}
 	return true
 }
@@ -1465,10 +1569,13 @@ func (p *parser) declAhead() bool {
 			return false
 		}
 		k++
+		closed := false
 		for p.isAt(k, ")") {
 			k++
+			closed = true
 		}
-		return p.isAt(k, ";") || p.isAt(k, "=") || p.isAt(k, "[") || p.isAt(k, "(") || p.isAt(k, ",")
+		// (T(a, b) is an expression; T(a), b; declares.)
+		return p.isAt(k, ";") || p.isAt(k, "=") || p.isAt(k, "[") || p.isAt(k, "(") || p.isAt(k, ",") && closed
 	}
 	if tk := p.peekAt(n); tk.kind == tkPunct {
 		switch tk.text {

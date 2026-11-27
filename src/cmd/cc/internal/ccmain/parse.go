@@ -2167,7 +2167,7 @@ func (p *parser) declarator2C(name string, t *ctype, s specs, a attrs, at pos) *
 	}
 	if inited {
 		// Initialized as C++ initializes.
-	} else if p.accept("=") {
+	} else if p.accept("=") || p.cxx && sym.t.kind == kArray && p.is("{") {
 		if s.storage == sExtern && p.fn != nil {
 			p.errorAt(at, "%q has both extern and an initializer", name)
 		}
