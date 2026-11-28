@@ -348,7 +348,7 @@ func (p *parser) nested(i int) (in *scope, j int) {
 		if !p.isAt(e, "::") {
 			break
 		}
-		if s != nil && in == nil && (s.kind == symVar || s.kind == symFunc) && p.isAt(j+1, "::") {
+		if s != nil && in == nil && (s.kind == symVar || s.kind == symFunc || s.kind == symField) && p.isAt(j+1, "::") {
 			// Before "::" only namespaces and types are looked for: one
 			// that a variable of the same name hides is found.
 			for sc := p.sc; sc != nil; sc = sc.parent {
@@ -1539,6 +1539,12 @@ func (p *parser) typeSpecEnd(i int) int {
 		if t.kind == tkIdent && (typeWords[t.text] || cxxTypeWords[t.text]) {
 			j++
 			switch t.text {
+			case "void", "char", "short", "int", "long", "float", "double", "signed", "unsigned", "bool", "_Bool",
+				"wchar_t", "char8_t", "char16_t", "char32_t", "auto":
+				// The type is said: a type's name after it is what is
+				// declared (int S = 2; auto tm = f();, where S and tm
+				// are classes too).
+				named = true
 			case "decltype", "typeof", "__typeof__", "__typeof", "__underlying_type", "__make_unsigned", "__make_signed", "alignas", "_Alignas", "_Atomic":
 				// With its operand in parentheses.
 				if p.isAt(j, "(") {
@@ -1786,6 +1792,28 @@ func (p *parser) classOperand(x, y expr, at pos) expr {
 	}
 	if c := p.convertClass(x, valueType(&goVal{node{to, at}, ""}), at); c != nil {
 		return c
+	}
+	if to.isInteger() {
+		// With an integer: the pointer the class converts to, if it
+		// is to one type of pointer and to nothing arithmetic (buf + n,
+		// of an object that owns an array).
+		var via *ctype
+		for _, f := range p.convFuncs(x.ty(), nil) {
+			rt := f.t.fn.ret.unqual()
+			if f.explicit || f.deleted || f.tmpl != nil || !rt.isPtr() || rt.isRef() {
+				continue
+			}
+			if via != nil && !sameType(via, rt) {
+				via = nil
+				break
+			}
+			via = rt
+		}
+		if via != nil {
+			if c := p.convertClass(x, via, at); c != nil {
+				return c
+			}
+		}
 	}
 	if to.isPtr() && to.elem.kind == kStruct {
 		// To a pointer the other operand's converts to or from: a
