@@ -14,6 +14,7 @@ import (
 	"cmd/compile/internal/objw"
 	"cmd/compile/internal/ssa"
 	"cmd/compile/internal/ssagen"
+	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
 	"cmd/internal/obj"
 	"cmd/internal/obj/x86"
@@ -1402,6 +1403,14 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p.From.Name = obj.NAME_PARAM
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = v.Reg()
+
+	case ssa.OpAMD64CHECKSHADOW:
+		// runtime/mkcshadow.go: the stub for the check and the
+		// register that the pointer is in, which it keeps.
+		p := s.Prog(obj.ACALL)
+		p.To.Type = obj.TYPE_MEM
+		p.To.Name = obj.NAME_EXTERN
+		p.To.Sym = typecheck.LookupRuntimeFunc(gd, fmt.Sprintf("cchk%d_%s", v.AuxInt, obj.Rconv(int(v.Args[0].Reg()))))
 
 	case ssa.OpAMD64LoweredWB:
 		p := s.Prog(obj.ACALL)

@@ -620,6 +620,11 @@ var genericOps = []opData{
 	// alignment that arg0 is to have <<8 and the size that it is
 	// converted to <<16.
 	{name: "C23Slow", argLength: 3, aux: "Int64", typ: "Bool"}, // arg2=mem
+	// The check of a C23Slow that a stub of the runtime makes with the
+	// shadow of C's memory (cheaders.go's cShadowSite): true if the
+	// runtime is to see arg0, a pointer. auxint is the stub's number
+	// (cshadowstubs.go); arg1=mem.
+	{name: "C23ShadowCheck", argLength: 2, aux: "Int64", typ: "Bool"},
 
 	{name: "KeepAlive", argLength: 2, typ: "Mem", zeroWidth: true},                  // arg[0] is a value that must be kept alive until this mark.  arg[1]=mem, returns mem
 

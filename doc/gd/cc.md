@@ -505,6 +505,19 @@ memory-safe `unsafe` (`unsafe.md`, "Compatible types", is the first):
   object, as the last of an object of 12 bytes, is in none for the
   shadow, and the runtime is asked. `-d=nocshadow=1` compiles a package
   without the shadow's checks.
+
+  Such a comparison is about fifteen instructions and sixty bytes, and
+  Godot has a quarter of a million of them. So it is not made where the
+  check is but by a call of a stub of the runtime's that makes it
+  (`runtime/cshadow_amd64.s`, written by `mkcshadow.go`): five bytes at
+  the site. There is a stub for each check, each size up to 16 bytes
+  and each number of whole words up to eight, and for each register
+  that the pointer can be in. The stub keeps every register and gives
+  its answer in the flags, so the compiled code neither moves the
+  pointer nor saves anything around the call, and the call is to what
+  the compiled code's register allocator sees as a comparison
+  (`CHECKSHADOW`). A check that has no stub is made where it is, as
+  before. `-d=nocshadowstub=1` makes all of them there.
 - **`memcpy`, `memmove` and `memset` stay in the objects they are
   given**, both of them for a copy, or the program stops (`checkptr:
   memory copied or set past the end of its object`), and what they

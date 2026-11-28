@@ -3508,6 +3508,8 @@ func rewriteValueAMD64(v *Value) bool {
 	case OpBswap64:
 		v.Op = OpAMD64BSWAPQ
 		return true
+	case OpC23ShadowCheck:
+		return rewriteValueAMD64_OpC23ShadowCheck(v)
 	case OpCeil:
 		return rewriteValueAMD64_OpCeil(v)
 	case OpCeilFloat32x4:
@@ -94240,6 +94242,24 @@ func rewriteValueAMD64_OpBswap16(v *Value) bool {
 		v.reset(OpAMD64ROLWconst)
 		v.AuxInt = int8ToAuxInt(8)
 		v.AddArg(x)
+		return true
+	}
+}
+func rewriteValueAMD64_OpC23ShadowCheck(v *Value) bool {
+	v_1 := v.Args[1]
+	v_0 := v.Args[0]
+	b := v.Block
+	// match: (C23ShadowCheck [s] p mem)
+	// result: (SETNE (CHECKSHADOW [s] p mem))
+	for {
+		s := auxIntToInt64(v.AuxInt)
+		p := v_0
+		mem := v_1
+		v.reset(OpAMD64SETNE)
+		v0 := b.NewValue0(v.Pos, OpAMD64CHECKSHADOW, types.TypeFlags)
+		v0.AuxInt = int64ToAuxInt(s)
+		v0.AddArg2(p, mem)
+		v.AddArg(v0)
 		return true
 	}
 }

@@ -1073,6 +1073,7 @@ const (
 	OpAMD64LoweredGetCallerPC
 	OpAMD64LoweredGetCallerSP
 	OpAMD64LoweredNilCheck
+	OpAMD64CHECKSHADOW
 	OpAMD64LoweredWB
 	OpAMD64LoweredHasCPUFeature
 	OpAMD64LoweredPanicBoundsRR
@@ -7109,6 +7110,7 @@ const (
 	OpVarDef
 	OpVarLive
 	OpC23Slow
+	OpC23ShadowCheck
 	OpKeepAlive
 	OpInlMark
 	OpInt64Make
@@ -20166,6 +20168,16 @@ var opcodeTable = [...]opInfo{
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, regMask{v1: 49151, v2: 0}}, // AX CX DX BX SP BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+		},
+	},
+	{
+		name:    "CHECKSHADOW",
+		auxType: auxInt64,
+		argLen:  2,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, regMask{v1: 49135, v2: 0}}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
 			},
 		},
 	},
@@ -107454,6 +107466,12 @@ var opcodeTable = [...]opInfo{
 		name:    "C23Slow",
 		auxType: auxInt64,
 		argLen:  3,
+		generic: true,
+	},
+	{
+		name:    "C23ShadowCheck",
+		auxType: auxInt64,
+		argLen:  2,
 		generic: true,
 	},
 	{

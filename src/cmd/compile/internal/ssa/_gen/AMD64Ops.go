@@ -1134,6 +1134,11 @@ func init() {
 		// LoweredWB invokes runtime.gcWriteBarrier{auxint}. arg0=mem, auxint=# of buffer entries needed.
 		// It saves all GP registers if necessary, but may clobber others.
 		// Returns a pointer to a write barrier buffer in R11.
+		// A call of runtime.cchk<auxint>_<arg0's register>, which
+		// keeps every register: the flags are not equal if the
+		// runtime is to see the pointer arg0 (mkcshadow.go). arg1=mem.
+		{name: "CHECKSHADOW", argLength: 2, reg: regInfo{inputs: []regMask{gp}}, aux: "Int64", typ: "Flags"},
+
 		{name: "LoweredWB", argLength: 1, reg: regInfo{clobbers: callerSave.minus(gp.union(g)), outputs: []regMask{buildReg("R11")}}, clobberFlags: true, aux: "Int64"},
 
 		{name: "LoweredHasCPUFeature", argLength: 0, reg: gp01, rematerializeable: true, typ: "UInt64", aux: "Sym", symEffect: "None"},

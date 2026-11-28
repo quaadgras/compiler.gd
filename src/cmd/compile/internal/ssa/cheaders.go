@@ -1124,6 +1124,25 @@ func cShadowSite(f *Func, v *Value, dry bool) bool {
 	if dry {
 		return true
 	}
+	if f.Config.arch == "amd64" && f.Config.gd.Debug.NoCShadowStub == 0 {
+		// The same comparison in a stub of the runtime's, which
+		// is called: five bytes here instead of about sixty
+		// (runtime/mkcshadow.go).
+		key := v.AuxInt
+		if check == CSlowArith {
+			k, _ := cConstOff(v.Args[0], v.Args[1])
+			key = CSlowAux(CSlowArith, 0, k)
+		}
+		if id, ok := cShadowStubs[key]; ok {
+			// (The pointer itself, which the stub keeps: it
+			// is not made a uintptr, which would be a copy.)
+			p := v.Args[0]
+			v.reset(OpC23ShadowCheck)
+			v.AuxInt = int64(id)
+			v.AddArg2(p, mem)
+			return true
+		}
+	}
 	q := b.NewValue2(pos, OpConvert, uintptrT, v.Args[0], mem)
 	// differ is not 0 if the words' bytes, under m, are not want.
 	differ := func(x *Value, m, want int64) *Value {

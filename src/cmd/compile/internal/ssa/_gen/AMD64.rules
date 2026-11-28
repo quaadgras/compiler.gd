@@ -1928,3 +1928,6 @@
 // gd: a string loaded and stored with one 16-byte access.
 (StringLoad16 ptr mem) => (MOVOloadstr ptr mem)
 (StringStore16 ptr w0 w1 mem) => (MOVOstorestr ptr w0 w1 mem)
+
+// A check of C's pointer that a stub of the runtime makes (cheaders.go).
+(C23ShadowCheck [s] p mem) => (SETNE (CHECKSHADOW [s] p mem))
