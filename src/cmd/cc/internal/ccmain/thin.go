@@ -277,6 +277,11 @@ func (g *gen) tindex(e *deref, forAddr bool) (string, bool) {
 	if _, isStr := d.x.(*strLit); isStr {
 		return "", false
 	}
+	if m, ok := d.x.(*member); ok && shortStruct(m.x.ty()) && at.sizeof() >= shortMin {
+		// The array that the struct may be allocated without all
+		// of: left to the arithmetic, which is checked.
+		return "", false
+	}
 	a := g.tlv(d.x, false).x
 	if c, ok := b.y.(*intConst); ok {
 		if c.v < 0 || c.v >= at.n {
@@ -365,9 +370,38 @@ func (g *gen) tbind(l *lval) {
 	l.addr = t
 }
 
+// shortMin is the runtime's cShortMin: the size from which the array
+// that a struct ends with may be one that the struct is allocated
+// without all of.
+const shortMin = 64 << 10
+
+// shortStruct reports whether t is a struct that ends with such an
+// array: a pointer to one may be to less than the type has. The array's
+// elements are not indexed as Go's (tindex), and a value of the struct
+// is whole where it is copied (wholeValue).
+func shortStruct(t *ctype) bool {
+	if t == nil || t.kind != kStruct || t.rec == nil || t.rec.union || len(t.rec.fields) == 0 {
+		return false
+	}
+	f := t.rec.fields[len(t.rec.fields)-1]
+	return f.t.kind == kArray && f.bits < 0 && f.t.n > 0 && f.t.sizeof() >= shortMin
+}
+
+// wholeValue is the check before the value of the lvalue l is copied:
+// if it is a struct that may be allocated short, and no variable, all of
+// it is in its object.
+func (g *gen) wholeValue(l *lval) {
+	if !shortStruct(l.t) || simpleLvalue(l.x) {
+		return
+	}
+	g.tbind(l)
+	g.p("c23.Whole(unsafe.Pointer(%s), %d)", taddr(l.x), l.t.sizeof())
+}
+
 func (g *gen) tload(l lval) string {
 	switch {
 	case l.t.kind == kStruct || l.t.kind == kArray:
+		g.wholeValue(&l)
 		return taddr(l.x)
 	case memValue(l.t):
 		return loadCode(g.vptr(taddr(l.x), ptrTo(l.t)), l.t)
@@ -409,6 +443,7 @@ func (g *gen) tstore(l lval, v string, c expr) {
 	switch {
 	case l.t.kind == kStruct || l.t.kind == kArray:
 		if v != taddr(l.x) {
+			g.wholeValue(&l)
 			g.p("%s = %s", l.x, star(v))
 			if hasUnionPtr(l.t) {
 				g.tbind(&l)

@@ -143,6 +143,14 @@ func capOf(r uintptr, x, y *Void) *Void {
 //go:linkname inObject runtime.c23InObject
 func inObject(p, r uintptr) int
 
+// Whole is called before the n bytes of a struct's value at p are
+// copied, if the struct is one that may be allocated without all of the
+// array it ends with (runtime's cShortOK): the value is all there, or
+// the program stops.
+//
+//go:linkname Whole runtime.c23Whole
+func Whole(p unsafe.Pointer, n uintptr)
+
 // CapArith is x op y ('+', '-', '*', '/', '%', '&', '|', '^'), signed if
 // s.
 func CapArith(op byte, x, y *Void, s bool) *Void {

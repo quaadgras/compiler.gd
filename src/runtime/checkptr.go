@@ -516,7 +516,7 @@ func checkptrConvCMoved(p unsafe.Pointer, elem *_type, load bool) unsafe.Pointer
 			checkptrStop("checkptr: converted pointer is past the end of its object")
 			return p
 		}
-		if elem.Size_ > limit-a {
+		if elem.Size_ > limit-a && !cShortOK(elem, limit-a) {
 			return unsafe.Pointer(a | cEnd)
 		}
 		if elem.Pointers() && a&(uintptr(min(elem.Align_, goarch.PtrSize))-1) != 0 {
@@ -1272,5 +1272,48 @@ func checkptrBase(p unsafe.Pointer) uintptr {
 func reflect_checkptr(p unsafe.Pointer, t *_type) {
 	if GOARCH != "wasm" { // see cmd/compile/internal/base/flag.go
 		checkptrAlignment(p, t, 1)
+	}
+}
+
+// cShortMin is the size from which the array that a struct of C's ends
+// with is one that the struct may be allocated without all of: the
+// "unlimited" vector that a program declares with a length it never
+// allocates,
+//
+//	struct match { ...; size_t ovector[131072]; };
+//	m = malloc(offsetof(struct match, ovector) + 2*n*sizeof(size_t));
+//
+// cmd/cc knows the same number (its shortStruct): the elements of such
+// an array are reached with arithmetic that is checked, and a value of
+// the struct is copied after c23Whole.
+const cShortMin = 64 << 10
+
+// cShortOK reports whether a pointer to elem may be to room bytes of an
+// object, fewer than elem has: elem ends with an array of cShortMin
+// bytes or more, and what is before the array fits.
+func cShortOK(elem *_type, room uintptr) bool {
+	if elem.Kind() != abi.Struct {
+		return false
+	}
+	st := (*structtype)(unsafe.Pointer(elem))
+	if len(st.Fields) == 0 {
+		return false
+	}
+	f := &st.Fields[len(st.Fields)-1]
+	return f.Typ.Kind() == abi.Array && f.Typ.Size_ >= cShortMin && f.Offset <= room
+}
+
+// c23Whole is called before a value of n bytes is loaded or stored
+// whole through p, a pointer to a struct that may be allocated short
+// (cShortOK): all of it is to be in the object.
+//
+//go:linkname c23Whole
+func c23Whole(p unsafe.Pointer, n uintptr) {
+	a := uintptr(p)
+	if a < minLegalPointer || a&(cPoison|cEnd) != 0 {
+		return // the copy faults
+	}
+	if base, size, kind := cObjectOf(a); kind != cObjNone && (a-base > size || n > size-(a-base)) {
+		throw("checkptr: a value is copied that its object does not have all of")
 	}
 }

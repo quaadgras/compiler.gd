@@ -225,6 +225,19 @@ Where C and Go's rules for pointers disagree:
   conversion to `*T` at a place where a `T` does not fit in what is
   left of the object: `(struct big *)p` for a `p` to a few bytes is a
   pointer that C may keep and compare, and that faults when it is used.
+  One kind of struct may be allocated without all it has: one that ends
+  with an array of 64 KiB or more, the "unlimited" vector that a program
+  declares with a length it never allocates (PCRE2's
+  `size_t ovector[131072]`, allocated as
+  `offsetof(match_data, ovector) + 2*n*sizeof(size_t)`). A pointer to
+  one is converted if what is before the array fits
+  (`runtime.cShortOK`). What makes that safe is in cmd/cc
+  (`shortStruct`): an element of such an array is not indexed as Go
+  indexes, with the length the type says, but with the arithmetic that
+  is checked against the object; and a value of the struct that is
+  loaded or stored whole through a pointer is checked to be all there
+  first (`c23.Whole`: `checkptr: a value is copied that its object does
+  not have all of`).
   The compiled code takes the bit off what it adds to
   (`uintptr(p) &^ cEnd` is what a conversion of a pointer to an integer
   is in such a package) and off both sides of `==`; the runtime puts it
