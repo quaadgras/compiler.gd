@@ -538,6 +538,7 @@ typedef atomic<intptr_t> atomic_intptr_t;
 typedef atomic<uintptr_t> atomic_uintptr_t;
 }
 #define ATOMIC_FLAG_INIT {}
+#define ATOMIC_VAR_INIT(value) (value)
 #endif
 `
 	sysHeaders["limits"] = `#ifndef __CC_LIMITS
