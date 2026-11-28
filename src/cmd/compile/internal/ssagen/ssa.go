@@ -4642,6 +4642,17 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 			return v
 		}
 
+		if s.gd.CObjects && from.IsUnsafePtr() && to.IsPtr() && x.Op == ssa.OpSelectN && x.Type.IsUnsafePtr() {
+			// What a call returned as a pointer to anything and the
+			// code uses as a pointer of a type, with no check (what
+			// malloc gave for a type, in internal/c23's own code):
+			// the value is of that type, and so is the slot of the
+			// frame that it is kept in. The runtime then asks about
+			// the pointer again when the memory is claimed for
+			// something else, as about any pointer of a type, and
+			// need not take it away for having none (crepair.go).
+			x.Type = to
+		}
 		v := s.newValue1(ssa.OpCopy, to, x) // ensure that v has the right type
 
 		// CONVNOP closure

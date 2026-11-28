@@ -610,12 +610,44 @@ func (g *gen) tcast(e *cast) string {
 		if code, ok := g.unionCast(e.x, to); ok {
 			return code
 		}
+		if softCast(e.x, to) {
+			return fmt.Sprintf("c23.ConvSoft[%s](unsafe.Pointer(%s))", g.mirror(to.elem), g.rv(e.x))
+		}
 	}
 	x := g.rv(e.x)
 	if s, ok := g.fenvOf(e); ok && !from.isPtr() && !to.isPtr() {
 		return convertUnder(x, from, to, s)
 	}
 	return g.tconv(x, from, to)
+}
+
+// softCast reports whether the cast of x to the pointer type to is of
+// what follows an object to another type: (U *)(t + n), where t points
+// to a struct and U is another struct, with pointers. A program writes
+// that for what it put after a header, and also where it put nothing
+// (Godot's (Variant *)(message + 1), for a message with no arguments,
+// which the next message follows): the conversion does not take the
+// memory from what is there (c23.ConvSoft).
+func softCast(x expr, to *ctype) bool {
+	if target.ilp32() {
+		return false
+	}
+	b, ok := x.(*binary)
+	if !ok || b.op != "+" && b.op != "-" {
+		return false
+	}
+	from := x.ty()
+	if !from.isPtr() || from.isRef() || !to.isPtr() {
+		return false
+	}
+	f, t := from.elem, to.elem
+	if f.kind != kStruct || t.kind != kStruct || !f.rec.complete || !t.rec.complete || f.rec == t.rec {
+		return false
+	}
+	if f.rec.union || t.rec.union || !hasPointers(t) {
+		return false
+	}
+	return !isBaseOf(f, t) && !isBaseOf(t, f)
 }
 
 // tptrAdd is p, of C type pt, plus or minus i elements.

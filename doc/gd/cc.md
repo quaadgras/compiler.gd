@@ -823,6 +823,16 @@ type union_value struct {
   the union holds no pointer once the integer is stored in its member.
   Godot's Callable is null if the integer is 0, and has a custom
   callable if the pointer is not null.
+- **A cast of what follows an object**, `(U *)(t + 1)` for a `t`
+  that points to a struct and a `U` that is another struct with
+  pointers, takes nothing from what the memory holds
+  (`c23.ConvSoft`): a program writes it for what it put after a
+  header, and also where it put nothing. Godot's message queue has
+  `(Variant *)(message + 1)` for a message with no arguments, where
+  the next message is: a conversion that claimed the words for a
+  Variant took the next message's pointers away. If the memory is not
+  what `U` says, the pointer is one that nothing is loaded through,
+  and the program stops only if it uses it.
 - **A pointer with no type** is converted by the runtime. C has a
   member at the union's address, and the union at a member's, so a
   `void *` that is one is converted to the other, in another function,

@@ -431,6 +431,20 @@ func cConvProbeType(v uintptr, t *_type, c bool) uintptr {
 	return cConvProbeElem(v, (*ptrtype)(unsafe.Pointer(t)).Elem, c)
 }
 
+// c23ConvSoft is the conversion of p to a pointer to elem that C wrote
+// as a cast of what follows an object, (U *)(t + 1) for a t that points
+// to a struct: the address after it, which the program may never use
+// (the arguments after a message that has none). It claims what nothing
+// claimed, as any conversion does, and takes nothing from what the
+// memory holds: if that is not what elem says, the pointer is one that
+// nothing is loaded through (cEnd), which may still be converted to
+// what is there.
+//
+//go:linkname c23ConvSoft
+func c23ConvSoft(p unsafe.Pointer, elem *_type) unsafe.Pointer {
+	return unsafe.Pointer(cConvProbeElem(uintptr(p), elem, true))
+}
+
 // cConvProbeElem is cConvProbeType for a pointer to elem.
 func cConvProbeElem(v uintptr, elem *_type, c bool) uintptr {
 	if v < minLegalPointer || v&(cPoison|cEnd) != 0 || elem.Size_ == 0 {

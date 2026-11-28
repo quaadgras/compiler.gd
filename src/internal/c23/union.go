@@ -233,3 +233,17 @@ func HasUnions() bool
 
 //go:linkname unionGlobal runtime.c23UnionGlobal
 func unionGlobal(p unsafe.Pointer, t *abi.Type)
+
+// ConvSoft is (*T)(p) for a p that C made by adding to a pointer to a
+// struct, the address of what follows an object: converted without
+// taking the memory from what it holds (runtime.c23ConvSoft). cmd/cc
+// writes it for such a cast to a pointer to another struct with
+// pointers.
+//
+//go:nocheckptr
+func ConvSoft[T any](p unsafe.Pointer) *T {
+	return (*T)(convSoft(p, abi.TypeFor[T]()))
+}
+
+//go:linkname convSoft runtime.c23ConvSoft
+func convSoft(p unsafe.Pointer, t *abi.Type) unsafe.Pointer
