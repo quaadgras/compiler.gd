@@ -1560,7 +1560,11 @@ typedef __builtin_va_list va_list;
 `,
 	"stddef.h": `#ifndef __CC_STDDEF_H
 #define __CC_STDDEF_H
+#ifdef __cplusplus
+#define NULL nullptr
+#else
 #define NULL ((void*)0)
+#endif
 typedef unsigned long size_t;
 typedef long ptrdiff_t;
 typedef int wchar_t;

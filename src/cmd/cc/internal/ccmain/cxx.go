@@ -1406,6 +1406,29 @@ func (p *parser) cxxName(at pos) expr {
 		p.pos += n + 1
 		name := p.operatorName()
 		sym = in.find(name)
+		if in.parent == nil && (strings.HasPrefix(name, "operatornew") || strings.HasPrefix(name, "operatordelete")) {
+			// The language's own, unless the program has it: the C
+			// library's.
+			own := false
+			if sym != nil && sym.kind == symFunc {
+				for _, o := range funcSet(sym) {
+					own = own || len(o.t.fn.params) == 1
+				}
+			}
+			if !own {
+				sym = nil
+			}
+			lib := name
+			if own {
+				lib = ""
+			}
+			switch lib {
+			case "operatornew", "operatornew[]":
+				return p.libcFunc("malloc", at)
+			case "operatordelete", "operatordelete[]":
+				return p.libcFunc("free", at)
+			}
+		}
 		if sym == nil || sym.kind != symFunc {
 			p.errorAt(at, "%q is not a member of %s", name, in.name)
 		}

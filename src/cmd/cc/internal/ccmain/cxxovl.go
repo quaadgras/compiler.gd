@@ -256,6 +256,17 @@ func (p *parser) convRank(a expr, pt *ctype) int {
 		if compatible(pt.elem.unqual(), vt.elem.unqual()) {
 			return rkQual // C's compatible types (an array of unknown length)
 		}
+		// A pointer to arrays, to one of arrays whose elements are
+		// more qualified: int (*)[3] to const int (*)[3].
+		pe, ve := pt.elem, vt.elem
+		pq, vq := pe.q, ve.q
+		for pe.kind == kArray && ve.kind == kArray && pe.n == ve.n {
+			pe, ve = pe.elem, ve.elem
+			pq, vq = pq|pe.q, vq|ve.q
+		}
+		if pe != pt.elem && sameType(pe.unqual(), ve.unqual()) && pq&vq == vq {
+			return rkQual
+		}
 		return rkNone
 	case pt.isPtr():
 		if vt.kind == kNullptr || isNullConst(a) {
