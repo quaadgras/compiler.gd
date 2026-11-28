@@ -1954,6 +1954,9 @@ size_t strlcat(char *restrict s1, const char *restrict s2, size_t n);
 size_t strxfrm(char *restrict s1, const char *restrict s2, size_t n);
 char *strsep(char **restrict stringp, const char *restrict delim);
 char *strsignal(int sig);
+#ifdef __cplusplus
+#include <strings.h> // as glibc's, which C++ libraries count on
+#endif
 #endif
 `,
 	"sys/types.h": `#ifndef __CC_SYS_TYPES_H

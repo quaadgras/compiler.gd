@@ -1444,7 +1444,15 @@ func (p *parser) cxxMember(x expr, arrow bool, at pos) expr {
 	} else {
 		name = p.ident()
 	}
-	if in == nil && t.rec.lookupField(name) != nil {
+	hidden := false
+	if in == nil && t.rec.cls != nil && t.rec.cls.scope != nil {
+		// A member function of the class hides a base's data member of
+		// the same name.
+		if s := t.rec.cls.scope.find(name); s != nil && s.kind == symFunc {
+			hidden = true
+		}
+	}
+	if in == nil && !hidden && t.rec.lookupField(name) != nil {
 		return p.memberOf(x, name, at)
 	}
 	sc := in

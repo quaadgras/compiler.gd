@@ -1373,6 +1373,19 @@ func (p *parser) primary() expr {
 	t := p.next()
 	switch t.kind {
 	case tkInt, tkChar:
+		if t.ud != "" && p.cxx {
+			// A user-defined literal: the literal operator's call.
+			name := `operator""` + t.ud
+			sym := p.lookup(name)
+			if sym == nil || sym.kind != symFunc {
+				p.errorAt(at, "no literal operator for the suffix %s", t.ud)
+			}
+			arg := &intConst{node{tULong, at}, t.ival}
+			if f := p.resolve(funcSet(sym), nil, []expr{arg}, at, name, true); f != nil {
+				return p.callFunc(f, nil, []expr{arg}, at)
+			}
+			p.errorAt(at, "no literal operator for the suffix %s takes an integer", t.ud)
+		}
 		return &intConst{node{t.ty, at}, t.ival}
 	case tkFloat:
 		if t.imag {

@@ -972,6 +972,10 @@ func (p *parser) operatorName() string {
 		}
 		p.errorf("%s is not an operator that can be overloaded", t)
 	}
+	if t.kind == tkString && t.str == "" && p.peek().kind == tkIdent {
+		// A literal operator: operator""_uz.
+		return `operator""` + p.next().text
+	}
 	if t.kind == tkIdent && (t.text == "new" || t.text == "delete") {
 		if p.is("[") && p.isAt(1, "]") {
 			p.pos += 2

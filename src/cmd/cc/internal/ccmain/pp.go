@@ -1769,6 +1769,12 @@ func convertNumber(t token) (token, error) {
 		t.kind, t.ival, t.ty = tkInt, int64(v), bitInt(max(n, 1), suffix != "wb")
 		return t, nil
 	default:
+		if raw := t.text[len(t.text)-len(suffix):]; strings.HasPrefix(raw, "_") {
+			// C++: a user-defined literal, 4_uz. The parser calls
+			// operator""_uz with the value, an unsigned long long.
+			t.kind, t.ival, t.ty, t.ud = tkInt, int64(v), tULong, raw
+			return t, nil
+		}
 		return errf("invalid suffix %q on integer constant", t.text[len(t.text)-len(suffix):])
 	}
 	// C23 6.4.4.1: the first type that can represent v.

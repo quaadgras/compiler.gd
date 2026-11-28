@@ -39,6 +39,7 @@ type token struct {
 	fval float64
 	line int
 	ty   *ctype // tkInt, tkChar, tkFloat; tkString: the element type
+	ud   string // tkInt: the suffix of a user-defined literal (C++)
 
 	space    bool  // whitespace before it
 	bol      bool  // first on its line

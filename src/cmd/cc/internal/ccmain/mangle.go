@@ -363,6 +363,8 @@ func mangleFunc(sc *scope, name string, ft *funcType, targs string) string {
 		// The type's substitutions come after the prefix's: written
 		// below, in place.
 		unq = "cv"
+	case strings.HasPrefix(name, `operator""`):
+		unq = "li" + sourceName(strings.TrimPrefix(name, `operator""`))
 	case strings.HasPrefix(name, "operator"):
 		op := strings.TrimPrefix(name, "operator")
 		nparams := len(ft.params)
