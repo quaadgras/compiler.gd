@@ -12,8 +12,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ssagen"
@@ -225,8 +228,10 @@ func compileUnits(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args, un
 		h.Write(src)
 		sum := fmt.Sprintf("%x", h.Sum(nil))
 		objs[i] = filepath.Join(dir, sum[:2], sum+".o")
-		if _, err := os.Stat(objs[i]); err != nil {
+		if st, err := os.Stat(objs[i]); err != nil {
 			todo = append(todo, i)
+		} else if now := time.Now(); now.Sub(st.ModTime()) > time.Hour {
+			os.Chtimes(objs[i], now, now) // used: trimUnitCache keeps it
 		}
 	}
 	if gd.Debug.Units != 0 {
@@ -290,7 +295,69 @@ func compileUnits(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args, un
 	if failed {
 		gd.ErrorExit()
 	}
+	trimUnitCache(dir, objs)
 	return objs
+}
+
+// unitCacheMax is how much the objects of units may take, in bytes:
+// 10 GB, or $GDUNITCACHE megabytes.
+func unitCacheMax() int64 {
+	if s := os.Getenv("GDUNITCACHE"); s != "" {
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+			return n << 20
+		}
+	}
+	return 10 << 30
+}
+
+// trimUnitCache removes the objects that were used longest ago, if
+// those of the cache take more than it may: down to three quarters of
+// that. The objects of this compilation, keep, stay. (A program of
+// hundreds of units is gigabytes of objects, and each change to what
+// makes them, the compiler or cmd/cc, makes all of them again.)
+func trimUnitCache(dir string, keep []string) {
+	limit := unitCacheMax()
+	type entry struct {
+		name string
+		size int64
+		used time.Time
+	}
+	var all []entry
+	var total int64
+	subs, _ := os.ReadDir(dir)
+	for _, sub := range subs {
+		if !sub.IsDir() {
+			continue
+		}
+		files, _ := os.ReadDir(filepath.Join(dir, sub.Name()))
+		for _, f := range files {
+			info, err := f.Info()
+			if err != nil || !strings.HasSuffix(f.Name(), ".o") {
+				continue
+			}
+			all = append(all, entry{filepath.Join(dir, sub.Name(), f.Name()), info.Size(), info.ModTime()})
+			total += info.Size()
+		}
+	}
+	if total <= limit {
+		return
+	}
+	kept := make(map[string]bool, len(keep))
+	for _, k := range keep {
+		kept[k] = true
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].used.Before(all[j].used) })
+	for _, e := range all {
+		if total <= limit/4*3 {
+			break
+		}
+		if kept[e.name] {
+			continue
+		}
+		if os.Remove(e.name) == nil {
+			total -= e.size
+		}
+	}
 }
 
 // dumpUnitObj writes a unit's object by itself: what an archive's entry

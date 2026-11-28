@@ -87,8 +87,9 @@ what the package clause already says here.
 - A unit's dependencies are the build ids of everything the package may
   import, not of what the unit imports: a change to any of them compiles
   every unit.
-- The cache is not trimmed as the go command's is; only
-  `go clean -cache` removes it.
+- The cache is trimmed by size alone: when the objects take more than
+  10 GB (`$GDUNITCACHE`, in megabytes), those used longest ago are
+  removed.
 - Escape analysis and inlining across units (summaries of what a unit's
   functions do with their arguments, kept with its object) would take
   back most of what separate compilation costs.
