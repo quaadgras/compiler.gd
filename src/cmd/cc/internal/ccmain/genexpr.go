@@ -1109,6 +1109,9 @@ func (g *gen) funcName(s *symbol, at pos) string {
 		if n, ok := libc[s.name]; ok {
 			return g.libcFunc(n)
 		}
+		if n, ok := goFunc(s); ok {
+			return g.libcFunc(n)
+		}
 		if s.weak || def.weak {
 			return ""
 		}

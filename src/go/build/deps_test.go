@@ -246,6 +246,7 @@ var depsRules = `
 	# packages of the functions of each header cmd/cc provides.
 	internal/c23
 	< internal/c23/aio,
+	  internal/c23/cxx,
 	  internal/c23/complex,
 	  internal/c23/ctype,
 	  internal/c23/dirent,

@@ -1506,7 +1506,16 @@ func (p *parser) unify(pt, at *ctype, bound []targ, set []bool) bool {
 		amp := memPtrOf(at)
 		return amp != nil && p.unify(pt.mp.cls, amp.cls, bound, set) && p.unify(pt.elem, amp.t, bound, set)
 	case kPtr:
-		return at.kind == kPtr && at.ref == pt.ref && at.q&pt.q == pt.q && p.unify(pt.elem, at.elem, bound, set)
+		if at.kind != kPtr || at.ref != pt.ref || at.q&pt.q != pt.q {
+			return false
+		}
+		ae := at.elem
+		if pt.ref == 0 && pt.elem.kind == kDependent && ae.q&pt.elem.q != pt.elem.q {
+			// A pointer converts to one to what is more qualified:
+			// const C<T> * is deduced from a C<int> *.
+			ae = withQual(ae, ae.q|pt.elem.q)
+		}
+		return p.unify(pt.elem, ae, bound, set)
 	case kArray:
 		if at.kind != kArray {
 			return false

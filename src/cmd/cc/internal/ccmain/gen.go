@@ -574,7 +574,7 @@ func (g *gen) mirror(t *ctype) string {
 			// To a function's descriptor (c23.Func), or an integer C
 			// keeps in its place (SIG_IGN).
 			return voidPtr
-		case e.kind == kStruct && !e.rec.complete:
+		case e.kind == kStruct && !e.rec.complete && !isGoType(e):
 			// Declared only, here: another unit may complete it.
 			if c := g.complete[completeKey(e)]; c != nil {
 				return "*" + g.mirror(c)
@@ -590,6 +590,9 @@ func (g *gen) mirror(t *ctype) string {
 	case kArray:
 		return fmt.Sprintf("[%d]%s", max(t.n, 0), g.mirror(t.elem))
 	case kStruct:
+		if n, ok := g.goType(t); ok {
+			return n
+		}
 		if !t.rec.complete {
 			// Declared only, here (the result of a function this unit
 			// only names): another unit may complete it.
@@ -625,7 +628,7 @@ func (g *gen) record(t *ctype) string {
 	if r.goName != "" {
 		return r.goName
 	}
-	bytes := r.union || r.packed > 0 || t.rec.align > 8 || !naturalLayout(r)
+	bytes := r.union || r.packed > 0 || t.rec.align > 8 && !(t.rec.align == 16 && goAlign16(t)) || !naturalLayout(r)
 	defer func() { r.bytes = bytes }()
 	var fields []string
 	for i, f := range r.fields {
@@ -1000,6 +1003,9 @@ func naturalLayout(r *record) bool {
 		a := f.t.unqual().alignofNatural()
 		if f.t.kind == kStruct {
 			a = min(f.t.rec.align, 8)
+		}
+		if goAlign16(f.t) {
+			a = 16
 		}
 		if bits {
 			// The bytes before the member are in the mirror, whatever

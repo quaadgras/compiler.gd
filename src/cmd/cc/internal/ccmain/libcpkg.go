@@ -53,7 +53,7 @@ func (g *gen) libcFunc(v string) string {
 // LibcPackages returns the import paths of internal/c23's packages of
 // headers, which the Go cmd/cc generates may import.
 func LibcPackages() []string {
-	m := map[string]bool{}
+	m := map[string]bool{"internal/c23/" + cxxPkg: true}
 	for _, v := range libc {
 		if path, _ := libcSplit(v); path != "" {
 			m["internal/c23/"+path] = true
@@ -70,6 +70,10 @@ func LibcPackages() []string {
 // isLibcGo reports whether fn, Go that calls a function, calls the
 // library's: internal/c23's (c23.Name) or a header's (c23_path.Name).
 func isLibcGo(fn string) bool {
+	if strings.HasPrefix(fn, libcAlias(cxxPkg)+".") {
+		// The C++ library's: generic, with the types that C++ has.
+		return false
+	}
 	return strings.HasPrefix(fn, "c23.") || strings.HasPrefix(fn, "c23_")
 }
 
@@ -100,4 +104,97 @@ func (g *gen) libcPtr(t *ctype) string {
 		return "*" + goType(e.unqual())
 	}
 	return voidPtr
+}
+
+// cxxPkg is the package, under internal/c23, of what the C++ library
+// headers call that is Go: a function that a header declares, and
+// nothing defines, with a name that begins with __go_ is that package's
+// function of the rest of the name (std::__go_SliceLen is
+// cxx.SliceLen), and is generic where the header's is a template. The
+// arguments are passed as they are to any function.
+const cxxPkg = "cxx"
+
+// goFunc returns the Go function of the C++ library that the function s
+// names, and whether it names one.
+func goFunc(s *symbol) (string, bool) {
+	n := s.src
+	if n == "" {
+		n = s.name
+	}
+	if !strings.HasPrefix(n, "__go_") || len(n) == 5 {
+		return "", false
+	}
+	return cxxPkg + "." + n[5:], true
+}
+
+// goTypes are the class templates of the C++ library headers whose
+// instances are Go's types: the Go type, with $0 and $1 for the Go
+// types of the template's arguments. The header declares each with
+// members that give it the size and the alignment of the Go type, and
+// never names them.
+var goTypes = map[string]string{
+	"__go_slice": "[]$0",
+}
+
+// goType returns the Go type that the class t is, if it is one of
+// goTypes.
+func (g *gen) goType(t *ctype) (string, bool) {
+	if t.kind != kStruct || t.rec == nil || t.rec.inst == nil || t.rec.inst.tmpl == nil {
+		return "", false
+	}
+	tm := t.rec.inst.tmpl
+	if tm.primary != nil {
+		tm = tm.primary
+	}
+	pat, ok := goTypes[tm.name]
+	if !ok {
+		return "", false
+	}
+	for i, a := range t.rec.inst.args {
+		if a.t != nil {
+			pat = strings.ReplaceAll(pat, "$"+string(rune('0'+i)), g.mirror(a.t))
+		}
+	}
+	return pat, true
+}
+
+// isGoType reports whether t is a class that goType gives a Go type.
+func isGoType(t *ctype) bool {
+	if t.kind != kStruct || t.rec == nil || t.rec.inst == nil || t.rec.inst.tmpl == nil {
+		return false
+	}
+	tm := t.rec.inst.tmpl
+	if tm.primary != nil {
+		tm = tm.primary
+	}
+	_, ok := goTypes[tm.name]
+	return ok
+}
+
+// goAlign16 reports whether Go aligns the mirror of t to 16 bytes, more
+// than it aligns anything of C's: t is, or has in it, a slice of Go's,
+// which is two words aligned to 16 where a pointer is 8 bytes
+// (doc/gd/slice16.md). The header gives the class that alignment.
+func goAlign16(t *ctype) bool {
+	if target.ilp32() {
+		return false
+	}
+	for t.kind == kArray {
+		t = t.elem
+	}
+	if t.kind != kStruct || t.rec == nil || t.rec.align != 16 {
+		return false
+	}
+	if isGoType(t) {
+		return true
+	}
+	if t.rec.union {
+		return false
+	}
+	for _, f := range t.rec.fields {
+		if f.bits < 0 && goAlign16(f.t) {
+			return true
+		}
+	}
+	return false
 }
