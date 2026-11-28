@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"io/fs"
 	"math"
 	"os"
 	"strconv"
@@ -237,6 +238,7 @@ type File struct {
 	Eof    bool
 	Err    bool
 	Unbuf  bool
+	Line   bool // line buffered: a write with a newline in it is flushed
 	closed bool
 	Rd, Wr bool      // the mode allows reading, writing
 	Mem    MemStream // fmemopen's and open_memstream's memory, which it reads and writes in place of fd's file
@@ -273,21 +275,50 @@ func NewFile(fd int32, rd, wr bool) *Void {
 // NewStream returns the FILE * for C of the stream fl, which is flushed
 // with the others from here on.
 func NewStream(fl *File) *Void {
+	flushOnce.Do(func() { setFlush(flushAtEnd) })
 	FilesMu.Lock()
 	Files = append(Files, fl)
 	FilesMu.Unlock()
 	return NewHandle(fl)
 }
 
-// Stdio returns stdin (0), stdout (1) or stderr (2).
+// Stdio returns stdin (0), stdout (1) or stderr (2). stdout is line
+// buffered if it is a character device, as a terminal is (and a page's
+// output with GOOS=js): what C prints is then in its place among what
+// Go prints.
 func Stdio(n int32) *Void {
 	stdioOnce.Do(func() {
 		stdio[0] = NewFile(0, true, false)
 		stdio[1] = NewFile(1, false, true)
 		stdio[2] = NewFile(2, false, true)
 		FileOf(stdio[2]).Unbuf = true
+		if fi, err := os.Stdout.Stat(); err == nil && fi.Mode()&fs.ModeCharDevice != 0 {
+			FileOf(stdio[1]).Line = true
+		}
 	})
 	return stdio[n]
+}
+
+var flushOnce sync.Once
+
+// setFlush gives the runtime the function that flushes C's streams,
+// which it calls as the program ends: when main returns, in os.Exit,
+// and where the program stops for a load or a store that is not
+// allowed. So what C printed is not lost with its buffers.
+//
+//go:linkname setFlush runtime.c23SetFlush
+func setFlush(f func())
+
+// flushAtEnd flushes every stream as the program ends. A program that
+// ends in Fflush has the lock: its streams stay as they are.
+func flushAtEnd() {
+	if !FilesMu.TryLock() {
+		return
+	}
+	for _, f := range Files {
+		f.Flush()
+	}
+	FilesMu.Unlock()
 }
 
 // unread ends reading: it moves the file back over what was read ahead.
@@ -315,7 +346,7 @@ func (f *File) Write(b []byte) bool {
 	}
 	f.unread()
 	_, err := f.W.Write(b)
-	if err == nil && f.Unbuf {
+	if err == nil && (f.Unbuf || f.Line && bytes.IndexByte(b, '\n') >= 0) {
 		err = f.W.Flush()
 	}
 	if err != nil {

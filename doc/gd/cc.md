@@ -1291,6 +1291,10 @@ priorities, `getrlimit` and `setrlimit` are the system's on Linux, macOS
 and the BSDs (Go raises `RLIMIT_NOFILE` at start, so that one is not
 what the program started with); elsewhere ids may only be set to what
 they are, there are no limits, and `setrlimit` fails with `EPERM`.
+`stdout` is line buffered if it is a character device (a terminal, or a
+page's output with `GOOS=js`), and the streams are flushed where the
+program ends: in `exit`, when Go's `main` returns, in `os.Exit`, and
+where it stops for a load or a store that is not allowed.
 `flockfile` is a recursive lock per `FILE` that the streams' functions
 do not take, so the `_unlocked` ones are theirs. `mlock` and its kin
 succeed and do nothing; `shm_open` opens a file of `/dev/shm` (the

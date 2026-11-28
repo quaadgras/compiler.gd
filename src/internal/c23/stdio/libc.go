@@ -385,18 +385,20 @@ func Clearerr(p *c23.Void) {
 	f.Eof, f.Err = false, false
 }
 
-// Setvbuf is setvbuf: _IONBF (2) makes the stream unbuffered; line
-// buffering is full buffering. C's buffer is not used.
+// Setvbuf is setvbuf: _IONBF (2) makes the stream unbuffered, _IOLBF
+// (1) line buffered. C's buffer is not used.
 func Setvbuf(p, buf *c23.Void, mode int32, size uint64) int32 {
 	if mode < 0 || mode > 2 {
 		return -1
 	}
-	c23.FileOf(p).Unbuf = mode == 2
+	f := c23.FileOf(p)
+	f.Unbuf, f.Line = mode == 2, mode == 1
 	return 0
 }
 
 func Setbuf(p, buf *c23.Void) {
-	c23.FileOf(p).Unbuf = c23.Addr(buf) == 0
+	f := c23.FileOf(p)
+	f.Unbuf, f.Line = c23.Addr(buf) == 0, false
 }
 
 func Remove(name *c23.Void) int32 {

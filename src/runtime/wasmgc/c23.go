@@ -40,6 +40,22 @@ func c23Object(p unsafe.Pointer) (unsafe.Pointer, uintptr) {
 	return unsafe.Add(p, -int(ptroff(p))), lim
 }
 
+// c23Flush flushes C's streams: internal/c23 sets it when C has one.
+var c23Flush func()
+
+//go:linkname c23SetFlush
+func c23SetFlush(f func()) { c23Flush = f }
+
+// flushC flushes C's streams where the program ends, so that what C
+// printed is not lost with its buffers. It does so once: a program
+// that ends again while it flushes them ends.
+func flushC() {
+	if f := c23Flush; f != nil {
+		c23Flush = nil
+		f()
+	}
+}
+
 // c23GTable returns the goroutine's slot for internal/c23's table of
 // it (_Thread_local objects, errno, pthread keys, thread id).
 //

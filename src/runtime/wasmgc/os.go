@@ -108,7 +108,7 @@ func setGodebugEnv(p *string) {
 var godebugEnvSet *string
 
 //go:linkname os_beforeExit os.runtime_beforeExit
-func os_beforeExit(exitCode int) {}
+func os_beforeExit(exitCode int) { flushC() }
 
 //go:linkname os_sigpipe os.sigpipe
 func os_sigpipe() {}

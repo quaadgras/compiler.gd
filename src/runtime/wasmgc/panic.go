@@ -109,6 +109,7 @@ func gopanic(e any) {
 			gcthrow()
 		}
 	}
+	flushC()
 	printpanics(p)
 	printnl()
 	printstring("goroutine ")
@@ -291,6 +292,7 @@ func itoa(v int64) string {
 
 // fatal reports an error that cannot be recovered from.
 func fatal(s string) {
+	flushC()
 	printstring("fatal error: ")
 	printstring(s)
 	printnl()

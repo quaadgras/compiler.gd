@@ -943,6 +943,7 @@ func sigpanic() {
 			// gd: the address is one that no memory has (an amd64
 			// does not say which): a pointer of C's with cEnd or
 			// cPoison (cclaim.go).
+			c23FlushFault()
 			throw("checkptr: load or store through a pointer to the end of its object, or through one that the program made of an integer")
 		} else {
 			print("unexpected fault address ", hex(gp.sigcode1), "\n")

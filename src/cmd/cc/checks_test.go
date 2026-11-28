@@ -86,6 +86,19 @@ func TestChecks(t *testing.T) {
 				printf("%ld\n", s);
 				return 0;
 			}`, "2016\n"},
+		// What C printed before the fault is not lost with stdout's
+		// buffer (a pipe's is not flushed at a newline).
+		{"printed", `
+			#include <stdio.h>
+			#include <stdlib.h>
+			int main(void) {
+				int n = 8;
+				long *a = malloc(n * sizeof(long));
+				printf("before\n");
+				a[n] = 1;
+				printf("after\n");
+				return 0;
+			}`, "before\n" + pastEnd},
 	}
 	for _, tc := range tests {
 		for _, flags := range []string{"", "-gcflags=-d=cheaders=1"} {

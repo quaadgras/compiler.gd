@@ -92,7 +92,7 @@ package main
 
 // #include <stdlib.h>
 // int main(void);
-// // exit, not os.Exit: it flushes C's stdout (a file, not a terminal).
+// // exit, as what starts a C program calls it: it runs what atexit registered.
 // static void run(void) { exit(main()); }
 import "C"
 

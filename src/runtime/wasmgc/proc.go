@@ -115,6 +115,7 @@ func linsetsp(sp uintptr)
 // functions that initialize the packages and then calls it.
 func rt0gc() {
 	main_main()
+	flushC()
 	exit(0)
 }
 

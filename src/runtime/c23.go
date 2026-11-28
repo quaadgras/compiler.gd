@@ -5,6 +5,7 @@
 package runtime
 
 import (
+	"internal/runtime/exithook"
 	"internal/runtime/gc"
 	"unsafe"
 )
@@ -37,6 +38,29 @@ func c23Object(p unsafe.Pointer) (unsafe.Pointer, uintptr) {
 		return nil, 0
 	}
 	return unsafe.Add(p, -int(a-base)), size
+}
+
+// c23Flush flushes C's streams: internal/c23 sets it when C has one.
+var c23Flush func()
+
+// c23SetFlush sets the function that flushes C's streams, which is
+// called as the program ends (when main returns and in os.Exit), so that
+// what C printed is not lost with its buffers.
+//
+//go:linkname c23SetFlush
+func c23SetFlush(f func()) {
+	c23Flush = f
+	exithook.Add(exithook.Hook{F: f, RunOnFailure: true})
+}
+
+// c23FlushFault flushes C's streams before the program stops for a load
+// or a store through a pointer of C's that is not allowed (sigpanic),
+// once: a program that faults again while it flushes them stops.
+func c23FlushFault() {
+	if f := c23Flush; f != nil {
+		c23Flush = nil
+		f()
+	}
 }
 
 // c23GTable returns the calling goroutine's slot for what internal/c23
