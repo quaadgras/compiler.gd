@@ -475,3 +475,22 @@ func (p *parser) callPMF(c *pmfCall, args []expr, at pos) expr {
 	fn := &cast{node{ptrTo(fnT), at}, &member{node{f0.t, at}, pm, f0}}
 	return p.wrapPre(pre, p.callResult(&call{node{full.ret.unqual(), at}, fn, full, out}, full, at))
 }
+
+// hasUnaryAddr reports whether t is a class with a member operator& of
+// no parameters: &x is then what it returns, not the object's address.
+func (p *parser) hasUnaryAddr(t *ctype) bool {
+	ci := classOf(t)
+	if ci == nil || ci.scope == nil {
+		return false
+	}
+	sym := ci.scope.find("operator&")
+	if sym == nil || sym.kind != symFunc {
+		return false
+	}
+	for _, o := range funcSet(sym) {
+		if o.t != nil && o.t.fn != nil && o.t.fn.recv != nil && len(o.t.fn.params) == 1 {
+			return true
+		}
+	}
+	return false
+}

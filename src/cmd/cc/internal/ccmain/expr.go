@@ -870,6 +870,12 @@ func (p *parser) unaryExpr() expr {
 		case "&":
 			p.next()
 			x := p.castExpr()
+			if p.cxx && p.hasUnaryAddr(x.ty()) {
+				// The class's own operator&.
+				if e := p.overloaded("&", []expr{x}, at); e != nil {
+					return e
+				}
+			}
 			return p.addressOf(x, at)
 		case "*":
 			p.next()
