@@ -178,6 +178,7 @@ internal/c23/arpa/inet ok
 internal/c23/complex SKIP no test files
 internal/c23/crypt ok
 internal/c23/ctype SKIP no test files
+internal/c23/cxx SKIP no test files
 internal/c23/devctl SKIP no test files
 internal/c23/dirent SKIP no test files
 internal/c23/err SKIP no test files
