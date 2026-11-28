@@ -1500,7 +1500,9 @@ func (p *parser) cxxName(at pos) expr {
 	sym.used = true
 	if sym.kind == symFunc && sym.tmpl != nil {
 		// A function template, by lookup: called.
-		if !p.is("(") {
+		if !p.is("(") && !(p.is(")") && p.isAt(1, "(")) {
+			// ((std::max)(a, b) is a call too: the parentheses keep a
+			// macro of the name from being one.)
 			p.errorAt(at, "the function template %q is only called here", name)
 		}
 		return &adlRef{node{tVoid, at}, name, funcSet(sym), nil, in != nil}

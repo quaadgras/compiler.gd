@@ -1233,6 +1233,17 @@ func (p *parser) templateID(tm *template, j int, at pos) (*symbol, int) {
 		if tm.kind != 'c' {
 			t.dep = &depType{}
 		}
+		if tm.kind == 'a' && len(given) == len(tm.params) {
+			// An alias is what it names, with the arguments for its
+			// parameters: Paths<T> is vector<vector<Point<T>>>, which
+			// T is deduced from.
+			sc := p.bindParams(tm, given)
+			if p.try(func() { p.replay(tm.start, sc, func() { p.usingDecl() }) }) {
+				if s := sc.vars[tm.name]; s != nil && s.t != nil {
+					t = s.t
+				}
+			}
+		}
 		if tm.kind == 'v' {
 			return &symbol{name: tm.name, src: tm.name, kind: symEnumConst, t: tBool, depVal: true, depParam: -1}, end
 		}

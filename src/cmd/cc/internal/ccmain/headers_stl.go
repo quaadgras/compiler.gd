@@ -251,31 +251,30 @@ public:
 	const_reverse_iterator crbegin() const noexcept { return const_reverse_iterator(end()); }
 	const_reverse_iterator crend() const noexcept { return const_reverse_iterator(begin()); }
 
-	void push_back(const T &v) {
-		if (size() == capacity()) {
-			// (v may be an element: it is copied before they move.)
-			T c(v);
-			new ((void *)this->__more()) T(static_cast<T &&>(c));
-			return;
-		}
-		new ((void *)this->__more()) T(v);
-	}
-	void push_back(T &&v) {
-		if (size() == capacity()) {
-			T c(static_cast<T &&>(v));
-			new ((void *)this->__more()) T(static_cast<T &&>(c));
-			return;
-		}
-		new ((void *)this->__more()) T(static_cast<T &&>(v));
-	}
+	// One more element at the end, made of args, which may be of an
+	// element: where the array is full it is made in the new one
+	// before the others move there.
 	template <class... Args>
-	T &emplace_back(Args &&...args) {
-		if (size() == capacity()) {
-			T c(static_cast<Args &&>(args)...);
-			return *new ((void *)this->__more()) T(static_cast<T &&>(c));
+	T *__emplace_end(Args &&...args) {
+		size_t len = __go_SliceLen(&__s);
+		if (len < __go_SliceCap(&__s)) {
+			__go_SliceSetLen(&__s, len + 1);
+			return new ((void *)(__go_SliceData(&__s) + len)) T(static_cast<Args &&>(args)...);
 		}
-		return *new ((void *)this->__more()) T(static_cast<Args &&>(args)...);
+		T *old = __go_SliceRealloc(&__s, len < 2 ? 4 : 2 * len);
+		__go_SliceSetLen(&__s, len + 1);
+		T *d = __go_SliceData(&__s);
+		T *r = new ((void *)(d + len)) T(static_cast<Args &&>(args)...);
+		for (size_t i = 0; i < len; i++) {
+			new ((void *)(d + i)) T(static_cast<T &&>(old[i]));
+			old[i].~T();
+		}
+		return r;
 	}
+	void push_back(const T &v) { __emplace_end(v); }
+	void push_back(T &&v) { __emplace_end(static_cast<T &&>(v)); }
+	template <class... Args>
+	T &emplace_back(Args &&...args) { return *__emplace_end(static_cast<Args &&>(args)...); }
 	void pop_back() { this->__cut(size() - 1); }
 
 	T *insert(const T *pos, const T &v) {

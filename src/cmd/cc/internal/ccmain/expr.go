@@ -1170,6 +1170,17 @@ func (p *parser) derefOf(x expr, at pos) expr {
 }
 
 func (p *parser) incDecOf(x expr, op string, post bool, at pos) expr {
+	if _, isCall := x.(*call); p.cxx && !post && isCall && x.ty().isPtr() && !x.ty().isRef() {
+		// --v.end(): the library's iterators are pointers, where
+		// another library's are objects that a temporary of may be
+		// stepped. The value before, or after.
+		p.checkPtrArith(x.ty(), at)
+		k := int64(1)
+		if op == "--" {
+			k = -1
+		}
+		return &binary{node{x.ty(), at}, "+", x, p.intc(k, tLong, at)}
+	}
 	p.checkModifiable(x, at)
 	t := x.ty()
 	if !t.isArith() && !t.isPtr() {
