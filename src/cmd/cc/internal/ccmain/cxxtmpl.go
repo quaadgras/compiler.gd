@@ -1306,7 +1306,9 @@ func (p *parser) complete(t *ctype) {
 			p.declSpecs()
 		})
 	}
-	in.busy, in.done = false, true
+	// (A template that is only declared so far may be defined later:
+	// its instance is completed then.)
+	in.busy, in.done = false, tm.hasBody
 }
 
 // selectSpec chooses the specialization of the class template tm that
