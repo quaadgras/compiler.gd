@@ -833,6 +833,14 @@ type union_value struct {
   Variant took the next message's pointers away. If the memory is not
   what `U` says, the pointer is one that nothing is loaded through,
   and the program stops only if it uses it.
+- **A cast to a pointer to const data** in C++, `(const uint32_t *)&s`
+  for a type with no pointers, is a view that is read and never stored
+  through: it claims nothing (`c23.ConvLoad`), so hashing a struct
+  that holds a pointer as its words takes nothing from the struct. The
+  cast that takes the const off is where the memory is claimed for
+  what is stored (`c23.ConvHard`). Not for bytes, which are a view of
+  anything already, nor for a class with a mutable member, nor in C,
+  where a pointer to const converts to one that is not with no cast.
 - **A pointer with no type** is converted by the runtime. C has a
   member at the union's address, and the union at a member's, so a
   `void *` that is one is converted to the other, in another function,

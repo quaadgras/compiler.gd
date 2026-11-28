@@ -247,3 +247,28 @@ func ConvSoft[T any](p unsafe.Pointer) *T {
 
 //go:linkname convSoft runtime.c23ConvSoft
 func convSoft(p unsafe.Pointer, t *abi.Type) unsafe.Pointer
+
+// ConvLoad is (*T)(p) for a cast of C++'s to a pointer to const T, a T
+// with no pointers: a view that is loaded through and never stored
+// through, which claims nothing (runtime.c23ConvLoad). The cast that
+// takes the const off is ConvHard.
+//
+//go:nocheckptr
+func ConvLoad[T any](p unsafe.Pointer) *T {
+	return (*T)(convLoad(p, abi.TypeFor[T]()))
+}
+
+//go:linkname convLoad runtime.c23ConvLoad
+func convLoad(p unsafe.Pointer, t *abi.Type) unsafe.Pointer
+
+// ConvHard is (*T)(p) where p is a pointer to const T already: the
+// memory is claimed for a T, as any conversion to a *T claims it
+// (runtime.c23ConvHard).
+//
+//go:nocheckptr
+func ConvHard[T any](p unsafe.Pointer) *T {
+	return (*T)(convHard(p, abi.TypeFor[T]()))
+}
+
+//go:linkname convHard runtime.c23ConvHard
+func convHard(p unsafe.Pointer, t *abi.Type) unsafe.Pointer

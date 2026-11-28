@@ -613,12 +613,57 @@ func (g *gen) tcast(e *cast) string {
 		if softCast(e.x, to) {
 			return fmt.Sprintf("c23.ConvSoft[%s](unsafe.Pointer(%s))", g.mirror(to.elem), g.rv(e.x))
 		}
+		if isCxxFile(g.u.file) && from.isPtr() && constData(to) {
+			switch same := g.gt(from) == g.gt(to); {
+			case !same:
+				// A view of the memory as constant data: read, and
+				// never stored through.
+				return fmt.Sprintf("c23.ConvLoad[%s](unsafe.Pointer(%s))", g.mirror(to.elem), g.rv(e.x))
+			}
+		} else if isCxxFile(g.u.file) && from.isPtr() && g.gt(from) == g.gt(to) && constData(from) && to.elem.q&qConst == 0 {
+			// The const is taken off: what may be stored through
+			// from here on is claimed.
+			return fmt.Sprintf("c23.ConvHard[%s](unsafe.Pointer(%s))", g.mirror(to.elem), g.rv(e.x))
+		}
 	}
 	x := g.rv(e.x)
 	if s, ok := g.fenvOf(e); ok && !from.isPtr() && !to.isPtr() {
 		return convertUnder(x, from, to, s)
 	}
 	return g.tconv(x, from, to)
+}
+
+// constData reports whether t is a pointer to const data: integers,
+// floats, and arrays and structs of them, which a pointer to const is
+// only loaded through in C++. (Not bytes, which are a view of anything
+// already, and not a class with a member that is mutable.) A cast to
+// such a pointer claims nothing: Godot hashes a struct that holds a
+// pointer to a function as its words, and that is no reason to take the
+// pointer from the struct.
+func constData(t *ctype) bool {
+	if !t.isPtr() || t.isRef() {
+		return false
+	}
+	e := t.elem
+	if e.q&qConst == 0 || e.kind == kVoid || e.kind == kFunc || !e.isComplete() || e.sizeof() <= 1 || hasPointers(e) {
+		return false
+	}
+	return !hasMutable(e)
+}
+
+func hasMutable(t *ctype) bool {
+	for t.kind == kArray {
+		t = t.elem
+	}
+	if t.kind != kStruct || t.rec == nil {
+		return false
+	}
+	for _, f := range t.rec.fields {
+		if f.mutable || hasMutable(f.t) {
+			return true
+		}
+	}
+	return false
 }
 
 // softCast reports whether the cast of x to the pointer type to is of

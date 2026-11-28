@@ -445,6 +445,26 @@ func c23ConvSoft(p unsafe.Pointer, elem *_type) unsafe.Pointer {
 	return unsafe.Pointer(cConvProbeElem(uintptr(p), elem, true))
 }
 
+// c23ConvLoad is the conversion of p to a pointer to elem that C++
+// wrote as a cast to a pointer to const: a view of the memory that is
+// only loaded through (checkptrConvCLoad). Integers are read of
+// whatever the words are, and nothing is claimed for them.
+//
+//go:linkname c23ConvLoad
+func c23ConvLoad(p unsafe.Pointer, elem *_type) unsafe.Pointer {
+	return checkptrConvCLoad(p, elem, 1)
+}
+
+// c23ConvHard is the conversion of p to a pointer to elem where the
+// two types are one to Go: the cast that takes const off a pointer,
+// which is where what the pointer is stored through is claimed
+// (checkptrConvC).
+//
+//go:linkname c23ConvHard
+func c23ConvHard(p unsafe.Pointer, elem *_type) unsafe.Pointer {
+	return checkptrConvC(p, elem, 1)
+}
+
 // cConvProbeElem is cConvProbeType for a pointer to elem.
 func cConvProbeElem(v uintptr, elem *_type, c bool) uintptr {
 	if v < minLegalPointer || v&(cPoison|cEnd) != 0 || elem.Size_ == 0 {
