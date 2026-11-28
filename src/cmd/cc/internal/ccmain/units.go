@@ -354,7 +354,13 @@ func translateUnits(files []string, o options, incDirs []string, dir string) (tr
 		infos[i] = info
 		count.Add(1)
 	}
+	// As many at a time as there are processors, and as the memory
+	// that is free has room for: a unit's trees are a gigabyte or two
+	// for a file that includes much (an editor's of Godot).
 	n := min(runtime.GOMAXPROCS(0), len(files))
+	if avail := memAvailable(); avail > 0 {
+		n = max(1, min(n, int(avail/(2<<30))))
+	}
 	var next atomic.Int64
 	var wg sync.WaitGroup
 	for w := 0; w < n; w++ {

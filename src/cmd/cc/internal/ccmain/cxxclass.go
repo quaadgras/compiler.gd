@@ -35,6 +35,7 @@ type classInfo struct {
 
 	complete    bool
 	userCtor    bool // a constructor is declared
+	noProvided  bool // and every one that is declared is = default or = delete: braces initialize its members (C++17's aggregate)
 	nontrivCtor bool // default initialization runs code
 	nontrivDtor bool // destruction runs code
 	nontrivCopy bool // a copy is not a copy of the bytes
@@ -736,6 +737,12 @@ func (p *parser) completeClass(t *ctype) {
 	ci := r.cls
 	sc := ci.scope
 	ci.userCtor = sc.vars["{ctor}"] != nil
+	ci.noProvided = ci.userCtor
+	for o := sc.vars["{ctor}"]; o != nil; o = o.next {
+		if o.tmpl != nil || !o.implicit && !o.deleted {
+			ci.noProvided = false
+		}
+	}
 	userDtor := sc.vars["~"+r.tag]
 	userDefault, defaultedDefault, userCopy, userAssign := false, false, false, false
 	isSelf := func(pt *ctype) bool {
@@ -1117,8 +1124,9 @@ func (p *parser) initMember(f *field, in memInit, at pos) stmt {
 			}
 			e = p.copyBytes(dst, p.compoundLiteral(t.unqual(), at), at)
 		default:
-			p.next()
-			e = p.constructAt(dst, t, p.exprList("}"), at, mValue)
+			// (A constructor that takes a std::initializer_list is the
+			// one, if the class has it: listInit.)
+			e = p.listInit(dst, t, p.braceList(), at)
 		}
 		p.pos = save
 	case t.kind == kStruct:

@@ -114,7 +114,7 @@ func (p *parser) listRank(l *initList, pt *ctype) int {
 			return rkConv
 		}
 		ci := classOf(pt)
-		if ci == nil || !ci.userCtor {
+		if ci == nil || !ci.userCtor || ci.noProvided && len(l.args) > 0 && !ci.poly && len(ci.bases) == 0 {
 			// An aggregate: its members, in order.
 			if len(l.args) > len(pt.rec.fields) && !(len(l.args) == 1 && sameType(l.args[0].ty().unqual(), pt)) {
 				return rkNone
@@ -158,7 +158,7 @@ func (p *parser) listInit(dst expr, t *ctype, l *initList, at pos) expr {
 		if len(l.args) == 1 && l.args[0].ty().kind == kStruct && (sameType(l.args[0].ty().unqual(), t) || isBaseOf(t, l.args[0].ty())) {
 			return p.constructAt(dst, t, l.args, at, mImplicit)
 		}
-		if ci != nil && ci.userCtor {
+		if ci != nil && ci.userCtor && !(ci.noProvided && len(l.args) > 0 && !ci.poly && len(ci.bases) == 0) {
 			if s, et := p.listCtor(t, l); s != nil {
 				il := s.t.fn.params[1]
 				if il.isRef() {

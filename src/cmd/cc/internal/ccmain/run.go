@@ -46,18 +46,27 @@ func limitMemory() {
 	if os.Getenv("GOMEMLIMIT") != "" {
 		return
 	}
+	if avail := memAvailable(); avail > 0 {
+		debug.SetMemoryLimit(avail / 2)
+	}
+}
+
+// memAvailable is the memory that is free, in bytes, where the system
+// says (0 if it does not).
+func memAvailable() int64 {
 	b, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
-		return
+		return 0
 	}
 	for _, line := range strings.Split(string(b), "\n") {
 		f := strings.Fields(line)
 		if len(f) >= 2 && f[0] == "MemAvailable:" {
 			if kb, err := strconv.ParseInt(f[1], 10, 64); err == nil && kb > 0 {
-				debug.SetMemoryLimit(kb * 1024 / 2)
+				return kb * 1024
 			}
 		}
 	}
+	return 0
 }
 
 func Run(args []string, stdout, stderr io.Writer) int {

@@ -129,6 +129,27 @@ func (p *parser) memberAddress(at pos) (expr, bool) {
 				set = append(set, s)
 			}
 		}
+		if p.isAt(1+n, "<") && hasTemplate(funcSet(sym)) {
+			// &C::f<args>: the member function template's instance
+			// that the arguments name.
+			save := p.pos
+			p.pos += 1 + n
+			targs := p.templateArgs()
+			for _, s := range funcSet(sym) {
+				if s.tmpl == nil {
+					continue
+				}
+				if full, ok := p.deduce(s.tmpl, targs, nil, at); ok {
+					if inst := p.instFunc(s.tmpl, full, at); inst != nil && inst.t.fn.recv != nil {
+						inst.used = true
+						p.use(inst)
+						return p.pmfConst(inst, at), true
+					}
+				}
+			}
+			p.pos = save
+			return nil, false
+		}
 		if len(set) == 0 {
 			return nil, false // a static member function: a function's address
 		}
