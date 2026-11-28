@@ -4,6 +4,11 @@
 
 package ccmain
 
+import (
+	"fmt"
+	"strings"
+)
+
 // Lambda expressions (doc/gd/cxx.md). A lambda is a class with an
 // operator() and a member for each variable it captures; its value is
 // an object of that class, initialized with the captured variables.
@@ -22,6 +27,7 @@ type lambdaInfo struct {
 	valNames  map[string]bool
 	caps      map[*symbol]*capture
 	order     []*capture
+	closed    bool // the class is complete: it has its captures
 }
 
 // A capture is a captured variable: the closure's member f, a pointer
@@ -93,6 +99,35 @@ func (p *parser) lambdaExpr(at pos) expr {
 	rec.cls = &classInfo{t: t, nsdmi: map[*field]defArg{}, syms: map[string]*symbol{}, vslot: map[*symbol]int{}}
 	rec.cls.scope = &scope{vars: map[string]*symbol{}, tags: map[string]*ctype{}, parent: p.sc, kind: skClass, name: tag, rec: rec}
 
+	// The initialized captures are variables to the body, which it
+	// captures as any other.
+	body := &scope{vars: map[string]*symbol{}, tags: map[string]*ctype{}, parent: p.sc}
+	for _, ic := range inits {
+		var ct *ctype
+		if ic.ref {
+			ct = refTo(ic.e.ty(), 1)
+		} else {
+			e := ic.e
+			if pr, ok := e.(*classPR); ok {
+				ct = pr.t
+			} else {
+				ct = valueType(e)
+			}
+		}
+		v := &symbol{name: ic.name, kind: symVar, t: ct.unqual(), p: at, owner: lam.encFn, capInit: ic.e}
+		if ic.ref {
+			v.t = ct
+			lam.refNames[ic.name] = true
+		} else {
+			lam.valNames[ic.name] = true
+		}
+		body.vars[ic.name] = v
+	}
+	if p.is("(") && p.genericParams() {
+		p.genericLambda(lam, body, at)
+		return p.closure(lam, nil, at)
+	}
+
 	// The operator(): its parameters, what follows them, and its body.
 	ft := &funcType{proto: true, ret: &ctype{kind: kInt, isAuto: true}}
 	if p.accept("(") {
@@ -137,30 +172,6 @@ func (p *parser) lambdaExpr(at pos) expr {
 	opSym.linkage, opSym.comdat = 0, true
 	rec.cls.addMethod(opSym)
 
-	// The initialized captures are variables to the body, which it
-	// captures as any other.
-	body := &scope{vars: map[string]*symbol{}, tags: map[string]*ctype{}, parent: p.sc}
-	for _, ic := range inits {
-		var ct *ctype
-		if ic.ref {
-			ct = refTo(ic.e.ty(), 1)
-		} else {
-			e := ic.e
-			if pr, ok := e.(*classPR); ok {
-				ct = pr.t
-			} else {
-				ct = valueType(e)
-			}
-		}
-		v := &symbol{name: ic.name, kind: symVar, t: ct.unqual(), p: at, owner: lam.encFn, capInit: ic.e}
-		if ic.ref {
-			v.t = ct
-			lam.refNames[ic.name] = true
-		} else {
-			lam.valNames[ic.name] = true
-		}
-		body.vars[ic.name] = v
-	}
 	st := p.saveFunc()
 	p.sc = body
 	p.lambda = lam
@@ -170,7 +181,17 @@ func (p *parser) lambdaExpr(at pos) expr {
 	}
 	p.restoreFunc(st)
 
+	return p.closure(lam, opSym, at)
+}
+
+// closure completes the class of the lambda lam, whose operator() is
+// op (nil for a generic lambda, which has a template of them), and is
+// the lambda expression's value.
+func (p *parser) closure(lam *lambdaInfo, opSym *symbol, at pos) expr {
+	t := lam.t
+	rec := t.rec
 	// The class is complete: its members are the captures.
+	lam.closed = true
 	for _, c := range lam.order {
 		rec.fields = append(rec.fields, c.f)
 	}
@@ -181,7 +202,7 @@ func (p *parser) lambdaExpr(at pos) expr {
 	}
 	p.u.records = append(p.u.records, t)
 	p.completeClass(t)
-	if len(lam.order) == 0 {
+	if len(lam.order) == 0 && opSym != nil {
 		p.lambdaToPointer(lam, opSym, at)
 	}
 	order := lam.order
@@ -211,6 +232,9 @@ func (p *parser) lambdaExpr(at pos) expr {
 func (p *parser) captureOf(lam *lambdaInfo, sym *symbol, at pos) *capture {
 	if c := lam.caps[sym]; c != nil {
 		return c
+	}
+	if lam.closed {
+		p.errorAt(at, "%q is captured by a lambda with auto parameters, which did not find it in its body", sym.name)
 	}
 	ref := lam.refNames[sym.name] || lam.byRef && !lam.valNames[sym.name]
 	if sym == lam.classThis {
@@ -310,4 +334,192 @@ func (p *parser) lambdaToPointer(lam *lambdaInfo, op *symbol, at pos) {
 		invoke.used = true
 		return []stmt{&returnStmt{&decay{node{pt, at}, &varRef{node{fnT, at}, invoke}}}}
 	})
+}
+
+// A generic lambda, one with a parameter that is auto, has an operator()
+// for each type it is called with: a member function template of the
+// closure's class, with a type parameter for each auto. The template is
+// parsed as one that the program wrote,
+//
+//	template <class __cc_auto0> auto operator()(const __cc_auto0 &x) const { body }
+//
+// from tokens that are made of the lambda's. The body is parsed when the
+// template is instantiated, in the scope the lambda is in; the class is
+// complete where the lambda expression is, so the captures are found
+// before that, by the names of the body's tokens: every local of the
+// enclosing functions that the body names where it may name a variable.
+// That is more than the body may capture, if it declares a name again,
+// and never less.
+
+// genericParams reports whether the parameters at p.pos, a "(", have an
+// auto.
+func (p *parser) genericParams() bool {
+	depth := 0
+	for i := 0; ; i++ {
+		t := p.peekAt(i)
+		switch {
+		case t.kind == tkEOF:
+			return false
+		case t.kind == tkPunct && t.text == "(":
+			depth++
+		case t.kind == tkPunct && t.text == ")":
+			depth--
+			if depth == 0 {
+				return false
+			}
+		case t.kind == tkIdent && t.text == "auto":
+			return true
+		}
+	}
+}
+
+// genericLambda parses the rest of a generic lambda, from its
+// parameters' "(": the closure gets its captures and the template of
+// its operator().
+func (p *parser) genericLambda(lam *lambdaInfo, body *scope, at pos) {
+	t := lam.t
+	rec := t.rec
+	// The parameters, what follows them, and the body.
+	match := func(i int, open, close string) int {
+		depth := 0
+		for ; ; i++ {
+			tk := p.toks[i]
+			switch {
+			case tk.kind == tkEOF:
+				p.errorAt(at, "unterminated lambda")
+			case tk.kind == tkPunct && tk.text == open:
+				depth++
+			case tk.kind == tkPunct && tk.text == close:
+				depth--
+				if depth == 0 {
+					return i
+				}
+			}
+		}
+	}
+	po := p.pos
+	pc := match(po, "(", ")")
+	lb := pc + 1
+	mutable := false
+	arrow := -1
+	for depth := 0; ; lb++ {
+		tk := p.toks[lb]
+		if tk.kind == tkEOF {
+			p.errorAt(at, "expected a lambda's body")
+		}
+		if tk.kind == tkPunct {
+			switch tk.text {
+			case "(", "[":
+				depth++
+			case ")", "]":
+				depth--
+			}
+		}
+		if depth == 0 && tk.kind == tkPunct && tk.text == "{" {
+			break
+		}
+		if depth == 0 && tk.kind == tkIdent && tk.text == "mutable" {
+			mutable = true
+		}
+		if depth == 0 && tk.kind == tkPunct && tk.text == "->" && arrow < 0 {
+			arrow = lb
+		}
+	}
+	rb := match(lb, "{", "}")
+
+	// The captures.
+	save := p.sc
+	p.sc = body
+	if lam.classThis != nil {
+		p.captureOf(lam, lam.classThis, at)
+	}
+	for i := pc + 1; i < rb; i++ {
+		tk := p.toks[i]
+		if tk.kind != tkIdent {
+			continue
+		}
+		if prev := p.toks[i-1]; prev.kind == tkPunct && (prev.text == "." || prev.text == "->" || prev.text == "::") {
+			continue
+		}
+		sym := p.lookup(tk.text)
+		if sym == nil || sym.kind != symVar || sym.global || sym.owner == nil && sym.capInit == nil || sym == lam.classThis {
+			continue
+		}
+		if lam.caps[sym] != nil {
+			continue
+		}
+		if !(lam.byRef || lam.byVal || lam.refNames[sym.name] || lam.valNames[sym.name]) {
+			continue // not captured: an error if the body does use it
+		}
+		p.captureOf(lam, sym, at)
+	}
+
+	// The template's tokens.
+	var head strings.Builder
+	head.WriteString("template <")
+	n := 0
+	var params []token
+	for i := po; i <= pc; i++ {
+		tk := p.toks[i]
+		if tk.kind == tkIdent && tk.text == "auto" {
+			if n > 0 {
+				head.WriteString(", ")
+			}
+			name := "__cc_auto" + itoa(int64(n))
+			fmt.Fprintf(&head, "class %s", name)
+			tk.text = name
+			n++
+		}
+		params = append(params, tk)
+	}
+	head.WriteString("> auto operator()")
+	lexed := func(src string) []token {
+		toks, err := lex(at.file, src)
+		if err != nil {
+			p.errorAt(at, "%v", err)
+		}
+		for len(toks) > 0 && toks[len(toks)-1].kind == tkEOF {
+			toks = toks[:len(toks)-1]
+		}
+		for i := range toks {
+			toks[i].line = at.line
+		}
+		return toks
+	}
+	synth := lexed(head.String())
+	synth = append(synth, params...)
+	if !mutable {
+		synth = append(synth, lexed("const")...)
+	}
+	if arrow >= 0 {
+		synth = append(synth, p.toks[arrow:lb]...)
+	}
+	synth = append(synth, p.toks[lb:rb+1]...)
+	synth = append(synth, lexed(";")...)
+	synth = append(synth, token{kind: tkEOF, file: at.file, line: at.line})
+	start := len(p.toks)
+	p.toks = append(p.toks, synth...)
+
+	// The template, a member of the closure's class.
+	saveCls, saveDeclIn := p.cls, p.declIn
+	rec.cls.scope.parent = body
+	p.sc, p.cls, p.declIn = rec.cls.scope, t, nil
+	p.pos = start
+	p.templateDecl()
+	p.sc, p.cls, p.declIn = save, saveCls, saveDeclIn
+	p.pos = rb + 1
+	if op := rec.cls.scope.vars["operator()"]; op != nil && op.tmpl != nil {
+		op.tmpl.lam = lam
+	} else {
+		p.errorAt(at, "internal error: a generic lambda's operator() is no template")
+	}
+}
+
+// inLambda sets the lambda that the function sym, whose body is about
+// to be parsed, is the operator() of, if it is an instance of a generic
+// lambda's.
+func (p *parser) inLambda(sym *symbol) {
+	if sym.inst != nil && sym.inst.tmpl != nil && sym.inst.tmpl.lam != nil {
+		p.lambda = sym.inst.tmpl.lam
+	}
 }

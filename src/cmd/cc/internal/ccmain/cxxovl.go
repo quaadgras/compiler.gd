@@ -512,6 +512,7 @@ func (p *parser) callFunc(sym *symbol, obj expr, args []expr, at pos) expr {
 			if sym.lateSc != nil {
 				p.sc = sym.lateSc
 			}
+			p.inLambda(sym)
 			p.defineFunc(sym, lf.ft, lf.name, lf.at, true)
 		})
 	}

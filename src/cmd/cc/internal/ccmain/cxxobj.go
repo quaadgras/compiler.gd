@@ -825,6 +825,12 @@ func (p *parser) overloaded(op string, xs []expr, at pos) expr {
 			continue
 		}
 		if c, ok := p.viable(s, xs[0], xs[1:]); ok {
+			if ot := xs[0].ty(); ot.kind == kStruct && s.t.fn.recv.elem.kind == kStruct && ot.rec != s.t.fn.recv.elem.rec && len(c.ranks) > 0 && c.ranks[0] < rkConv {
+				// A base's operator: the object is converted to the
+				// base, as it is for a function that is no member
+				// and takes the base.
+				c.ranks[0] = rkConv
+			}
 			cands = append(cands, c)
 		}
 	}

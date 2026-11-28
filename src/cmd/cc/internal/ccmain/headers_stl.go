@@ -15,6 +15,7 @@ func init() {
 #include <stddef.h>
 #include <new>
 #include <utility>
+#include <limits>
 namespace std {
 // As large as Go's slice, and aligned as it: two words that are aligned
 // to 16 bytes where a pointer is 8 (doc/gd/slice16.md), three where it

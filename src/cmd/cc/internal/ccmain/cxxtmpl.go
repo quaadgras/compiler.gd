@@ -67,7 +67,8 @@ type template struct {
 	patBad  bool   // a specialization whose pattern cannot be parsed: never chosen
 
 	// A function template.
-	pat          *funcType // its type, with the parameters as placeholders
+	lam          *lambdaInfo // a generic lambda's operator(): the lambda
+	pat          *funcType   // its type, with the parameters as placeholders
 	patDone      bool
 	nameAt       int         // the token of its name
 	static       bool        // a static member function
@@ -2017,6 +2018,7 @@ func (p *parser) drain(final bool) {
 				if sym.lateSc != nil {
 					p.sc = sym.lateSc
 				}
+				p.inLambda(sym)
 				p.defineFunc(sym, lf.ft, lf.name, lf.at, true)
 			})
 		case sym.synth != nil:
