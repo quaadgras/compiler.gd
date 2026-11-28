@@ -14,6 +14,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -71,6 +72,16 @@ func memAvailable() int64 {
 
 func Run(args []string, stdout, stderr io.Writer) int {
 	limitMemory()
+	if f := os.Getenv("CCPROF"); f != "" {
+		// A CPU profile of the translation, for go tool pprof.
+		if w, err := os.Create(f); err == nil {
+			pprof.StartCPUProfile(w)
+			defer func() {
+				pprof.StopCPUProfile()
+				w.Close()
+			}()
+		}
+	}
 	fs := flag.NewFlagSet("cc", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	pkg := fs.String("pkg", "main", "package of the output")

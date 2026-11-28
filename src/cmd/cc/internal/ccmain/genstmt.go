@@ -69,6 +69,9 @@ func (g *gen) localName(s *symbol) string {
 	} else {
 		n = goIdent(s.name)
 	}
+	if n == "_" {
+		n = "_c" // C's _ is a variable; Go's is none
+	}
 	if g.localNames == nil {
 		g.localNames = map[string]bool{}
 	}

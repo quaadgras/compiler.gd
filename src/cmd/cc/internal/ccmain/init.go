@@ -493,6 +493,12 @@ func (ip *initParser) element(t *ctype, off int64, f *field, afterDesignator boo
 				e = p.initExpr()
 			}
 			ip.pending = nil
+			if p.cxx && isPMF(t) {
+				// A pointer to member function, which is a struct
+				// here: from nullptr, or another.
+				ip.add(initItem{off: off, t: t, x: p.rvalue(p.toMemPtr(e, t, e.at()))})
+				return
+			}
 			if et := e.ty(); et.kind == kStruct && compatible(et.unqual(), t.unqual()) {
 				ip.add(initItem{off: off, t: t, x: p.rvalue(e)})
 				return

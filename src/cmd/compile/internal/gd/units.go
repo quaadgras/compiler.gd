@@ -247,14 +247,25 @@ func compileUnits(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args, un
 	par := min(procs, len(todo))
 	each := max(1, min(4, procs/par))
 	sem := make(chan struct{}, par)
+	// And no more at a time than the memory that is free has room
+	// for: a unit's compilation is taken to need sixty times its
+	// source and a quarter of a gigabyte, and a unit that would need
+	// more than there is is compiled by itself.
+	budget := newMemBudget()
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	failed := false
 	for _, i := range todo {
 		wg.Add(1)
+		need := int64(256 << 20)
+		if st, err := os.Stat(units[i]); err == nil {
+			need += 60 * st.Size()
+		}
+		need = budget.take(need)
 		sem <- struct{}{}
 		go func(i int) {
 			defer wg.Done()
+			defer budget.give(need)
 			defer func() { <-sem }()
 			if err := os.MkdirAll(filepath.Dir(objs[i]), 0o777); err != nil {
 				mu.Lock()
@@ -297,6 +308,58 @@ func compileUnits(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args, un
 	}
 	trimUnitCache(dir, objs)
 	return objs
+}
+
+// A memBudget is the memory that compilations running at one time may
+// take: half of what the system says is free, or no limit where it
+// does not say.
+type memBudget struct {
+	mu    sync.Mutex
+	cond  *sync.Cond
+	total int64
+	used  int64
+}
+
+func newMemBudget() *memBudget {
+	b := &memBudget{}
+	b.cond = sync.NewCond(&b.mu)
+	if data, err := os.ReadFile("/proc/meminfo"); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			f := strings.Fields(line)
+			if len(f) >= 2 && f[0] == "MemAvailable:" {
+				if kb, err := strconv.ParseInt(f[1], 10, 64); err == nil {
+					b.total = kb * 1024 / 2
+				}
+			}
+		}
+	}
+	return b
+}
+
+// take waits until n bytes are free, or all of it for an n that is
+// more than there is, and returns what it took.
+func (b *memBudget) take(n int64) int64 {
+	if b.total <= 0 {
+		return 0
+	}
+	n = min(n, b.total)
+	b.mu.Lock()
+	for b.used+n > b.total {
+		b.cond.Wait()
+	}
+	b.used += n
+	b.mu.Unlock()
+	return n
+}
+
+func (b *memBudget) give(n int64) {
+	if n == 0 {
+		return
+	}
+	b.mu.Lock()
+	b.used -= n
+	b.mu.Unlock()
+	b.cond.Broadcast()
 }
 
 // unitCacheMax is how much the objects of units may take, in bytes:

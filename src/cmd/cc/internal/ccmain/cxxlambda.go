@@ -191,6 +191,10 @@ func (p *parser) lambdaExpr(at pos) expr {
 			m := &member{node{c.f.t, at}, dst, c.f}
 			if c.ref {
 				list = append(list, &exprStmt{&assign{node{c.f.t, at}, "=", m, &cast{node{c.f.t, at}, p.addressOf(c.init, at)}, c.f.t}})
+			} else if c.f.t.kind == kStruct {
+				// A copy that is direct-initialization: an explicit
+				// copy constructor makes it too.
+				list = append(list, &exprStmt{p.constructAt(m, c.f.t, []expr{c.init}, at, mValue)})
 			} else {
 				list = append(list, &exprStmt{p.initWith(m, c.init, at)})
 			}
