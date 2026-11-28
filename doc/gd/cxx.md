@@ -81,6 +81,19 @@ Steps 1 to 3 are largely done, and step 4 has begun (Status, below).
   defines one. `T a = f();` constructs `a` in place; where no object
   takes it, the parser makes a temporary, destroyed when its full
   expression ends (a statement expression around it).
+
+  A temporary of a class with a destructor that a full expression
+  destroyed is the next one of the same class in the function: the
+  frame has one variable for temporaries that are never alive together
+  (`materializePR`, `reuseTemp`), not one for each. Godot's
+  `VisualShaderEditor` constructor made 3,343 `String` temporaries, each
+  a variable of the frame that every call's map of the frame's pointers
+  counted. The full expression that takes one makes it zero first, as a
+  new variable is, because the parser destroys every temporary it made
+  for the full expression, also one for a conversion it tried and
+  dropped, which was never constructed: zero, it destroys to nothing.
+  One whose lifetime a reference extends is not shared, nor one of a
+  class without a destructor.
 - **Passing and returning classes.** The generator already passes a
   struct by the pointer to its memory and returns one into memory the
   caller gives. For a class with a copy constructor or a destructor that

@@ -30,6 +30,12 @@ type retSlot struct {
 type tempObj struct {
 	sym  *symbol
 	flag *symbol // set when it is constructed, if that is conditional
+	// reused is set if sym was another full expression's temporary
+	// (reuseTemp): the full expression makes it zero first, as a new
+	// variable is. (A temporary whose construction the parser tried
+	// and dropped is still destroyed: one that was never constructed
+	// is zero, which destroys to nothing.)
+	reused bool
 }
 
 const (
@@ -246,7 +252,14 @@ func (p *parser) construct(t *ctype, args []expr, at pos, explicit bool) expr {
 func (p *parser) materializePR(pr *classPR) expr {
 	at := pr.p
 	t := pr.t.unqual()
-	sym := p.temporary(t, at)
+	var reused bool
+	var sym *symbol
+	if p.extend == nil && p.fn != nil && needsDtor(t) {
+		sym, reused = p.reuseTemp(t)
+	}
+	if sym == nil {
+		sym = p.temporary(t, at)
+	}
 	ref := &varRef{node{sym.t, at}, sym}
 	init := pr.build(ref)
 	if p.extend != nil && p.fn != nil {
@@ -258,7 +271,7 @@ func (p *parser) materializePR(pr *classPR) expr {
 	}
 	pre := []stmt{&exprStmt{init}}
 	if needsDtor(t) && p.fn != nil {
-		tmp := &tempObj{sym: sym}
+		tmp := &tempObj{sym: sym, reused: reused}
 		if p.condDepth > 0 {
 			tmp.flag = p.newLocal("live", tBool, at)
 			fv := &varRef{node{tBool, at}, tmp.flag}
@@ -267,6 +280,20 @@ func (p *parser) materializePR(pr *classPR) expr {
 		p.temps = append(p.temps, tmp)
 	}
 	return p.xvalue(&seqExpr{node{sym.t, at}, pre, ref})
+}
+
+// reuseTemp returns a temporary of the class t that a full expression
+// of the function destroyed, if there is one, and takes it from the
+// free ones.
+func (p *parser) reuseTemp(t *ctype) (*symbol, bool) {
+	free := p.fn.freeTemps
+	for i := len(free) - 1; i >= 0; i-- {
+		if s := free[i]; sameType(s.t, t) {
+			p.fn.freeTemps = append(free[:i:i], free[i+1:]...)
+			return s, true
+		}
+	}
+	return nil, false
 }
 
 // fullExpr is e, a full expression, followed by the destruction of the
@@ -280,6 +307,9 @@ func (p *parser) fullExpr(mark int, e expr) expr {
 	at := e.at()
 	var list []stmt
 	for _, tmp := range temps {
+		if tmp.reused {
+			list = append(list, &exprStmt{p.zeroObject(&varRef{node{tmp.sym.t, at}, tmp.sym}, at)})
+		}
 		if tmp.flag != nil {
 			fv := &varRef{node{tBool, at}, tmp.flag}
 			list = append(list, &exprStmt{&assign{node{tBool, at}, "=", fv, p.intc(0, tBool, at), tBool}})
@@ -302,6 +332,11 @@ func (p *parser) fullExpr(mark int, e expr) expr {
 			d = &ifStmt{&varRef{node{tBool, at}, tmp.flag}, d, nil}
 		}
 		list = append(list, d)
+		if p.fn != nil && tmp.sym.owner == p.fn {
+			// Dead from here on: another full expression's
+			// temporary of the class may be it.
+			p.fn.freeTemps = append(p.fn.freeTemps, tmp.sym)
+		}
 	}
 	p.stmtExprs++ // as a statement expression's
 	p.stmtExprs--

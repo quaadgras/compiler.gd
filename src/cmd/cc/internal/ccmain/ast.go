@@ -279,6 +279,11 @@ type symbol struct {
 }
 
 type funcDecl struct {
+	// freeTemps are a function's temporaries of classes that a full
+	// expression destroyed: the next temporary of the same class is one
+	// of them (materializePR), so the frame has one variable for the
+	// temporaries of a class that are never alive together.
+	freeTemps []*symbol
 	nstatic int // its static locals so far
 	sym     *symbol
 	params  []*symbol
