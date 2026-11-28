@@ -63,6 +63,11 @@ const (
 	// whoever calls it is the only one that has the object. sync.Pool
 	// asks it of its New function (runtime/shared.go).
 	FuncFlagFreshResult
+
+	// FuncFlagC indicates (gd fork) a function of a package of C's
+	// translated by cmd/cc. The linker's -lean gives it no name of
+	// its own in the function table: it is the package's "?".
+	FuncFlagC
 )
 
 // A FuncID identifies particular functions that need to be treated

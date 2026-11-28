@@ -349,6 +349,9 @@ func Compile(gd *base.Invocation, fn *ir.Func, w *Worker, profile *pgoir.Profile
 	if fn.FreshResult {
 		fn.LSym.Func().FuncFlag |= abi.FuncFlagFreshResult
 	}
+	if gd.CObjects {
+		fn.LSym.Func().FuncFlag |= abi.FuncFlagC
+	}
 
 	// The function is assembled and its tables are written. What they
 	// were made from points to its instructions: without it, those that

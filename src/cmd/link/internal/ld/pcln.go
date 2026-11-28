@@ -328,10 +328,31 @@ func funcName(ctxt *Link, s loader.Sym) string {
 func (state *pclntab) generateFuncnametab(ctxt *Link, funcs []loader.Sym) map[loader.Sym]uint32 {
 	nameOffsets := make(map[loader.Sym]uint32, state.nfunc)
 
+	// With -lean a function of C's has no name of its own: tracebacks
+	// print its package's "?" (FuncFlagC). Its name stays in the ELF
+	// symbol table of a binary that is not stripped, for the tools that
+	// read that.
+	ldr := ctxt.loader
+	cname := func(s loader.Sym) (string, bool) {
+		if !leanFunc(ldr, s) {
+			return "", false
+		}
+		if fi := ldr.FuncInfo(s); !fi.Valid() || fi.FuncFlag()&abi.FuncFlagC == 0 {
+			return "", false
+		}
+		return ldr.SymPkg(s) + ".?", true
+	}
+	pkgNames := map[string]uint32{} // the offsets of the packages' "?"
+	named := map[uint32]string{}    // and their strings
+
 	// Write the null terminated strings.
 	writeFuncNameTab := func(ctxt *Link, s loader.Sym) {
 		symtab := ctxt.loader.MakeSymbolUpdater(s)
 		for s, off := range nameOffsets {
+			if name, ok := named[off]; ok {
+				symtab.AddCStringAt(int64(off), name)
+				continue
+			}
 			symtab.AddCStringAt(int64(off), funcName(ctxt, s))
 		}
 	}
@@ -339,6 +360,16 @@ func (state *pclntab) generateFuncnametab(ctxt *Link, funcs []loader.Sym) map[lo
 	// Loop through the CUs, and calculate the size needed.
 	var size int64
 	walkFuncs(ctxt, funcs, func(s loader.Sym) {
+		if name, ok := cname(s); ok {
+			off, ok := pkgNames[name]
+			if !ok {
+				off = uint32(size)
+				pkgNames[name], named[off] = off, name
+				size += int64(len(name) + 1)
+			}
+			nameOffsets[s] = off
+			return
+		}
 		nameOffsets[s] = uint32(size)
 		size += int64(len(funcName(ctxt, s)) + 1) // NULL terminate
 	})

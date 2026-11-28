@@ -93,7 +93,7 @@ func setupFlags(ctxt *Link) {
 	fs.BoolVar(&ctxt.flagMsan, "msan", false, "enable MSan interface")
 	fs.BoolVar(&ctxt.flagAsan, "asan", false, "enable ASan interface")
 	fs.BoolVar(&ctxt.flagAslr, "aslr", true, "enable ASLR for buildmode=c-shared on windows")
-	fs.BoolVar(&ctxt.flagLean, "lean", false, "gd: leave out of the function table what only tracebacks use (file and line numbers, inlined calls), but for the runtime's functions")
+	fs.BoolVar(&ctxt.flagLean, "lean", false, "gd: leave out of the function table what only tracebacks use (file and line numbers, inlined calls, and the names of functions of C's, which are their package's ?), but for the runtime's functions")
 
 	fs.StringVar(&ctxt.flagFieldTrack, "k", "", "set field tracking `symbol`")
 	fs.StringVar(&ctxt.flagLibGCC, "libgcc", "", "compiler support lib for internal linking; use \"none\" to disable")
