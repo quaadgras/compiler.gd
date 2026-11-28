@@ -197,6 +197,10 @@ template <class... B> inline constexpr bool disjunction_v = disjunction<B...>::v
 template <class B> inline constexpr bool negation_v = !bool(B::value);
 
 template <class T> add_rvalue_reference_t<T> declval() noexcept;
+template <class F, class... A> struct invoke_result {
+	typedef decltype(declval<F>()(declval<A>()...)) type;
+};
+template <class F, class... A> using invoke_result_t = typename invoke_result<F, A...>::type;
 }
 #endif
 `

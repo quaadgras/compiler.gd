@@ -1016,6 +1016,19 @@ public:
 }
 #endif
 `
+	// The streams' names, which a library declares its operator<< with
+	// whatever it included: <utility> has them, as every header of
+	// libstdc++ does.
+	sysHeaders["iosfwd"] = `#ifndef __CC_IOSFWD
+#define __CC_IOSFWD
+namespace std {
+template <class C> struct char_traits;
+template <class C, class Tr = char_traits<C>> class basic_ostream;
+typedef basic_ostream<char> ostream;
+}
+#endif
+`
+	sysHeaders["utility"] = strings.Replace(sysHeaders["utility"], "#include <type_traits>\n", "#include <type_traits>\n#include <iosfwd>\n", 1)
 	sysHeaders["string_view"] = `#ifndef __CC_STRING_VIEW
 #define __CC_STRING_VIEW
 #include <string>
@@ -1107,6 +1120,8 @@ typedef basic_string_view<char32_t> u32string_view;
 	if i < 0 {
 		panic("cc: <string> has no string")
 	}
+	// (And the streams' names, which a library declares its operator<<
+	// with after including <string> alone.)
 	s = s[:i] + view[1:] + s[i:]
 	const conv = "	~basic_string() {}\n"
 	s = strings.Replace(s, conv, "	explicit basic_string(basic_string_view<C, Tr> v) { __add(v.data(), v.size()); }\n	operator basic_string_view<C, Tr>() const noexcept { return basic_string_view<C, Tr>(data(), size()); }\n"+conv, 1)

@@ -1411,7 +1411,7 @@ public:
 		return o;
 	}
 };
-template <class C, class Tr = char_traits<C>>
+template <class C, class Tr>
 class basic_ostream : public ios_base {
 protected:
 	FILE *__f;
@@ -1633,5 +1633,4 @@ template <class C, class Tr> basic_ostream<C, Tr> &operator<<(basic_ostream<C, T
 }
 #endif
 `
-	sysHeaders["iosfwd"] = "#ifndef __CC_IOSFWD\n#define __CC_IOSFWD\n#include <ostream>\n#endif\n"
 }
