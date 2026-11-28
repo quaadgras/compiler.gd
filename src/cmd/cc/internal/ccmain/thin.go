@@ -223,7 +223,7 @@ func (g *gen) tlv1(e expr, forAddr bool) lval {
 			// A union's member that has a pointer: in the union's
 			// interface value.
 			l := lval{x: g.unionHeld(base, e.t), t: e.t}
-			if unionPtrPun(xt.rec, e.f) && simpleLvalue(base) {
+			if unionPtrPun(xt.rec, e.f) && punBase(base) {
 				l.ubase = base
 			}
 			return l
@@ -232,7 +232,7 @@ func (g *gen) tlv1(e expr, forAddr bool) lval {
 		// offset.
 		if e.f.off == 0 {
 			l := lval{x: fmt.Sprintf("(*(*%s)(unsafe.Pointer(%s)))", g.mirror(e.t), taddr(base)), t: e.t}
-			if unionPtrPun(xt.rec, e.f) && simpleLvalue(base) {
+			if unionPtrPun(xt.rec, e.f) && punBase(base) {
 				l.ubase = base
 			}
 			return l
@@ -254,6 +254,17 @@ func (g *gen) tlv1(e expr, forAddr bool) lval {
 	}
 	g.errorf(e.at(), "internal error: %T is not an lvalue", e)
 	return lval{}
+}
+
+// punBase reports whether base, the Go expression of a union, may be
+// written again where a store to its member also says what the union
+// holds (tstore): a variable, a member of one, or what a pointer
+// variable points to, as a union's own constructor has it.
+func punBase(base string) bool {
+	if simpleLvalue(base) {
+		return true
+	}
+	return strings.HasPrefix(base, "(*") && strings.HasSuffix(base, ")") && isSimple(base[2:len(base)-1])
 }
 
 // tindex is a[i], the dereference e of an array lvalue's element's

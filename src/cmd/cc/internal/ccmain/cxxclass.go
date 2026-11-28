@@ -1109,7 +1109,12 @@ func (p *parser) initMembers(t *ctype, inits map[*field]memInit, baseInits map[*
 		}
 		in, ok := inits[f]
 		if !ok && t.rec.union {
-			continue
+			// A union's member is initialized only if the constructor
+			// names it, or names none and it has a default member
+			// initializer (union { uint64_t object = 0; C *custom; }).
+			if _, has := ci.nsdmi[f]; !has || len(inits) > 0 {
+				continue
+			}
 		}
 		if !ok {
 			d, has := ci.nsdmi[f]
