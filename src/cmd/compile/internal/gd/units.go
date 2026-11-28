@@ -18,7 +18,6 @@ import (
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ssagen"
 	"cmd/internal/bio"
-	"cmd/internal/buildid"
 )
 
 // Units (doc/gd/units.md).
@@ -153,13 +152,34 @@ func importsKey(importcfg string) string {
 			continue
 		}
 		path, file, _ := strings.Cut(rest, "=")
-		id, err := buildid.ReadFile(file)
-		if err != nil {
-			id = file
-		}
-		fmt.Fprintf(&b, "packagefile %s %s\n", path, id)
+		fmt.Fprintf(&b, "packagefile %s %s\n", path, packageID(file))
 	}
 	return b.String()
+}
+
+// packageID is what says which compilation the package file is: its
+// build id, which is in the first lines of the archive (the compiler
+// is built without cmd/internal/buildid when it is bootstrapped), or
+// failing that the file's size and time.
+func packageID(file string) string {
+	f, err := os.Open(file)
+	if err != nil {
+		return file
+	}
+	defer f.Close()
+	var buf [1024]byte
+	n, _ := io.ReadFull(f, buf[:])
+	const mark = "build id \""
+	if i := bytes.Index(buf[:n], []byte(mark)); i >= 0 {
+		rest := buf[i+len(mark) : n]
+		if j := bytes.IndexByte(rest, '"'); j >= 0 {
+			return string(rest[:j])
+		}
+	}
+	if st, err := f.Stat(); err == nil {
+		return fmt.Sprintf("%s %d %d", file, st.Size(), st.ModTime().UnixNano())
+	}
+	return file
 }
 
 // compilerKey says which compiler this is.

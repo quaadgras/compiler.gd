@@ -919,11 +919,12 @@ func walkUnsafeData(gd *base.Invocation, n *ir.UnaryExpr, init *ir.Nodes) ir.Nod
 		if v := staticValue(gd, x); v != nil {
 			x = v
 		}
-		if x.Op() == ir.OLITERAL && x.Val().Kind() == constant.String {
+		// (The empty string has no symbol, and is left to the paths
+		// below: a nil pointer made here is one that GOWASM=gc,split
+		// traps on in unsafe.Slice(unsafe.StringData(""), 0), which
+		// os.File.WriteString("") is once it is inlined.)
+		if x.Op() == ir.OLITERAL && x.Val().Kind() == constant.String && constant.StringVal(x.Val()) != "" {
 			s := constant.StringVal(x.Val())
-			if len(s) == 0 {
-				return typecheck.ConvNop(gd, typecheck.NodNil(gd), n.Type())
-			}
 			sym := staticdata.StringSym(gd, n.Pos(), s)
 			addr := typecheck.NodAddr(gd, ir.NewLinksymExpr(gd, n.Pos(), sym, types.Types[types.TUINT8]))
 			addr.SetType(n.Type())
