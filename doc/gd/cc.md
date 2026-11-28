@@ -266,8 +266,14 @@ Where C and Go's rules for pointers disagree:
   in a variable is to a type that is in it whole and is compatible
   with the variable's type, as in an object of Go's.
   A pointer that arithmetic takes out of its object, before it or past
-  its end, stops the program: for what malloc gave, the end is where C
-  asked for it, not where the allocator's slot ends. A result that is
+  its end, is one that nothing is loaded or stored through: it has
+  `cPoison`, as a pointer that the program made of an integer has, and
+  arithmetic on it gives another such, also back where it came from.
+  (It stopped the program until 2026-11-28. C programs make such
+  pointers and do not use them: Godot's `String::to_int` has
+  `&p_str[p_len]` as a limit, with a `p_len` of -1 for "to the
+  terminator".) For what malloc gave, the end is where C asked for it,
+  not where the allocator's slot ends. A result that is
   in nothing the runtime knows (the originals were not either: memory
   that the program mapped) is let be for now.
 - **Integers in pointers.** C keeps them there (`SIG_IGN`, `(void *)1`,

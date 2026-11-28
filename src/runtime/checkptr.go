@@ -361,9 +361,19 @@ func checkptrArithmeticCMoved(p unsafe.Pointer, originals []unsafe.Pointer) unsa
 		cIntPtrs.Add(1)
 		return unsafe.Pointer(a | cPoison)
 	}
-	throw("checkptr: pointer arithmetic result is out of its object")
-	return nil
+	// Out of what every original is in, before it or past its end. C
+	// programs make such a pointer and never use it (a limit that is
+	// not reached, &s[-1]; what a loop that runs back ends with): it
+	// is one that nothing is loaded or stored through, as a pointer
+	// that the program made of an integer is, and arithmetic does
+	// not bring it back.
+	cOutPtrs.Add(1)
+	return unsafe.Pointer(a | cPoison)
 }
+
+// cOutPtrs counts the pointers that arithmetic took out of their
+// objects (checkptrArithmeticC).
+var cOutPtrs atomic.Uint64
 
 // checkptrArithmeticC1 is checkptrArithmeticC for a p that is made of
 // one pointer, as most are: the compiled code has nothing to put
