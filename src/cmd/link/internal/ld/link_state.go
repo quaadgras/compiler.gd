@@ -97,6 +97,7 @@ type linkState struct {
 	flagMsan            bool
 	flagAsan            bool
 	flagAslr            bool
+	flagLean            bool
 	flagFieldTrack      string
 	flagLibGCC          string
 	flagTmpdir          string

@@ -525,6 +525,7 @@ func (ctxt *Link) loadlib() {
 		log.Fatalf("invalid -strictdups flag value %d", ctxt.FlagStrictDups)
 	}
 	ctxt.loader = loader.NewLoader(flags, &ctxt.ErrorReporter.ErrorReporter)
+	ctxt.loader.LeanTab = ctxt.flagLean
 	if ctxt.stderr != nil {
 		ctxt.loader.SetErrorStderr(ctxt.stderr)
 	}

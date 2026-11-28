@@ -241,7 +241,7 @@ func makeInlSyms(ctxt *Link, funcs []loader.Sym, nameOffsets map[loader.Sym]uint
 	for _, s := range funcs {
 		if fi := ldr.FuncInfo(s); fi.Valid() {
 			fi.Preload()
-			if fi.NumInlTree() > 0 {
+			if numInl(ldr, s, fi) > 0 {
 				inlSyms[s] = genInlTreeSym(ctxt, ldr.SymUnit(s), fi, ctxt.Arch, nameOffsets)
 			}
 		}
@@ -303,7 +303,7 @@ func walkFuncs(ctxt *Link, funcs []loader.Sym, f func(loader.Sym)) {
 			continue
 		}
 		fi.Preload()
-		for i, ni := 0, fi.NumInlTree(); i < int(ni); i++ {
+		for i, ni := 0, numInl(ldr, s, fi); i < int(ni); i++ {
 			call := fi.InlTree(i).Func
 			if _, ok := seen[call]; !ok {
 				f(call)
@@ -364,7 +364,7 @@ func walkFilenames(ctxt *Link, funcs []loader.Sym, f func(*sym.CompilationUnit, 
 		for i, nf := 0, int(fi.NumFile()); i < nf; i++ {
 			f(cu, fi.File(i))
 		}
-		for i, ninl := 0, int(fi.NumInlTree()); i < ninl; i++ {
+		for i, ninl := 0, int(numInl(ldr, s, fi)); i < ninl; i++ {
 			call := fi.InlTree(i)
 			f(cu, call.File)
 		}
@@ -511,14 +511,19 @@ func (state *pclntab) generatePctab(ctxt *Link, funcs []loader.Sym) {
 		fi.Preload()
 		pcsp, pcfile, pcline, pcinline, pcdata = ldr.PcdataAuxs(s, pcdata)
 
-		pcSyms := []loader.Sym{pcsp, pcfile, pcline}
-		for _, pcSym := range pcSyms {
+		lean := leanFunc(ldr, s)
+		saveOffset(pcsp)
+		if !lean {
+			saveOffset(pcfile)
+			saveOffset(pcline)
+		}
+		for j, pcSym := range pcdata {
+			if lean && j == abi.PCDATA_InlTreeIndex {
+				continue
+			}
 			saveOffset(pcSym)
 		}
-		for _, pcSym := range pcdata {
-			saveOffset(pcSym)
-		}
-		if fi.NumInlTree() > 0 {
+		if numInl(ldr, s, fi) > 0 {
 			saveOffset(pcinline)
 		}
 	}
@@ -689,6 +694,27 @@ func ignoreFuncData(ldr *loader.Loader, s loader.Sym, j int, fdSym loader.Sym) b
 	return false
 }
 
+// leanFunc reports whether the function table has only what the runtime
+// needs to run s (the linker's -lean): not its file and line numbers
+// and the calls inlined into it, which tracebacks print. The runtime's
+// own functions keep them.
+func leanFunc(ldr *loader.Loader, s loader.Sym) bool {
+	if !ldr.LeanTab {
+		return false
+	}
+	pkg := ldr.SymPkg(s)
+	return pkg != "runtime" && !strings.HasPrefix(pkg, "runtime/") && !strings.HasPrefix(pkg, "internal/runtime/")
+}
+
+// numInl is the number of calls inlined into s that the function table
+// has: none of a lean function's.
+func numInl(ldr *loader.Loader, s loader.Sym, fi loader.FuncInfo) uint32 {
+	if leanFunc(ldr, s) {
+		return 0
+	}
+	return fi.NumInlTree()
+}
+
 // numPCData returns the number of PCData syms for the FuncInfo.
 // NB: Preload must be called on valid FuncInfos before calling this function.
 func numPCData(ldr *loader.Loader, s loader.Sym, fi loader.FuncInfo) uint32 {
@@ -696,7 +722,7 @@ func numPCData(ldr *loader.Loader, s loader.Sym, fi loader.FuncInfo) uint32 {
 		return 0
 	}
 	numPCData := uint32(ldr.NumPcdata(s))
-	if fi.NumInlTree() > 0 {
+	if numInl(ldr, s, fi) > 0 {
 		if numPCData < abi.PCDATA_InlTreeIndex+1 {
 			numPCData = abi.PCDATA_InlTreeIndex + 1
 		}
@@ -734,7 +760,7 @@ func funcData(ldr *loader.Loader, s loader.Sym, fi loader.FuncInfo, inlSym loade
 	fdSyms = fdSyms[:0]
 	if fi.Valid() {
 		fdSyms = ldr.Funcdata(s, fdSyms)
-		if fi.NumInlTree() > 0 {
+		if numInl(ldr, s, fi) > 0 {
 			if len(fdSyms) < abi.FUNCDATA_InlTree+1 {
 				fdSyms = append(fdSyms, make([]loader.Sym, abi.FUNCDATA_InlTree+1-len(fdSyms))...)
 			}
@@ -765,7 +791,7 @@ func (state pclntab) calculateFunctabSize(ctxt *Link, funcs []loader.Sym) (int64
 		if fi.Valid() {
 			fi.Preload()
 			numFuncData := ldr.NumFuncdata(s)
-			if fi.NumInlTree() > 0 {
+			if numInl(ldr, s, fi) > 0 {
 				if numFuncData < abi.FUNCDATA_InlTree+1 {
 					numFuncData = abi.FUNCDATA_InlTree + 1
 				}
@@ -869,8 +895,14 @@ func writeFuncs(ctxt *Link, sb *loader.SymbolBuilder, funcs []loader.Sym, inlSym
 		// pcdata
 		if fi.Valid() {
 			off = sb.SetUint32(ctxt.Arch, off, uint32(ldr.SymValue(pcsp)))
-			off = sb.SetUint32(ctxt.Arch, off, uint32(ldr.SymValue(pcfile)))
-			off = sb.SetUint32(ctxt.Arch, off, uint32(ldr.SymValue(pcline)))
+			if leanFunc(ldr, s) {
+				// No table: the runtime says "?" and line 0.
+				off = sb.SetUint32(ctxt.Arch, off, 0)
+				off = sb.SetUint32(ctxt.Arch, off, 0)
+			} else {
+				off = sb.SetUint32(ctxt.Arch, off, uint32(ldr.SymValue(pcfile)))
+				off = sb.SetUint32(ctxt.Arch, off, uint32(ldr.SymValue(pcline)))
+			}
 		} else {
 			off += 12
 		}
@@ -908,10 +940,15 @@ func writeFuncs(ctxt *Link, sb *loader.SymbolBuilder, funcs []loader.Sym, inlSym
 
 		// Output the pcdata.
 		if fi.Valid() {
+			lean := leanFunc(ldr, s)
 			for j, pcSym := range pcdata {
+				if lean && j == abi.PCDATA_InlTreeIndex {
+					sb.SetUint32(ctxt.Arch, off+int64(j*4), 0)
+					continue
+				}
 				sb.SetUint32(ctxt.Arch, off+int64(j*4), uint32(ldr.SymValue(pcSym)))
 			}
-			if fi.NumInlTree() > 0 {
+			if numInl(ldr, s, fi) > 0 {
 				sb.SetUint32(ctxt.Arch, off+abi.PCDATA_InlTreeIndex*4, uint32(ldr.SymValue(pcinline)))
 			}
 		}

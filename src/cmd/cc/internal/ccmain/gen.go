@@ -227,7 +227,10 @@ func (pg *pkgGen) fdTables() {
 			fmt.Fprintf(&typeInit, "\t%s = c23.FuncType((%s)(nil))\n%s", t, gr.erased, initSplit)
 		}
 		for j, f := range gr.funcs {
-			fmt.Fprintf(&descs, "\t{\n\t\tf := %s\n\t\tc23.FuncInto(&%s, unsafe.Pointer(&f), %s)\n\t}\n%s", f, gr.vars[j], t, initSplit)
+			// (The function's value is read from a variable that the
+			// compiler does not keep: nothing is left on the stack
+			// for the collector to be told of.)
+			fmt.Fprintf(&descs, "\t{\n\t\tf := %s\n\t\tc23.FuncInto(&%s, *(*unsafe.Pointer)(unsafe.Pointer(&f)), %s)\n\t}\n%s", f, gr.vars[j], t, initSplit)
 		}
 	}
 	old := pg.descInit.String()

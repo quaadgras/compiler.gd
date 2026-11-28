@@ -188,6 +188,11 @@ type symAndSize struct {
 //     overwriting/overwritten symbols, the second (or later) appearance
 //     of the symbol gets the same global index as the first appearance.
 type Loader struct {
+	// LeanTab is the linker's -lean: the function table has no file
+	// and line numbers and no inlined calls for the functions that are
+	// not the runtime's (ld/pcln.go).
+	LeanTab bool
+
 	objs        []*oReader
 	extStart    Sym   // from this index on, the symbols are externally defined
 	builtinSyms []Sym // global index of builtin symbols

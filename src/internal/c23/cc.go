@@ -86,22 +86,22 @@ func FuncType(like any) unsafe.Pointer {
 }
 
 // FuncInto makes the descriptor of a function and stores it in *d, if
-// *d has none: pf points to a variable that holds the function, and
-// typ is FuncType's for the type that calls through pointers to it
-// have. It is NewFuncAs for a program that makes a descriptor for each
+// *d has none: fv is the function, as the pointer that a Go function
+// value is, and typ is FuncType's for the type that calls through
+// pointers to it have. It is NewFuncAs for a program that makes a descriptor for each
 // of a hundred thousand functions as it starts, in which what a
 // statement for each takes is most of that code: this takes three
 // addresses.
 //
 //go:nocheckptr
 //go:noinline
-func FuncInto(d **Void, pf, typ unsafe.Pointer) {
+func FuncInto(d **Void, fv, typ unsafe.Pointer) {
 	if *d != nil {
 		return
 	}
 	var f any
 	e := (*abi.EmptyInterface)(unsafe.Pointer(&f))
-	e.Type, e.Data = (*abi.Type)(typ), *(*unsafe.Pointer)(pf)
+	e.Type, e.Data = (*abi.Type)(typ), fv
 	*d = NewFunc(f)
 }
 
