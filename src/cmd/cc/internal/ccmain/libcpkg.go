@@ -134,6 +134,7 @@ func goFunc(s *symbol) (string, bool) {
 // never names them.
 var goTypes = map[string]string{
 	"__go_slice": "[]$0",
+	"__go_map":   "map[$0]$1",
 }
 
 // goType returns the Go type that the class t is, if it is one of

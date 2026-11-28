@@ -1052,9 +1052,42 @@ func (g *gen) elvis(e *cond) string {
 
 // isPure reports whether evaluating the Go expression s can have no
 // effect and cannot fail: no call but conversions, no memory.
+// isPure reports whether the Go expression s may be evaluated where C
+// does not evaluate it, as an operand of c23.If is: a name, or a
+// constant. Not what loads through a pointer (p.f, where p may be null:
+// c ? p->f : 0), indexes, or divides.
 func isPure(s string) bool {
-	return !strings.Contains(s, "(") || strings.HasPrefix(s, "int") && !strings.Contains(s[1:], "(") ||
-		isConvLit(s)
+	if isConvLit(s) {
+		return true
+	}
+	body := strings.TrimPrefix(s, "c23.")
+	if i := strings.Index(body, "("); i > 0 && strings.HasSuffix(body, ")") && isWord(body[:i]) {
+		// A constant of a type: c23.Int(5), c23.Double(0.5).
+		arg := strings.TrimPrefix(body[i+1:len(body)-1], "-")
+		if arg == "" {
+			return false
+		}
+		for _, c := range arg {
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' || c == 'x' || c == '.' || c == '_') {
+				return false
+			}
+		}
+		return true
+	}
+	return isWord(strings.TrimPrefix(body, "-"))
+}
+
+// isWord reports whether s is a name or a number.
+func isWord(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func isConvLit(s string) bool {
