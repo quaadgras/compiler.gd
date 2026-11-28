@@ -234,6 +234,9 @@ template <class T1, class T2> constexpr pair<decay_t<T1>, decay_t<T2>> make_pair
 template <class T1, class T2> constexpr bool operator==(const pair<T1, T2> &a, const pair<T1, T2> &b) { return a.first == b.first && a.second == b.second; }
 template <class T1, class T2> constexpr bool operator!=(const pair<T1, T2> &a, const pair<T1, T2> &b) { return !(a == b); }
 template <class T1, class T2> constexpr bool operator<(const pair<T1, T2> &a, const pair<T1, T2> &b) { return a.first < b.first || !(b.first < a.first) && a.second < b.second; }
+template <class T1, class T2> constexpr bool operator>(const pair<T1, T2> &a, const pair<T1, T2> &b) { return b < a; }
+template <class T1, class T2> constexpr bool operator<=(const pair<T1, T2> &a, const pair<T1, T2> &b) { return !(b < a); }
+template <class T1, class T2> constexpr bool operator>=(const pair<T1, T2> &a, const pair<T1, T2> &b) { return !(a < b); }
 struct in_place_t { explicit in_place_t() = default; };
 inline constexpr in_place_t in_place{};
 }

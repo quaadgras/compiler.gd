@@ -1101,6 +1101,9 @@ func (p *parser) paramsAhead(i int) bool {
 // paramAhead reports whether the first item of a parenthesized list, at
 // i, can be a parameter's declaration.
 func (p *parser) paramAhead(i int) bool {
+	if k := p.attrEnd(i); k > i {
+		return p.paramAhead(k) // (__attribute__((unused)) T x)
+	}
 	if p.isTypeStart(i) {
 		// A parameter's type, unless it is T(args) or T{args}: a
 		// temporary. T(name) declares a parameter only if name is not

@@ -1217,6 +1217,26 @@ func (p *parser) postfix(x expr) expr {
 			p.expect("]")
 			e := p.memberCall(x, "operator[]", []expr{i}, at)
 			if e == nil {
+				// A class that converts to a pointer: the pointer's
+				// element.
+				var to *ctype
+				for _, f := range p.convFuncs(x.ty(), nil) {
+					rt := f.t.fn.ret
+					if rt.isRef() {
+						rt = rt.elem
+					}
+					if !f.explicit && !f.deleted && rt.isPtr() && to == nil {
+						to = rt.unqual()
+					}
+				}
+				if to != nil {
+					if c := p.convertClass(x, to, at); c != nil {
+						x = p.derefOf(p.binop(at, "+", p.rvalue(c), p.rvalue(i)), at)
+						continue
+					}
+				}
+			}
+			if e == nil {
 				p.errorAt(at, "no match for operator[] (operand type is %s)", x.ty())
 			}
 			x = e

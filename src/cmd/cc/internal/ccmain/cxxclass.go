@@ -1344,6 +1344,13 @@ func (p *parser) specialMember(s specs, at pos) {
 	if t.kind != kFunc || p.declIn == nil || p.declIn.kind != skClass {
 		p.errorAt(at, "expected a type")
 	}
+	if p.is("=") && p.isAt(1, "default") && len(t.fn.params) == 0 {
+		// C::C() = default; and C::~C() = default;, outside the class:
+		// defined here, with a body that does nothing more than
+		// the members' and the bases' own.
+		p.toks[p.pos].text, p.toks[p.pos+1].text = "{", "}"
+		p.toks[p.pos].kind, p.toks[p.pos+1].kind = tkPunct, tkPunct
+	}
 	if !p.is("{") && !p.is(":") {
 		p.errorAt(at, "expected the definition of %s::%s", p.declIn.name, name)
 	}

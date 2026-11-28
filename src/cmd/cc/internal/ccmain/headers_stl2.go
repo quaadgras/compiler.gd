@@ -419,6 +419,10 @@ template <class C, class Tr, class A> bool operator>(const basic_string<C, Tr, A
 template <class C, class Tr, class A> bool operator<=(const basic_string<C, Tr, A> &a, const basic_string<C, Tr, A> &b) { return a.compare(b) <= 0; }
 template <class C, class Tr, class A> bool operator>=(const basic_string<C, Tr, A> &a, const basic_string<C, Tr, A> &b) { return a.compare(b) >= 0; }
 template <class C, class Tr, class A> void swap(basic_string<C, Tr, A> &a, basic_string<C, Tr, A> &b) noexcept { a.swap(b); }
+}
+#include <ctype.h>
+#include <algorithm>
+namespace std {
 typedef basic_string<char> string;
 typedef basic_string<wchar_t> wstring;
 typedef basic_string<char16_t> u16string;
