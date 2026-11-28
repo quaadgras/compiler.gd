@@ -164,9 +164,10 @@ func (g *gen) unitRecordName(t *ctype, kw, tag, layout string) string {
 			fmt.Fprintf(&shape, "|%d:%d:%v", f.off, f.t.sizeof(), f.t.isPtr())
 		}
 		name := fmt.Sprintf("%s%s_%s_%s", g.o.prefix, kw, goIdent(tag), hash8(shape.String()))
-		if t.rec.tag == "" || g.mirrorTaken(name) {
-			// An unnamed type, or one that another of this unit is
-			// laid out as: named by its members too.
+		if t.rec.tag == "" && t.rec.tdName == "" || g.mirrorTaken(name) {
+			// A type that nothing names (one that a typedef names is
+			// the same in every unit: png_image), or one that another
+			// of this unit is laid out as: named by its members too.
 			name = fmt.Sprintf("%s%s_%s_%s", g.o.prefix, kw, goIdent(tag), hash8(layout))
 		}
 		return name
