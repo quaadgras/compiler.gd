@@ -726,6 +726,23 @@ func (p *parser) templateDecl() {
 		// A member defined outside its class.
 		save := p.pos
 		first := p.lookup(p.peekAt(qual).text)
+		// (The class template may be a member of a class or of a
+		// namespace: Outer::Inner<T>::f.)
+		for j := qual; first != nil && !(first.kind == symTemplate && first.tmpl.kind == 'c'); {
+			var sc *scope
+			switch first.kind {
+			case symNamespace:
+				sc = first.ns
+			case symTypedef:
+				sc = typeScope(first.t)
+			}
+			if sc == nil || !p.isAt(j+1, "::") || p.peekAt(j+2).kind != tkIdent {
+				first = p.lookup(p.peekAt(qual).text)
+				break
+			}
+			j += 2
+			first = sc.find(p.peekAt(j).text)
+		}
 		tm.hasBody = p.skipDecl(false)
 		end := p.pos
 		if first != nil && first.kind == symTemplate && first.tmpl.kind == 'c' {
@@ -1657,6 +1674,13 @@ func (p *parser) deduce(tm *template, given []targ, args []expr, at pos) ([]targ
 			}
 		}
 	}
+	return p.deduceRest(tm, bound, set, at)
+}
+
+// deduceRest completes the arguments bound of the template tm, of
+// which those that set marks are known, with the rest's defaults (or
+// empty packs): ok is false if one has none, or cannot be made.
+func (p *parser) deduceRest(tm *template, bound []targ, set []bool, at pos) ([]targ, bool) {
 	// What is not deduced: a default, or an empty pack.
 	for i, tp := range tm.params {
 		if set[i] {
@@ -1936,6 +1960,13 @@ func (p *parser) use(sym *symbol) {
 	if sym.late == nil && sym.synth == nil && !p.instMember(sym) && !(sym.kind == symFunc && sym.inst != nil) {
 		return
 	}
+	if debugUse {
+		by := "(no function)"
+		if p.fn != nil {
+			by = p.fn.sym.name
+		}
+		println("use:", sym.name, "by", by)
+	}
 	sym.queued = true
 	p.pending = append(p.pending, sym)
 }
@@ -2206,6 +2237,10 @@ func (p *parser) typePackAt(i int) bool {
 // debugSFINAE prints the errors that are not reported because they are
 // substitution failures: CCDEBUG=sfinae.
 var debugSFINAE = os.Getenv("CCDEBUG") == "sfinae"
+
+// debugUse prints each function that is to be defined because it is
+// used, and the function that uses it: CCDEBUG=use.
+var debugUse = os.Getenv("CCDEBUG") == "use"
 
 // debugPanic makes a parse error that is reported a panic, with its
 // stack: CCDEBUG=panic.

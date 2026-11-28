@@ -1234,7 +1234,14 @@ func (g *gen) tglobalVar(s *symbol) {
 	save, saveInd := g.out, g.ind
 	g.out, g.ind = &g.inits, 1
 	if s.init != nil && !inDecl {
+		if g.o.unit != "" && !constInit(s.init) {
+			// A value that code computes (int n = f();): with the
+			// initializers that run, in the order of the declarations,
+			// when every unit's objects have their constants.
+			g.out = &g.dynInits
+		}
 		g.tinitObject(x, s.t, s.init)
+		g.out = &g.inits
 	}
 	if s.ctor != nil {
 		if g.o.unit != "" {
@@ -1261,6 +1268,20 @@ func (g *gen) tglobalVar(s *symbol) {
 			b.WriteString(initSplit) // the next object's is on its own
 		}
 	}
+}
+
+// constInit reports whether the initializer is of constants and
+// addresses: what C++ initializes an object with before any code runs.
+func constInit(in *initializer) bool {
+	if in.scalar != nil {
+		return staticInit(in.scalar)
+	}
+	for _, it := range in.items {
+		if it.x != nil && !staticInit(it.x) {
+			return false
+		}
+	}
+	return true
 }
 
 // staticInitFor is staticInit. An object that several units define

@@ -861,9 +861,40 @@ func (p *parser) completeClass(t *ctype) {
 		sym := implicit("operator=", &funcType{ret: refTo(self, 1), proto: true, params: []*ctype{cref}, names: []string{"o"}}, !ci.nontrivCopy)
 		later(sym, func() { p.implicitCopy(sym, t, true, false) })
 	}
-	// A move constructor or move assignment declared = default: member
-	// by member, each moved. (One that is not declared is not made: the
-	// copy is used.)
+	// The implicit move constructor and move assignment, of a class
+	// that declares no copy, move or destructor of its own and has a
+	// member or base that moves otherwise than it is copied (a
+	// std::unique_lock, whose copies are deleted): for any other class
+	// the copy does what the move would.
+	if !userCopy && !userAssign && (userDtor == nil || userDtor.implicit) && !r.union {
+		moves := false
+		for _, f := range r.fields {
+			moves = moves || hasMove(f.t)
+		}
+		for _, b := range ci.bases {
+			moves = moves || hasMove(b.t)
+		}
+		declared := func(key string) bool {
+			for o := sc.vars[key]; o != nil; o = o.next {
+				if ps := o.t.fn.params; o.tmpl == nil && len(ps) == 2 && ps[1].ref == 2 && isSelf(ps[1]) {
+					return true
+				}
+			}
+			return false
+		}
+		if moves {
+			rref := refTo(self, 2)
+			if !declared("{ctor}") {
+				implicit(r.tag, &funcType{ret: tVoid, proto: true, ctor: true, params: []*ctype{rref}, names: []string{"o"}}, false)
+			}
+			if !declared("operator=") {
+				implicit("operator=", &funcType{ret: refTo(self, 1), proto: true, params: []*ctype{rref}, names: []string{"o"}}, false)
+			}
+		}
+	}
+	// A move constructor or move assignment declared = default, or
+	// implicit: member by member, each moved. (For a class that has
+	// neither the copy is used.)
 	for _, key := range []string{"{ctor}", "operator="} {
 		for o := sc.vars[key]; o != nil; o = o.next {
 			ps := o.t.fn.params
@@ -922,6 +953,23 @@ func (p *parser) completeClass(t *ctype) {
 		p.restoreFunc(st)
 		p.pos, p.cls = save, saveCls
 	}
+}
+
+// hasMove reports whether t is a class, or an array of one, that has a
+// move constructor or move assignment.
+func hasMove(t *ctype) bool {
+	ci := elemClass(t)
+	if ci == nil {
+		return false
+	}
+	for _, key := range []string{"{ctor}", "operator="} {
+		for o := ci.scope.vars[key]; o != nil; o = o.next {
+			if ps := o.t.fn.params; o.tmpl == nil && len(ps) == 2 && ps[1].ref == 2 && ps[1].elem.kind == kStruct && ps[1].elem.rec == ci.t.rec {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // synth defines the function sym with the body that body makes, given

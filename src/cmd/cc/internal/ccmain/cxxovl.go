@@ -706,9 +706,16 @@ func (p *parser) thisOrNil(set []*symbol, at pos) expr {
 			for sc.kind == skTemplate && sc.parent != nil {
 				sc = sc.parent
 			}
-			if sc.kind == skClass {
-				return p.thisObject(at)
+			if sc.kind != skClass {
+				continue
 			}
+			if p.lambda != nil && (s.tmpl == nil && s.t.fn.recv == nil || s.tmpl != nil && s.tmpl.static) {
+				// A static member function: a lambda that calls
+				// only such does not capture this (and so may be a
+				// pointer to a function).
+				continue
+			}
+			return p.thisObject(at)
 		}
 	}
 	return nil

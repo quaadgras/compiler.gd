@@ -620,7 +620,10 @@ func (p *parser) convFuncs(t, to *ctype) []*symbol {
 				if !p.unify(tm.convPat, want.unqual(), bound, set) {
 					continue
 				}
-				if targs, ok := p.deduce(tm, bound[:countSet(set)], nil, o.p); ok {
+				// (The parameters that the type does not name have
+				// their defaults: template <class U = T, class O, ...>
+				// operator Ref<O>().)
+				if targs, ok := p.deduceRest(tm, bound, set, o.p); ok {
 					if inst := p.instFunc(tm, targs, o.p); inst != nil && inst.t.fn.conv != nil {
 						out = append(out, inst)
 					}
