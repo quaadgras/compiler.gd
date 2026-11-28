@@ -152,6 +152,25 @@ func (pg *pkgGen) unitTypeName(t *ctype, kw, tag, key string) string {
 // unitRecordName is the Go name of the complete struct or union t in a
 // unit: layout is its layout's key (record).
 func (g *gen) unitRecordName(t *ctype, kw, tag, layout string) string {
+	if t.rec.cdecl {
+		// C's: two units' types of one tag are the same type if they
+		// are laid out alike (a header of another version, or of a
+		// library configured otherwise, gives another type), whether
+		// the units are C or C++. The name is of the tag and of where
+		// the members are.
+		var shape strings.Builder
+		fmt.Fprintf(&shape, "%s|%d|%d", tag, t.rec.size, t.rec.align)
+		for _, f := range t.rec.fields {
+			fmt.Fprintf(&shape, "|%d:%d:%v", f.off, f.t.sizeof(), f.t.isPtr())
+		}
+		name := fmt.Sprintf("%s%s_%s_%s", g.o.prefix, kw, goIdent(tag), hash8(shape.String()))
+		if t.rec.tag == "" || g.mirrorTaken(name) {
+			// An unnamed type, or one that another of this unit is
+			// laid out as: named by its members too.
+			name = fmt.Sprintf("%s%s_%s_%s", g.o.prefix, kw, goIdent(tag), hash8(layout))
+		}
+		return name
+	}
 	if k := completeKey(t); strings.HasPrefix(k, "c++:") {
 		name := g.unitTypeName(t, kw, tag, k)
 		if g.info.Types == nil {
@@ -182,8 +201,8 @@ func (g *gen) opaque(t *ctype) string {
 		return ""
 	}
 	k := completeKey(t)
-	if !strings.HasPrefix(k, "c++:") {
-		return ""
+	if !strings.HasPrefix(k, "c++:") || t.rec.cdecl {
+		return "" // (C's: no name says which type it is before it is defined)
 	}
 	kw := "struct"
 	if t.rec.union {

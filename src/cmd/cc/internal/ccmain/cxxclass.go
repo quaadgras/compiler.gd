@@ -563,7 +563,7 @@ func (p *parser) staticMember(name string, t *ctype, s specs, at pos) {
 	if s.constx {
 		t = constexprType(t)
 	}
-	sym := &symbol{name: mangleVar(p.sc, name), src: name, kind: symVar, t: t, storage: sExtern, global: true, linkage: 'e', sc: p.sc, p: at, constx: s.constx}
+	sym := &symbol{name: mangleVar(p.sc, name), src: name, kind: symVar, t: t, storage: sExtern, global: true, linkage: 'e', sc: p.sc, p: at, constx: s.constx, tls: s.tls}
 	if inBlock(p.sc) {
 		sym.linkage = 0
 	}

@@ -89,6 +89,7 @@ type ctype struct {
 }
 
 type record struct {
+	cdecl    bool       // declared by C, or by C++ in extern "C": a type that each translation unit has its own of, which are one if they are laid out alike
 	lazy     *lazyClass // C++: its definition, put off until it must be complete
 	tag      string
 	union    bool

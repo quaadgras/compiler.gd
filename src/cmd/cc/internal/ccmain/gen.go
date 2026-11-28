@@ -70,6 +70,7 @@ type pkgGen struct {
 	declared map[*symbol]bool
 	refs     map[*symbol]bool // nil: not being made
 	refFunc  bool             // it refers to a function
+	tlsSelf  *symbol          // the thread-local object whose maker is being written
 
 	// The struct and union types that a unit completes, by what names
 	// them in every unit (completeKey): a pointer to one is a pointer

@@ -989,7 +989,7 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 		if end := p.classEnd(); end > 0 && p.isAt(end, ";") && (old == nil || !old.rec.complete && old.rec != p.lazySkip) {
 			t := old
 			if t == nil {
-				t = &ctype{kind: kStruct, rec: &record{tag: tag, union: union, id: p.nextRecord(), sc: p.sc}}
+				t = &ctype{kind: kStruct, rec: &record{tag: tag, union: union, id: p.nextRecord(), sc: p.sc, cdecl: !p.cxx || p.externC > 0}}
 				p.sc.tags[tag] = t
 				p.declareTag(p.sc, tag, t)
 			}
@@ -1004,7 +1004,7 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 		p.next()
 		if _, ok := p.sc.tags[tag]; !ok {
 			// Its name is declared in its bases: class D : Base<D>.
-			t := &ctype{kind: kStruct, rec: &record{tag: tag, union: union, id: p.nextRecord(), sc: p.sc}}
+			t := &ctype{kind: kStruct, rec: &record{tag: tag, union: union, id: p.nextRecord(), sc: p.sc, cdecl: !p.cxx || p.externC > 0}}
 			p.sc.tags[tag] = t
 			p.declareTag(p.sc, tag, t)
 		}
@@ -1024,7 +1024,7 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 			return t
 		}
 		// A new incomplete type.
-		t := &ctype{kind: kStruct, rec: &record{tag: tag, union: union, id: p.nextRecord(), sc: p.sc}}
+		t := &ctype{kind: kStruct, rec: &record{tag: tag, union: union, id: p.nextRecord(), sc: p.sc, cdecl: !p.cxx || p.externC > 0}}
 		p.sc.tags[tag] = t
 		p.declareTag(p.sc, tag, t)
 		return t
@@ -1044,7 +1044,7 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 	}
 	var prev *ctype // a complete type of the same tag in this scope
 	if t == nil {
-		t = &ctype{kind: kStruct, rec: &record{tag: tag, union: union, id: p.nextRecord(), sc: p.sc}}
+		t = &ctype{kind: kStruct, rec: &record{tag: tag, union: union, id: p.nextRecord(), sc: p.sc, cdecl: !p.cxx || p.externC > 0}}
 		if tag != "" {
 			prev = p.sc.tags[tag]
 			p.sc.tags[tag] = t // in scope in its own body

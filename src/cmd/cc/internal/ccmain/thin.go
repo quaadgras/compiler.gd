@@ -171,6 +171,9 @@ func (g *gen) tlv1(e expr, forAddr bool) lval {
 			g.errorf(e.p, "%s is not an object", s.name)
 		}
 		if s.global {
+			if s == g.tlsSelf {
+				return lval{x: "(*p)", t: s.t}
+			}
 			if s.tls {
 				// The calling thread's.
 				return lval{x: fmt.Sprintf("(*(*%s)(unsafe.Pointer(%s.Get())))", g.mirror(s.t), g.globalName(s)), t: s.t}
@@ -1165,11 +1168,18 @@ func (g *gen) tglobalVar(s *symbol) {
 			fmt.Fprintf(w, "var %s = c23.NewTLS(func() *c23.Void {\n", name)
 		}
 		fmt.Fprintf(w, "p := new(%s)\n", g.mirror(s.t))
-		if s.init != nil {
-			save, saveInd := g.out, g.ind
-			g.out = w
-			g.tinitObject("(*p)", s.t, s.init)
-			g.out, g.ind = save, saveInd
+		if s.init != nil || s.ctor != nil {
+			// Its initializer runs for each thread, and names the
+			// object being made.
+			save, saveInd, saveSelf := g.out, g.ind, g.tlsSelf
+			g.out, g.tlsSelf = w, s
+			if s.init != nil {
+				g.tinitObject("(*p)", s.t, s.init)
+			}
+			if s.ctor != nil {
+				g.effect(s.ctor)
+			}
+			g.out, g.ind, g.tlsSelf = save, saveInd, saveSelf
 		}
 		w.WriteString("return (*c23.Void)(unsafe.Pointer(p))\n})\n")
 		if g.o.unit != "" {
