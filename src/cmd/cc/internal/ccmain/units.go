@@ -157,7 +157,18 @@ func (g *gen) unitRecordName(t *ctype, kw, tag, layout string) string {
 		if g.info.Types == nil {
 			g.info.Types = map[string]string{}
 		}
-		g.info.Types[name] = hash8(layout)
+		// What two units' definitions of the class must agree on: its
+		// size and where its members are. (Not the layout's key, in
+		// which a member of unnamed type has the number that its
+		// unit gave it; nor the members' names, which a library's
+		// header may give otherwise to the library's own files, as
+		// mbedtls's MBEDTLS_PRIVATE does.)
+		var shape strings.Builder
+		fmt.Fprintf(&shape, "%d|%d", t.rec.size, t.rec.align)
+		for _, f := range t.rec.fields {
+			fmt.Fprintf(&shape, "|%d:%d", f.off, f.t.sizeof())
+		}
+		g.info.Types[name] = hash8(shape.String())
 		return name
 	}
 	return fmt.Sprintf("%s%s_%s_%s", g.o.prefix, kw, goIdent(tag), hash8(layout))

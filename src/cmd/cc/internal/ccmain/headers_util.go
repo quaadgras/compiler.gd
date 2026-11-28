@@ -4,6 +4,8 @@
 
 package ccmain
 
+import "strings"
+
 // The headers of the common extensions of glibc and musl that are not
 // C's or the POSIX ones headers.go has: getopt_long, err.h, libgen.h,
 // endian.h, fnmatch.h, glob.h, search.h, iconv.h and others.
@@ -421,6 +423,26 @@ func init() {
 #define _IOR(t, n, T) _IOC(2, (t), (n), sizeof(T))
 #define _IOWR(t, n, T) _IOC(3, (t), (n), sizeof(T))
 `)
+	extendHeader("sys/types.h", `#ifndef __CC_BSD_INTS
+#define __CC_BSD_INTS
+typedef unsigned char u_int8_t;
+typedef unsigned short u_int16_t;
+typedef unsigned int u_int32_t;
+typedef unsigned long u_int64_t;
+#endif
+`)
+	// Linux's credentials of a socket's peer.
+	extendHeader("sys/socket.h", `#ifndef SO_PEERCRED
+#define SO_PEERCRED 17
+struct ucred {
+	pid_t pid;
+	uid_t uid;
+	gid_t gid;
+};
+#endif
+`)
+	// glibc's sys/types.h has fd_set and select's macros (sys/select.h).
+	sysHeaders["sys/types.h"] = strings.Replace(sysHeaders["sys/types.h"], "#define __CC_BSD_INTS\n", "#define __CC_BSD_INTS\n#include <sys/select.h>\n", 1)
 	extendHeader("dlfcn.h", `#define RTLD_DEFAULT ((void *)0)
 #define RTLD_NEXT ((void *)-1l)
 `)

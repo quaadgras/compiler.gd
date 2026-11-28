@@ -784,6 +784,7 @@ template <class T = void> struct equal_to { constexpr bool operator()(const T &a
 `
 	sysHeaders["mutex"] = `#ifndef __CC_MUTEX
 #define __CC_MUTEX
+#include <errno.h> // as libstdc++'s does, with <system_error>
 #include <pthread.h>
 #include <utility>
 namespace std {
