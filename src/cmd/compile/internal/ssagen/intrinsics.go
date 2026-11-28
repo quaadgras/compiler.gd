@@ -182,6 +182,19 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 			return s.newValue3I(ssa.OpC23Slow, types.Types[types.TBOOL], ssa.CSlowArith, args[0], args[1], s.mem())
 		},
 		all...)
+	// The check of pointer arithmetic that the runtime makes, as a
+	// call that keeps the registers where it can be.
+	add("runtime", "checkptrArithmeticC1",
+		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+			t := types.Types[types.TUNSAFEPTR]
+			if !s.cKeep() {
+				return s.rtcall(ir.Syms(s.gd).CheckPtrArithmeticC1, true, []*types.Type{t}, args...)[0]
+			}
+			c := s.newValue3(ssa.OpC23KeepArith, types.NewTuple(t, types.TypeMem), args[0], args[1], s.mem())
+			s.vars[memVar] = s.newValue1(ssa.OpSelect1, types.TypeMem, c)
+			return s.newValue1(ssa.OpSelect0, t, c)
+		},
+		sys.ArchAMD64)
 	add("runtime", "KeepAlive",
 		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 			data := s.newValue1(ssa.OpIData, s.f.Config.Types.BytePtr, args[0])

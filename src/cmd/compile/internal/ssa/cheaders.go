@@ -723,6 +723,13 @@ func cRoots(f *Func) func(*Value) *Value {
 						continue
 					}
 				}
+			case OpSelect0:
+				// (The same, from a check that keeps the
+				// registers.)
+				if c := v.Args[0]; c.Op == OpC23KeepArith || c.Op == OpC23KeepConvLoad {
+					v = c.Args[0]
+					continue
+				}
 			case OpSelectN:
 				// The pointer that the runtime's check gives is
 				// the one it is given, with that bit or without,
@@ -931,6 +938,10 @@ func cSameLoads(f *Func) map[*Value]*Value {
 				if checks[fn] || (fn == f.fe.Syslook("c23PtrStore") || fn == f.fe.Syslook("c23ByteStore")) && temp(call.Args[0]) {
 					c = back(call.Args[len(call.Args)-1], depth+1)
 				}
+			}
+		case OpSelect1:
+			if call := m.Args[0]; call.Op == OpC23KeepArith || call.Op == OpC23KeepConvLoad {
+				c = back(call.Args[len(call.Args)-1], depth+1)
 			}
 		case OpStore, OpZero:
 			if temp(m.Args[0]) {

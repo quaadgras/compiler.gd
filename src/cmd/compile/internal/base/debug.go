@@ -18,6 +18,7 @@ type DebugFlags struct {
 	AlignHot              int    `help:"enable hot block alignment (currently requires -pgo)" concurrent:"ok"`
 	Append                int    `help:"print information about append compilation"`
 	AstDump               string `help:"for specified function/method, dump AST/IR at interesting points in compilation, to file pkg.func.ast. Use leading ~ for regular expression match."`
+	NoCKeep               int    `help:"with 1, call the runtime's checks of C's pointers that neither claim nor repair as other calls, not by the stubs that keep the registers" concurrent:"ok"`
 	NoCShadowStub         int    `help:"with 1, make the checks of C's pointers against the shadow in the compiled code, not by a call of the runtime's stubs" concurrent:"ok"`
 	NoCShadow             int    `help:"with 1, do not ask the shadow of C's memory what a word is" concurrent:"ok"`
 	SlowFunc              int    `help:"print the functions that take the back end this many milliseconds or more" concurrent:"ok"`

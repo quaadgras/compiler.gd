@@ -625,6 +625,12 @@ var genericOps = []opData{
 	// runtime is to see arg0, a pointer. auxint is the stub's number
 	// (cshadowstubs.go); arg1=mem.
 	{name: "C23ShadowCheck", argLength: 2, aux: "Int64", typ: "Bool"},
+	// The runtime's checks of C's pointers that neither claim nor
+	// repair, as calls that keep the registers (runtime/ckeep_amd64.s):
+	// checkptrArithmeticC1(arg0, arg1) and, for a type without pointers,
+	// checkptrConvCLoad(arg0, arg1, arg2). The result is (pointer, mem).
+	{name: "C23KeepArith", argLength: 3},
+	{name: "C23KeepConvLoad", argLength: 4},
 
 	{name: "KeepAlive", argLength: 2, typ: "Mem", zeroWidth: true},                  // arg[0] is a value that must be kept alive until this mark.  arg[1]=mem, returns mem
 

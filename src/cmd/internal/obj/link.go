@@ -475,6 +475,11 @@ type LSym struct {
 // A FuncInfo contains extra fields for STEXT symbols.
 type FuncInfo struct {
 	Args      int32
+	// ExtraStack is room that the function's stack check asks for
+	// beyond its frame: what a call it makes that may not grow the
+	// stack uses (gd: the checks of C's pointers that keep the
+	// registers).
+	ExtraStack int32
 	Locals    int32
 	FuncID    abi.FuncID
 	FuncFlag  abi.FuncFlag

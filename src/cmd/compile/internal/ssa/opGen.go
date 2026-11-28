@@ -1074,6 +1074,8 @@ const (
 	OpAMD64LoweredGetCallerSP
 	OpAMD64LoweredNilCheck
 	OpAMD64CHECKSHADOW
+	OpAMD64LoweredC23KeepArith
+	OpAMD64LoweredC23KeepConvLoad
 	OpAMD64LoweredWB
 	OpAMD64LoweredHasCPUFeature
 	OpAMD64LoweredPanicBoundsRR
@@ -7111,6 +7113,8 @@ const (
 	OpVarLive
 	OpC23Slow
 	OpC23ShadowCheck
+	OpC23KeepArith
+	OpC23KeepConvLoad
 	OpKeepAlive
 	OpInlMark
 	OpInt64Make
@@ -20178,6 +20182,39 @@ var opcodeTable = [...]opInfo{
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, regMask{v1: 49135, v2: 0}}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+		},
+	},
+	{
+		name:           "LoweredC23KeepArith",
+		argLen:         3,
+		clobberFlags:   true,
+		hasSideEffects: true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, regMask{v1: 1, v2: 0}}, // AX
+				{1, regMask{v1: 8, v2: 0}}, // BX
+			},
+			clobbers: regMask{v1: 2147418113, v2: 0}, // AX X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			outputs: []outputInfo{
+				{0, regMask{v1: 1, v2: 0}}, // AX
+			},
+		},
+	},
+	{
+		name:           "LoweredC23KeepConvLoad",
+		argLen:         4,
+		clobberFlags:   true,
+		hasSideEffects: true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, regMask{v1: 1, v2: 0}}, // AX
+				{1, regMask{v1: 8, v2: 0}}, // BX
+				{2, regMask{v1: 2, v2: 0}}, // CX
+			},
+			clobbers: regMask{v1: 2147418113, v2: 0}, // AX X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			outputs: []outputInfo{
+				{0, regMask{v1: 1, v2: 0}}, // AX
 			},
 		},
 	},
@@ -107472,6 +107509,16 @@ var opcodeTable = [...]opInfo{
 		name:    "C23ShadowCheck",
 		auxType: auxInt64,
 		argLen:  2,
+		generic: true,
+	},
+	{
+		name:    "C23KeepArith",
+		argLen:  3,
+		generic: true,
+	},
+	{
+		name:    "C23KeepConvLoad",
+		argLen:  4,
 		generic: true,
 	},
 	{

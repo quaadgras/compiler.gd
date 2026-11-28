@@ -914,6 +914,9 @@ func loadG(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog, newprog obj.ProgAlloc)
 // Assumes g is in rg.
 // Returns last new instruction.
 func stacksplit(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog, newprog obj.ProgAlloc, framesize int32, textarg int32) *obj.Prog {
+	// What the check compares: the frame and the room that the
+	// function asks for beyond it (FuncInfo.ExtraStack).
+	need := framesize + cursym.Func().ExtraStack
 	cmp := ACMPQ
 	lea := ALEAQ
 	mov := AMOVQ
@@ -974,7 +977,7 @@ func stacksplit(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog, newprog obj.ProgA
 	p, rg = loadG(ctxt, cursym, p, newprog)
 
 	var q1 *obj.Prog
-	if framesize <= abi.StackSmall {
+	if need <= abi.StackSmall {
 		// small stack: SP <= stackguard
 		//	CMPQ SP, stackguard
 		p = obj.Appendp(p, newprog)
@@ -994,7 +997,7 @@ func stacksplit(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog, newprog obj.ProgA
 		// cleared, but we'll still call morestack, which will double the stack
 		// unnecessarily. See issue #35470.
 		p = ctxt.StartUnsafePoint(p, newprog)
-	} else if framesize <= abi.StackBig {
+	} else if need <= abi.StackBig {
 		// large stack: SP-framesize <= stackguard-StackSmall
 		//	LEAQ -xxx(SP), tmp
 		//	CMPQ tmp, stackguard
@@ -1003,7 +1006,7 @@ func stacksplit(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog, newprog obj.ProgA
 		p.As = lea
 		p.From.Type = obj.TYPE_MEM
 		p.From.Reg = REG_SP
-		p.From.Offset = -(int64(framesize) - abi.StackSmall)
+		p.From.Offset = -(int64(need) - abi.StackSmall)
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = tmp
 
@@ -1046,7 +1049,7 @@ func stacksplit(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog, newprog obj.ProgA
 		p = obj.Appendp(p, newprog)
 		p.As = sub
 		p.From.Type = obj.TYPE_CONST
-		p.From.Offset = int64(framesize) - abi.StackSmall
+		p.From.Offset = int64(need) - abi.StackSmall
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = tmp
 

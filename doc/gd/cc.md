@@ -518,6 +518,24 @@ memory-safe `unsafe` (`unsafe.md`, "Compatible types", is the first):
   the compiled code's register allocator sees as a comparison
   (`CHECKSHADOW`). A check that has no stub is made where it is, as
   before. `-d=nocshadowstub=1` makes all of them there.
+- **The calls of checks that keep the registers.** A check that the
+  compiled code cannot make is a call of the runtime's, and an ordinary
+  call costs more than the call: what is live is saved before it and
+  loaded again after it, and the call is a place where the goroutine
+  may stop, which the frame has a map of its pointers for. Two checks
+  of the runtime's neither claim words nor repair pointers: that of
+  pointer arithmetic (`checkptrArithmeticC1`), and the conversion of
+  what is only loaded to a type without pointers (`checkptrConvCLoad`).
+  On linux/amd64 they are called through stubs that keep every general
+  register (`runtime/ckeep_amd64.s`), and nothing is saved or loaded
+  around them. What makes that safe while the frame's values are only
+  in registers: the stub holds `m.locks`, so the goroutine is not
+  preempted, and its stack not scanned or moved, until the check
+  returns; and a function that calls one leaves 16 KB beyond its
+  frame in its stack check, so the check never has to grow the stack
+  (the runtime stops the program if it would). The call is not a place
+  where the goroutine stops, so the frame has no map for it.
+  `-d=nockeep=1` makes them ordinary calls.
 - **`memcpy`, `memmove` and `memset` stay in the objects they are
   given**, both of them for a copy, or the program stops (`checkptr:
   memory copied or set past the end of its object`), and what they

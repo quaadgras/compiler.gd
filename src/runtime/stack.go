@@ -1246,6 +1246,12 @@ func newstack() {
 
 	// The concurrent GC will not scan the stack while we are doing the copy since
 	// the gp is in a Gcopystack status.
+	if thisg.m.cKeep != 0 {
+		// What the registers of the frame below hold is not
+		// known (ckeep_amd64.s): the compiled code left room
+		// for the check.
+		throw("runtime: the stack grew in a check of C's pointer")
+	}
 	copystack(gp, newsize)
 	if stackDebug >= 1 {
 		print("stack grow done\n")

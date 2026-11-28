@@ -43,6 +43,8 @@ type SymsStruct struct {
 	CheckPtrArithmeticC       *obj.LSym
 	CheckPtrArithmeticC1      *obj.LSym
 	CheckPtrConvCLoad         *obj.LSym
+	CKeepArith                *obj.LSym
+	CKeepConvLoad             *obj.LSym
 	C23ByteStore              *obj.LSym
 	C23PtrStore               *obj.LSym
 	C23PtrStores              *obj.LSym

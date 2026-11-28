@@ -1931,3 +1931,5 @@
 
 // A check of C's pointer that a stub of the runtime makes (cheaders.go).
 (C23ShadowCheck [s] p mem) => (SETNE (CHECKSHADOW [s] p mem))
+(C23KeepArith ...) => (LoweredC23KeepArith ...)
+(C23KeepConvLoad ...) => (LoweredC23KeepConvLoad ...)

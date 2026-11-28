@@ -3508,6 +3508,12 @@ func rewriteValueAMD64(v *Value) bool {
 	case OpBswap64:
 		v.Op = OpAMD64BSWAPQ
 		return true
+	case OpC23KeepArith:
+		v.Op = OpAMD64LoweredC23KeepArith
+		return true
+	case OpC23KeepConvLoad:
+		v.Op = OpAMD64LoweredC23KeepConvLoad
+		return true
 	case OpC23ShadowCheck:
 		return rewriteValueAMD64_OpC23ShadowCheck(v)
 	case OpCeil:

@@ -1404,6 +1404,19 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = v.Reg()
 
+	case ssa.OpAMD64LoweredC23KeepArith, ssa.OpAMD64LoweredC23KeepConvLoad:
+		// runtime/ckeep_amd64.s: the function leaves room in its
+		// stack check for what the check uses, which may not grow
+		// the stack.
+		p := s.Prog(obj.ACALL)
+		p.To.Type = obj.TYPE_MEM
+		p.To.Name = obj.NAME_EXTERN
+		p.To.Sym = ir.Syms(gd).CKeepArith
+		if v.Op == ssa.OpAMD64LoweredC23KeepConvLoad {
+			p.To.Sym = ir.Syms(gd).CKeepConvLoad
+		}
+		s.ReserveStack(ssagen.CKeepStack)
+
 	case ssa.OpAMD64CHECKSHADOW:
 		// runtime/mkcshadow.go: the stub for the check and the
 		// register that the pointer is in, which it keeps.

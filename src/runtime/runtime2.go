@@ -701,6 +701,7 @@ type m struct {
 	throwing        throwType
 	preemptoff      string // if != "", keep curg running on this m
 	locks           int32
+	cKeep           int32 // in a check of C's pointer that keeps the registers (ckeep_amd64.s): the stack may not move
 	dying           int32
 	profilehz       int32
 	spinning        bool // m is out of work and is actively looking for work

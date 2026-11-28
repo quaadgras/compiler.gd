@@ -1139,6 +1139,12 @@ func init() {
 		// runtime is to see the pointer arg0 (mkcshadow.go). arg1=mem.
 		{name: "CHECKSHADOW", argLength: 2, reg: regInfo{inputs: []regMask{gp}}, aux: "Int64", typ: "Flags"},
 
+		// The calls of runtime.cKeepArith(AX, BX) and
+		// runtime.cKeepConvLoad(AX, BX, CX), which keep every general
+		// register but AX, their result (ckeep_amd64.s). arg3/arg2=mem.
+		{name: "LoweredC23KeepArith", argLength: 3, reg: regInfo{inputs: []regMask{ax, buildReg("BX")}, clobbers: fp.union(ax), outputs: []regMask{ax}}, clobberFlags: true, hasSideEffects: true},
+		{name: "LoweredC23KeepConvLoad", argLength: 4, reg: regInfo{inputs: []regMask{ax, buildReg("BX"), cx}, clobbers: fp.union(ax), outputs: []regMask{ax}}, clobberFlags: true, hasSideEffects: true},
+
 		{name: "LoweredWB", argLength: 1, reg: regInfo{clobbers: callerSave.minus(gp.union(g)), outputs: []regMask{buildReg("R11")}}, clobberFlags: true, aux: "Int64"},
 
 		{name: "LoweredHasCPUFeature", argLength: 0, reg: gp01, rematerializeable: true, typ: "UInt64", aux: "Sym", symEffect: "None"},

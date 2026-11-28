@@ -162,6 +162,10 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).
 		CheckPtrConvCLoad = typecheck.LookupRuntimeFunc(gd, "checkptrConvCLoad")
 	ir.Syms(gd).
+		CKeepArith = typecheck.LookupRuntimeFunc(gd, "cKeepArith")
+	ir.Syms(gd).
+		CKeepConvLoad = typecheck.LookupRuntimeFunc(gd, "cKeepConvLoad")
+	ir.Syms(gd).
 		C23ByteStore = typecheck.LookupRuntimeFunc(gd, "c23ByteStore")
 	ir.Syms(gd).
 		C23PtrStore = typecheck.LookupRuntimeFunc(gd, "c23PtrStore")
@@ -1299,6 +1303,14 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 				// where the memory has pointers: the int of a
 				// union of the system's that holds a pointer.
 				fn = ir.Syms(s.gd).CheckPtrConvCLoad
+				if !elem.HasPointers() && s.cKeep() {
+					// It claims nothing: a call that keeps
+					// the registers (runtime/ckeep_amd64.s).
+					c := s.newValue4(ssa.OpC23KeepConvLoad, types.NewTuple(v.Type, types.TypeMem), v, rtype, count, s.mem())
+					s.vars[memVar] = s.newValue1(ssa.OpSelect1, types.TypeMem, c)
+					s.vars[convVar] = s.newValue1(ssa.OpSelect0, v.Type, c)
+					return
+				}
 			}
 			s.vars[convVar] = s.rtcall(fn, true, []*types.Type{v.Type}, v, rtype, count)[0]
 			return
@@ -1454,6 +1466,27 @@ func (s *state) cStoreCheck(check int, addr, v *ssa.Value, size int64) *ssa.Valu
 		return s.variable(convVar, v.Type)
 	}
 	return nil
+}
+
+// cKeep reports whether the runtime's checks of C's pointers that
+// neither claim nor repair are calls that keep the registers
+// (runtime/ckeep_amd64.s): where the shadow is, and in a function that
+// checks its stack, which leaves room for them (CKeepStack).
+func (s *state) cKeep() bool {
+	return s.config.CShadow() && s.gd.Debug.NoCKeep == 0 && s.curfn.Pragma&ir.Nosplit == 0
+}
+
+// CKeepStack is the room that a function that calls a check that keeps
+// the registers leaves for it, beyond its frame, where it checks its
+// stack: the check may not grow the stack.
+const CKeepStack = 16 << 10
+
+// ReserveStack asks for n bytes beyond the function's frame where it
+// checks its stack.
+func (s *State) ReserveStack(n int32) {
+	if fi := s.pp.CurFunc.LSym.Func(); fi.ExtraStack < n {
+		fi.ExtraStack = n
+	}
 }
 
 // cHeaders reports whether the checks of C's pointers are made in the
