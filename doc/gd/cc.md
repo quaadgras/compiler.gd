@@ -269,6 +269,11 @@ Where C and Go's rules for pointers disagree:
   its end, is one that nothing is loaded or stored through: it has
   `cPoison`, as a pointer that the program made of an integer has, and
   arithmetic on it gives another such, also back where it came from.
+  As an integer, and where it is compared, a pointer is its address,
+  without `cEnd` and `cPoison` (`ssa.CAddr`): a loop that steps a
+  pointer down past the start of its array and compares it with one
+  that steps up ends as C expects (mbedtls's
+  `mbedtls_mpi_core_bigendian_to_host`).
   (It stopped the program until 2026-11-28. C programs make such
   pointers and do not use them: Godot's `String::to_int` has
   `&p_str[p_len]` as a limit, with a `p_len` of -1 for "to the

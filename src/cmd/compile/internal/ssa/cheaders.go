@@ -56,6 +56,18 @@ const CConvMax = 4096
 // address has it, so a load or a store through the pointer faults.
 const CEnd = 1 << 54
 
+// CPoison is the bit of a pointer of C's that the program was not
+// given, or that arithmetic took out of its object: runtime's cPoison.
+// No address has it either.
+const CPoison = 1 << 55
+
+// CAddr is the mask of the address that a pointer of C's is, as an
+// integer: without the bits that say nothing may be loaded through it.
+// What a pointer is compared with, what is taken from it and what C
+// converts it to are its address; what is added to it is checked with
+// the pointer itself, which keeps what its bits say.
+const CAddr = ^(CEnd | CPoison)
+
 // CSlowAux returns the auxint of a C23Slow: the check, the mask of the
 // alignment that the pointer is to have, and the size of what it is
 // converted to.
@@ -588,9 +600,9 @@ func cAddend(v *Value) *Value {
 		case OpSub64:
 			v = v.Args[0]
 		case OpAnd64:
-			if c := v.Args[1]; c.Op == OpConst64 && c.AuxInt == ^CEnd {
+			if c := v.Args[1]; c.Op == OpConst64 && c.AuxInt == CAddr {
 				v = v.Args[0]
-			} else if c := v.Args[0]; c.Op == OpConst64 && c.AuxInt == ^CEnd {
+			} else if c := v.Args[0]; c.Op == OpConst64 && c.AuxInt == CAddr {
 				v = v.Args[1]
 			} else {
 				return nil
@@ -1033,7 +1045,7 @@ func cConstOff(q, p *Value) (int64, bool) {
 				return 0, false
 			}
 		case OpAnd64:
-			if c := q.Args[1]; c.Op == OpConst64 && c.AuxInt == ^CEnd {
+			if c := q.Args[1]; c.Op == OpConst64 && c.AuxInt == CAddr {
 				q = q.Args[0]
 			} else {
 				return 0, false

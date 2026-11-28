@@ -4637,7 +4637,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 				// (runtime's cEnd), which what is added to it, what
 				// it is compared with and what is taken from it
 				// know nothing of.
-				v = s.newValue2(ssa.OpAnd64, to, v, s.constInt64(to, ^ssa.CEnd))
+				v = s.newValue2(ssa.OpAnd64, to, v, s.constInt64(to, ssa.CAddr))
 			}
 			return v
 		}
@@ -4747,8 +4747,8 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 			// are: one of them may have the bit of a pointer that
 			// nothing is loaded through (runtime's cEnd).
 			u := types.Types[types.TUINTPTR]
-			a = s.newValue2(ssa.OpAnd64, u, s.newValue2(ssa.OpConvert, u, a, s.mem()), s.constInt64(u, ^ssa.CEnd))
-			b = s.newValue2(ssa.OpAnd64, u, s.newValue2(ssa.OpConvert, u, b, s.mem()), s.constInt64(u, ^ssa.CEnd))
+			a = s.newValue2(ssa.OpAnd64, u, s.newValue2(ssa.OpConvert, u, a, s.mem()), s.constInt64(u, ssa.CAddr))
+			b = s.newValue2(ssa.OpAnd64, u, s.newValue2(ssa.OpConvert, u, b, s.mem()), s.constInt64(u, ssa.CAddr))
 			return s.newValue2(s.ssaOp(op, u), types.Types[types.TBOOL], a, b)
 		}
 		// integer comparison
