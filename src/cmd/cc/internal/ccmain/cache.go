@@ -47,8 +47,11 @@ func newInputs() *inputs {
 // readFile is os.ReadFile, recorded.
 func (in *inputs) readFile(path string) ([]byte, error) {
 	b, err := os.ReadFile(path)
+	// (What the file's hash is of is the file; what is read of it is
+	// without the byte order mark that an editor began it with.)
+	text := bytes.TrimPrefix(b, []byte("\xef\xbb\xbf"))
 	if in == nil {
-		return b, err
+		return text, err
 	}
 	in.mu.Lock()
 	defer in.mu.Unlock()
@@ -59,7 +62,7 @@ func (in *inputs) readFile(path string) ([]byte, error) {
 	if _, ok := in.files[path]; !ok {
 		in.files[path] = sha256.Sum256(b)
 	}
-	return b, nil
+	return text, nil
 }
 
 // A ccCache is the cache in a directory, for one command line.

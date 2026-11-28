@@ -1114,5 +1114,5 @@ typedef basic_string_view<char32_t> u32string_view;
 	s = strings.Replace(s, "#include <__go_slice>\n", "#include <__go_slice>\n#include <__hash>\n", 1)
 	sysHeaders["string"] = s
 	f := sysHeaders["functional"]
-	sysHeaders["functional"] = strings.Replace(f, "#include <utility>\n", "#include <utility>\n#include <__hash>\n", 1)
+	sysHeaders["functional"] = strings.Replace(f, "#include <utility>\n", "#include <utility>\n#include <__hash>\n#include <memory>\n", 1)
 }

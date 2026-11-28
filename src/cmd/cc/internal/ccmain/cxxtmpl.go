@@ -1854,7 +1854,13 @@ func (p *parser) unifyBase(pt, at *ctype, bound []targ, set []bool) bool {
 		p.complete(aa)
 		if ci := aa.rec.cls; ci != nil {
 			for _, b := range ci.bases {
-				if p.unifyBase(pp, b.t, bound, set) {
+				// (The base is as qualified as the class, and a
+				// pointer converts to one to what is more.)
+				bt := b.t
+				if q := aa.q | pp.q; bt.q != q {
+					bt = withQual(bt, q)
+				}
+				if p.unifyBase(pp, bt, bound, set) {
 					return true
 				}
 			}

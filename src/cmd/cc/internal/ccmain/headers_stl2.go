@@ -532,6 +532,8 @@ template <> struct hash<string> {
 #define __CC_MEMORY
 #include <__go_slice>
 #include <type_traits>
+#include <atomic>
+#include <__hash>
 namespace std {
 template <class T> T *addressof(T &v) noexcept { return reinterpret_cast<T *>(&const_cast<char &>(reinterpret_cast<const volatile char &>(v))); }
 template <class T> struct default_delete {
@@ -642,6 +644,217 @@ template <class T, class... Args, class = enable_if_t<!is_array_v<T>>>
 unique_ptr<T> make_unique(Args &&...args) { return unique_ptr<T>(new T(static_cast<Args &&>(args)...)); }
 template <class T, class = enable_if_t<is_array_v<T>>>
 unique_ptr<T> make_unique(size_t n) { return unique_ptr<T>(new remove_extent_t<T>[n]()); }
+// What shared_ptrs of one object share: how many there are, and how
+// many weak_ptrs, and the object's deletion.
+struct __ctrl {
+	atomic<long> __strong, __weak;
+	__ctrl() : __strong(1), __weak(1) {}
+	virtual ~__ctrl() {}
+	virtual void __destroy() = 0;
+	void __drop() {
+		if (__strong.fetch_sub(1) == 1) {
+			__destroy();
+			__unweak();
+		}
+	}
+	void __unweak() {
+		if (__weak.fetch_sub(1) == 1)
+			delete this;
+	}
+	// One more owner, if there is one still.
+	bool __lock() {
+		long n = __strong.load();
+		while (n != 0)
+			if (__strong.compare_exchange_weak(n, n + 1))
+				return true;
+		return false;
+	}
+};
+template <class T> struct __ctrl_ptr : __ctrl {
+	T *__p;
+	explicit __ctrl_ptr(T *p) : __p(p) {}
+	void __destroy() override { delete __p; }
+};
+template <class T, class D> struct __ctrl_del : __ctrl {
+	T *__p;
+	D __d;
+	__ctrl_del(T *p, D d) : __p(p), __d(d) {}
+	void __destroy() override { __d(__p); }
+};
+template <class T> class weak_ptr;
+template <class T> class shared_ptr;
+template <class T> class enable_shared_from_this {
+public:
+	mutable weak_ptr<T> __weak_this;
+	shared_ptr<T> shared_from_this() { return shared_ptr<T>(__weak_this); }
+	shared_ptr<const T> shared_from_this() const { return shared_ptr<const T>(__weak_this); }
+	weak_ptr<T> weak_from_this() noexcept { return __weak_this; }
+
+protected:
+	enable_shared_from_this() noexcept {}
+	enable_shared_from_this(const enable_shared_from_this &) noexcept {}
+	enable_shared_from_this &operator=(const enable_shared_from_this &) noexcept { return *this; }
+};
+template <class T>
+class shared_ptr {
+public:
+	T *__p;
+	__ctrl *__c;
+	template <class U, class Y> void __enable(const enable_shared_from_this<U> *e, Y *p) {
+		if (e)
+			e->__weak_this.__set(const_cast<U *>(static_cast<const U *>(p)), __c);
+	}
+	void __enable(...) {}
+	typedef T element_type;
+	constexpr shared_ptr() noexcept : __p(nullptr), __c(nullptr) {}
+	constexpr shared_ptr(nullptr_t) noexcept : __p(nullptr), __c(nullptr) {}
+	template <class Y, class = enable_if_t<is_convertible_v<Y *, T *>>>
+	explicit shared_ptr(Y *p) : __p(p), __c(new __ctrl_ptr<Y>(p)) { __enable(p, p); }
+	template <class Y, class D, class = enable_if_t<is_convertible_v<Y *, T *>>>
+	shared_ptr(Y *p, D d) : __p(p), __c(new __ctrl_del<Y, D>(p, d)) { __enable(p, p); }
+	shared_ptr(const shared_ptr &o) noexcept : __p(o.__p), __c(o.__c) {
+		if (__c)
+			__c->__strong.fetch_add(1);
+	}
+	template <class Y, class = enable_if_t<is_convertible_v<Y *, T *>>>
+	shared_ptr(const shared_ptr<Y> &o) noexcept : __p(o.__p), __c(o.__c) {
+		if (__c)
+			__c->__strong.fetch_add(1);
+	}
+	shared_ptr(shared_ptr &&o) noexcept : __p(o.__p), __c(o.__c) {
+		o.__p = nullptr;
+		o.__c = nullptr;
+	}
+	template <class Y, class = enable_if_t<is_convertible_v<Y *, T *>>>
+	shared_ptr(shared_ptr<Y> &&o) noexcept : __p(o.__p), __c(o.__c) {
+		o.__p = nullptr;
+		o.__c = nullptr;
+	}
+	// The object that o owns, and another pointer: to a part of it.
+	template <class Y> shared_ptr(const shared_ptr<Y> &o, T *p) noexcept : __p(p), __c(o.__c) {
+		if (__c)
+			__c->__strong.fetch_add(1);
+	}
+	template <class Y, class = enable_if_t<is_convertible_v<Y *, T *>>>
+	explicit shared_ptr(const weak_ptr<Y> &w) : __p(nullptr), __c(nullptr) {
+		if (w.__c && w.__c->__lock()) {
+			__p = w.__p;
+			__c = w.__c;
+		}
+	}
+	template <class Y, class D, class = enable_if_t<is_convertible_v<Y *, T *>>>
+	shared_ptr(unique_ptr<Y, D> &&u) : __p(u.get()), __c(nullptr) {
+		if (__p) {
+			__c = new __ctrl_ptr<Y>(u.get());
+			__enable(u.get(), u.get());
+		}
+		u.release();
+	}
+	~shared_ptr() {
+		if (__c)
+			__c->__drop();
+	}
+	shared_ptr &operator=(const shared_ptr &o) noexcept {
+		shared_ptr(o).swap(*this);
+		return *this;
+	}
+	template <class Y, class = enable_if_t<is_convertible_v<Y *, T *>>>
+	shared_ptr &operator=(const shared_ptr<Y> &o) noexcept {
+		shared_ptr(o).swap(*this);
+		return *this;
+	}
+	shared_ptr &operator=(shared_ptr &&o) noexcept {
+		shared_ptr(static_cast<shared_ptr &&>(o)).swap(*this);
+		return *this;
+	}
+	template <class Y, class = enable_if_t<is_convertible_v<Y *, T *>>>
+	shared_ptr &operator=(shared_ptr<Y> &&o) noexcept {
+		shared_ptr(static_cast<shared_ptr<Y> &&>(o)).swap(*this);
+		return *this;
+	}
+	template <class Y, class D> shared_ptr &operator=(unique_ptr<Y, D> &&u) {
+		shared_ptr(static_cast<unique_ptr<Y, D> &&>(u)).swap(*this);
+		return *this;
+	}
+	void swap(shared_ptr &o) noexcept {
+		T *p = __p;
+		__ctrl *c = __c;
+		__p = o.__p;
+		__c = o.__c;
+		o.__p = p;
+		o.__c = c;
+	}
+	void reset() noexcept { shared_ptr().swap(*this); }
+	template <class Y> void reset(Y *p) { shared_ptr(p).swap(*this); }
+	T *get() const noexcept { return __p; }
+	T &operator*() const noexcept { return *__p; }
+	T *operator->() const noexcept { return __p; }
+	long use_count() const noexcept { return __c ? __c->__strong.load() : 0; }
+	bool unique() const noexcept { return use_count() == 1; }
+	explicit operator bool() const noexcept { return __p != nullptr; }
+};
+template <class T>
+class weak_ptr {
+public:
+	T *__p;
+	__ctrl *__c;
+	void __set(T *p, __ctrl *c) {
+		if (c)
+			c->__weak.fetch_add(1);
+		if (__c)
+			__c->__unweak();
+		__p = p;
+		__c = c;
+	}
+	typedef T element_type;
+	constexpr weak_ptr() noexcept : __p(nullptr), __c(nullptr) {}
+	weak_ptr(const weak_ptr &o) noexcept : __p(nullptr), __c(nullptr) { __set(o.__p, o.__c); }
+	template <class Y, class = enable_if_t<is_convertible_v<Y *, T *>>>
+	weak_ptr(const weak_ptr<Y> &o) noexcept : __p(nullptr), __c(nullptr) { __set(o.__p, o.__c); }
+	template <class Y, class = enable_if_t<is_convertible_v<Y *, T *>>>
+	weak_ptr(const shared_ptr<Y> &o) noexcept : __p(nullptr), __c(nullptr) { __set(o.__p, o.__c); }
+	weak_ptr(weak_ptr &&o) noexcept : __p(o.__p), __c(o.__c) {
+		o.__p = nullptr;
+		o.__c = nullptr;
+	}
+	~weak_ptr() {
+		if (__c)
+			__c->__unweak();
+	}
+	weak_ptr &operator=(const weak_ptr &o) noexcept {
+		__set(o.__p, o.__c);
+		return *this;
+	}
+	template <class Y> weak_ptr &operator=(const shared_ptr<Y> &o) noexcept {
+		__set(o.__p, o.__c);
+		return *this;
+	}
+	void reset() noexcept { __set(nullptr, nullptr); }
+	long use_count() const noexcept { return __c ? __c->__strong.load() : 0; }
+	bool expired() const noexcept { return use_count() == 0; }
+	shared_ptr<T> lock() const noexcept { return shared_ptr<T>(*this); }
+};
+template <class T, class... Args> shared_ptr<T> make_shared(Args &&...args) { return shared_ptr<T>(new T(static_cast<Args &&>(args)...)); }
+template <class T, class U> bool operator==(const shared_ptr<T> &a, const shared_ptr<U> &b) noexcept { return a.get() == b.get(); }
+template <class T, class U> bool operator!=(const shared_ptr<T> &a, const shared_ptr<U> &b) noexcept { return a.get() != b.get(); }
+template <class T, class U> bool operator<(const shared_ptr<T> &a, const shared_ptr<U> &b) noexcept { return a.get() < b.get(); }
+template <class T> bool operator==(const shared_ptr<T> &a, nullptr_t) noexcept { return !a; }
+template <class T> bool operator==(nullptr_t, const shared_ptr<T> &a) noexcept { return !a; }
+template <class T> bool operator!=(const shared_ptr<T> &a, nullptr_t) noexcept { return bool(a); }
+template <class T> bool operator!=(nullptr_t, const shared_ptr<T> &a) noexcept { return bool(a); }
+template <class T, class U> shared_ptr<T> static_pointer_cast(const shared_ptr<U> &o) noexcept { return shared_ptr<T>(o, static_cast<T *>(o.get())); }
+template <class T, class U> shared_ptr<T> const_pointer_cast(const shared_ptr<U> &o) noexcept { return shared_ptr<T>(o, const_cast<T *>(o.get())); }
+template <class T, class U> shared_ptr<T> dynamic_pointer_cast(const shared_ptr<U> &o) noexcept {
+	if (T *p = dynamic_cast<T *>(o.get()))
+		return shared_ptr<T>(o, p);
+	return shared_ptr<T>();
+}
+template <class T> struct hash<shared_ptr<T>> {
+	size_t operator()(const shared_ptr<T> &p) const noexcept { return (size_t)p.get(); }
+};
+template <class T, class D> struct hash<unique_ptr<T, D>> {
+	size_t operator()(const unique_ptr<T, D> &p) const noexcept { return (size_t)p.get(); }
+};
 }
 #endif
 `
