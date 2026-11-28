@@ -132,6 +132,51 @@ struct that mirrors it. What C++ adds:
 - **Go sees classes as it sees structs** (`C.struct_node`): through
   `extern "C"` functions for now; C++ names are not Go's.
 
+## The library: C++ headers over Go's types
+
+cmd/cc has its own C++ library headers (`headers_cxx.go`,
+`headers_stl*.go`), written for what Godot and the libraries it bundles
+use; it does not read libstdc++'s or libc++'s. The containers are made
+of Go's own types (2026-11-28):
+
+- `std::__go_slice<T>` is `[]T` and `std::__go_map<K, V>` is `map[K]V`
+  in the Go that cmd/cc writes (`goTypes` in `libcpkg.go`). A header
+  declares them with members that only give them Go's size and
+  alignment (a slice is 16 bytes aligned to 16 where a pointer is 8,
+  doc/gd/slice16.md, and 12 bytes on wasm32), and never names a member.
+  A struct that holds one keeps a typed mirror although it is aligned to
+  16 (`goAlign16`).
+- A function that a header declares, and nothing defines, with a name
+  that begins with `__go_` is `internal/c23/cxx`'s function of the rest
+  of the name: `std::__go_SliceLen(&s)` is `cxx.SliceLen(&s)`, generic
+  where the header's is a template, called with the pointers' own types
+  (not as the C library is, with `*c23.Void`).
+- The headers stay C++ for what C++ says about elements: they construct,
+  copy, move and destroy them with placement new and destructor calls,
+  in memory that Go made, zeroed, typed and grows (`cxx.SliceRealloc`,
+  `SliceSetLen`). `vector`, `basic_string`, the sorted index of `map`
+  and `set` are `__seq<T>` over a slice; an array has one more element
+  than its capacity says, so `end()` is an address in it (and a string
+  has its 0 there). `deque` is blocks that stay where they are;
+  `unordered_map` and `unordered_set` are nodes in insertion order,
+  found through a `map[size_t]*node` from the hash that C++ computed;
+  `map` and `set` are nodes in a list, with a vector of them in order
+  that is searched.
+- Iterators of `vector` and `string` are pointers, which libstdc++'s
+  are not: `--v.end()` is accepted for a pointer that a call returns.
+- Also there: `optional` (a union), `unique_ptr`, `shared_ptr` and
+  `weak_ptr` (counts are `atomic<long>`), `function`, `list`, `stack`,
+  `queue`, `priority_queue`, `string_view`, `ostream` to a `FILE` or a
+  string (`cout`, `ostringstream`, `iomanip`), `stdexcept`'s classes
+  (nothing throws: cmd/cc has no exceptions), and the algorithms these
+  libraries call. Not there yet: `<random>`, `<chrono>`, `<tuple>`,
+  `<variant>`, `<filesystem>`, `<fstream>`, input streams, `std::bind`.
+- An unordered container's order is the order of insertion, which no
+  program may rely on and libstdc++'s is not.
+
+The tests are `testdata/cxx/std*.cc`, `sharedptr.cc` and
+`genericlambda.cc`, compared with g++ and its libstdc++.
+
 ## What is not planned
 
 Two-phase lookup, access checking as an error (access specifiers are
